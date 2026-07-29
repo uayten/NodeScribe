@@ -97,6 +97,18 @@ evento MinhaHabilidadeAtivou
 Se o nome existir na classe pai, vira o evento de override. Se não existir,
 vira um Custom Event com esse nome (e o plugin avisa que fez isso).
 
+Para o evento de um **dispatcher de outro objeto** — o que você cria clicando
+com o botão direito num widget filho e escolhendo o dispatcher dele:
+
+```
+tecla = evento OnKeySelected de SelecionarInputKey
+Print String (In String = $tecla.Selected Key Key)
+```
+
+`de` (ou `of`) separa o nome do dispatcher da variável que o expõe. Se a
+variável não existir, ou não tiver esse dispatcher, o plugin lista os que ela
+tem em vez de criar um evento solto.
+
 Se o nome for um evento **que existe na Engine, mas não nesta classe** — o caso
 clássico é `BeginPlay` num Widget Blueprint, que só tem `Construct` — o aviso
 sobe para **amarelo** e lista os eventos que a classe pai realmente oferece.

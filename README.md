@@ -81,8 +81,7 @@ Versão 0.2. UE 5.8.1, build limpa sem avisos.
 - Layout é simples: execução da esquerda para a direita, uma coluna por passo;
   os nodes de dado descem em pilha embaixo do passo que os consome, recuando
   à esquerda conforme afundam na cadeia. Legível, não bonito.
-- Delegates e event dispatchers ainda não têm forma própria. Na leitura o
-  plugin avisa; ao colar, deixa um comentário vermelho em vez de um Custom
-  Event que compilaria e nunca dispararia.
+- Dos dispatchers, só o **evento vinculado** (`evento X de $Variavel`) existe.
+  Chamar, vincular e desvincular ainda não têm forma.
 - Nodes assíncronos/latentes (`Delay`, AbilityTasks) entram como qualquer função,
   mas as saídas extras exigem rótulos explícitos.

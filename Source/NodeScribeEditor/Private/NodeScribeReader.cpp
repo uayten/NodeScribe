@@ -10,6 +10,7 @@
 #include "Engine/Blueprint.h"
 #include "K2Node_BreakStruct.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_ComponentBoundEvent.h"
 #include "K2Node_CustomEvent.h"
 #include "K2Node_GetSubsystem.h"
 #include "K2Node_MakeStruct.h"
@@ -396,6 +397,15 @@ FString FNodeScribeReadContext::MakeUniqueName(const FString& Base)
 FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRoundTripIssue)
 {
 	OutRoundTripIssue.Reset();
+
+	// Evento vinculado ao dispatcher de outro objeto: "On Key Selected
+	// (SelecionarInputKey)" no grafo. Vem antes de Event porque deriva dele.
+	if (const UK2Node_ComponentBoundEvent* BoundEvent = Cast<UK2Node_ComponentBoundEvent>(Node))
+	{
+		return FString::Printf(TEXT("event %s of %s"),
+			*BoundEvent->DelegatePropertyName.ToString(),
+			*BoundEvent->GetComponentPropertyName().ToString());
+	}
 
 	// CustomEvent antes de Event: o primeiro deriva do segundo.
 	if (const UK2Node_CustomEvent* CustomEvent = Cast<UK2Node_CustomEvent>(Node))

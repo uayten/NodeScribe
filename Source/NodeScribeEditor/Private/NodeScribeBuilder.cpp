@@ -11,6 +11,7 @@
 #include "Engine/BlueprintGeneratedClass.h"
 #include "K2Node_BreakStruct.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_ComponentBoundEvent.h"
 #include "K2Node_CustomEvent.h"
 #include "K2Node_GetSubsystem.h"
 #include "K2Node_MakeStruct.h"
@@ -451,6 +452,9 @@ private:
 	/** Saidas nomeadas com `nome = ...`, disponiveis para `$nome`. */
 	TMap<FString, FPinRef> NamedOutputs;
 
+	/** Nomes cuja linha nao resolveu, e em que linha isso aconteceu. */
+	TMap<FString, int32> FailedOutputs;
+
 	/** true quando o node nao participa do fluxo de execucao: e' so' um valor. */
 	bool IsPureDataNode(UEdGraphNode* Node) const;
 
@@ -841,6 +845,17 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 		return OutputPin;
 	}
 
+	// A causa ja' foi relatada la' atras; repetir "nao existe" aqui mandaria o
+	// usuario procurar o problema no lugar errado.
+	if (const int32* FailedLine = FailedOutputs.Find(Name))
+	{
+		AddError(Line, FString::Printf(
+			TEXT("`$%s` vem da linha %d, que nao resolveu. Corrija aquela linha primeiro."),
+			*Name, *FailedLine));
+
+		return nullptr;
+	}
+
 	AddError(Line, FString::Printf(
 		TEXT("`$%s` nao existe: nao e' saida de nenhuma linha anterior nem variavel deste Blueprint."), *Name));
 
@@ -1077,6 +1092,65 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 				Node->bOverrideFunction = true;
 				FinalizeNode(Node);
 				return Node;
+			}
+
+			// --- evento <Dispatcher> de <Variavel> -----------------------
+			// A forma que faltava: o node vermelho de antes dizia "recrie a
+			// mao" justamente porque este bloco nao existia.
+			{
+				FString DelegateName;
+				FString ComponentName;
+
+				const bool bHasOwner =
+					EventName.Split(TEXT(" de "), &DelegateName, &ComponentName, ESearchCase::IgnoreCase)
+					|| EventName.Split(TEXT(" of "), &DelegateName, &ComponentName, ESearchCase::IgnoreCase);
+
+				if (bHasOwner)
+				{
+					DelegateName.TrimStartAndEndInline();
+					ComponentName.TrimStartAndEndInline();
+
+					UClass* SelfClass = GetSelfClass();
+
+					FObjectProperty* ComponentProperty = SelfClass
+						? FindFProperty<FObjectProperty>(SelfClass, FName(*ComponentName))
+						: nullptr;
+
+					if (!ComponentProperty)
+					{
+						AddError(Statement.LineNumber, FString::Printf(
+							TEXT("`%s` nao e' uma variavel de objeto deste Blueprint."), *ComponentName));
+
+						return CreateErrorComment(Statement, FString::Printf(
+							TEXT("`%s` precisa ser uma variavel deste Blueprint que aponte para outro objeto."),
+							*ComponentName));
+					}
+
+					FMulticastDelegateProperty* DelegateProperty =
+						FindFProperty<FMulticastDelegateProperty>(ComponentProperty->PropertyClass, FName(*DelegateName));
+
+					if (!DelegateProperty)
+					{
+						TArray<FString> Available;
+						for (TFieldIterator<FMulticastDelegateProperty> It(ComponentProperty->PropertyClass); It; ++It)
+						{
+							Available.Add(It->GetName());
+						}
+
+						AddError(Statement.LineNumber, FString::Printf(
+							TEXT("`%s` nao tem dispatcher `%s`. Dispatchers: %s"),
+							*ComponentName, *DelegateName,
+							Available.Num() > 0 ? *FString::Join(Available, TEXT(", ")) : TEXT("nenhum")));
+
+						return CreateErrorComment(Statement, FString::Printf(
+							TEXT("`%s` nao expoe um dispatcher chamado `%s`."), *ComponentName, *DelegateName));
+					}
+
+					UK2Node_ComponentBoundEvent* Node = AllocateNode<UK2Node_ComponentBoundEvent>();
+					Node->InitializeComponentBoundEventParams(ComponentProperty, DelegateProperty);
+					FinalizeNode(Node);
+					return Node;
+				}
 			}
 
 			// `__DelegateSignature` e' o sufixo que a Engine poe na funcao de
@@ -1408,7 +1482,17 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 		if (!Statement.OutputName.IsEmpty())
 		{
-			RegisterOutput(Statement.OutputName, Node, Statement.LineNumber);
+			if (Node->IsA<UEdGraphNode_Comment>())
+			{
+				// A linha nao virou node. Guardar o nome evita duas mensagens
+				// que nao ajudam ninguem: "nao tem saida de dado" aqui, e
+				// "`$nome` nao existe" em toda linha que o usasse depois.
+				FailedOutputs.Add(Statement.OutputName, Statement.LineNumber);
+			}
+			else
+			{
+				RegisterOutput(Statement.OutputName, Node, Statement.LineNumber);
+			}
 		}
 
 		UEdGraphPin* ExecIn = FindExecInput(Node);
