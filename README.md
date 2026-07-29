@@ -78,8 +78,9 @@ Versão 0.2. UE 5.8.1, build limpa sem avisos.
 
 - Um node por linha; expressões aninhadas (`Print(Concat(a, b))`) não são suportadas.
   Quebre em duas linhas com `x = Concat(...)`.
-- Layout é simples: cadeia de execução da esquerda para a direita, ramos empilhados.
-  Legível, não bonito.
+- Layout é simples: execução da esquerda para a direita, uma coluna por passo;
+  os nodes de dado descem em pilha embaixo do passo que os consome, recuando
+  à esquerda conforme afundam na cadeia. Legível, não bonito.
 - Delegates e event dispatchers ainda não têm forma própria. Na leitura o
   plugin avisa; na escrita, um `evento X` desses vira Custom Event solto.
 - Nodes assíncronos/latentes (`Delay`, AbilityTasks) entram como qualquer função,

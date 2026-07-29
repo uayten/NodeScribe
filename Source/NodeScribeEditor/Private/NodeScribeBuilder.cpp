@@ -31,21 +31,24 @@
 namespace
 {
 	/** Espacamento horizontal entre nodes de uma mesma cadeia de execucao. */
-	constexpr int32 ColumnWidth = 340;
+	constexpr int32 ColumnWidth = 420;
 
-	/** Distancia da linha de execucao ate' a faixa de nodes de dado, abaixo dela. */
-	constexpr int32 DataRowOffsetY = 220;
+	/** Distancia da linha de execucao ate' o primeiro node de dado, abaixo dela. */
+	constexpr int32 DataRowOffsetY = 200;
+
+	/** Cada node de dado ganha a propria linha, empilhando para baixo. */
+	constexpr int32 DataRowHeight = 170;
+
+	/** A pilha de dados fica um pouco a' esquerda da coluna de execucao. */
+	constexpr int32 DataColumnOffsetX = -40;
+
+	/** Quanto mais fundo na cadeia de dados, mais para a esquerda. */
+	constexpr int32 DataDepthIndentX = 30;
 
 	/** Espacamento vertical entre blocos irmaos (os ramos de um Branch). */
 	constexpr int32 BranchRowHeight = 300;
 
 	/** Deslocamento de um node de dado criado implicitamente para o seu consumidor. */
-	/** Onde cai um Get criado automaticamente por `$Variavel`, em relacao a quem o consome. */
-	constexpr int32 DataNodeOffsetX = -260;
-	constexpr int32 DataNodeOffsetY = 400;
-
-	/** Empilhamento quando o mesmo node consome varias variaveis. */
-	constexpr int32 AutoGetRowHeight = 150;
 
 	const TCHAR* const StandardMacrosPath = TEXT("/Engine/EditorBlueprintResources/StandardMacros.StandardMacros");
 
@@ -448,26 +451,36 @@ private:
 	/** Saidas nomeadas com `nome = ...`, disponiveis para `$nome`. */
 	TMap<FString, FPinRef> NamedOutputs;
 
+	/** true quando o node nao participa do fluxo de execucao: e' so' um valor. */
+	bool IsPureDataNode(UEdGraphNode* Node) const;
+
 	/**
-	 * Nodes puros ainda sem posicao, esperando o node de execucao que os
-	 * consome. So' quando ele chega da' para saber quantas colunas reservar
-	 * embaixo dele -- por isso a posicao nao e' decidida na hora da criacao.
+	 * Segue os fios de dado para a frente ate' achar quem consome o valor.
+	 * @param OutDepth  saltos ate' la'. 1 = alimenta o node de execucao direto.
 	 */
-	TArray<UEdGraphNode*> PendingDataNodes;
+	UEdGraphNode* FindConsumingExecNode(UEdGraphNode* Node, int32& OutDepth) const;
 
-	/** Quantos Gets automaticos cada consumidor ja' ganhou, para nao empilha-los. */
-	TMap<UEdGraphNode*, int32> AutoGetCounts;
-
-	/** Quantos saltos de dado ate' chegar a um node de execucao. */
-	int32 DataDepthToExec(UEdGraphNode* Node) const;
-
-	/** Posiciona os nodes puros acumulados numa faixa abaixo da execucao. */
-	void FlushPendingData(const FFrame& Frame, int32 StartColumn);
+	/**
+	 * Posiciona todos os nodes de dado, depois que o grafo inteiro existe.
+	 *
+	 * Tem que ser no fim: um Get criado por `$Variavel` nasce durante a
+	 * ligacao, e o node que o consome pode ainda nao ter posicao nenhuma. Era
+	 * o que jogava esse Get para longe -- ele era ancorado num (0,0).
+	 */
+	void LayoutDataNodes();
 };
 
-int32 FNodeScribeBuildContext::DataDepthToExec(UEdGraphNode* Node) const
+bool FNodeScribeBuildContext::IsPureDataNode(UEdGraphNode* Node) const
 {
-	int32 Depth = 0;
+	return Node
+		&& !Node->IsA<UEdGraphNode_Comment>()
+		&& !FindExecInput(Node)
+		&& GetExecOutputs(Node).Num() == 0;
+}
+
+UEdGraphNode* FNodeScribeBuildContext::FindConsumingExecNode(UEdGraphNode* Node, int32& OutDepth) const
+{
+	OutDepth = 0;
 	UEdGraphNode* Current = Node;
 
 	// O grafo de dados e' aciclico, mas um texto torto pode fechar um ciclo;
@@ -485,39 +498,84 @@ int32 FNodeScribeBuildContext::DataDepthToExec(UEdGraphNode* Node) const
 			}
 		}
 
-		if (!Next || FindExecInput(Next) || GetExecOutputs(Next).Num() > 0)
+		if (!Next)
 		{
-			return Depth;
+			return nullptr;
 		}
 
-		++Depth;
+		++OutDepth;
+
+		if (!IsPureDataNode(Next))
+		{
+			return Next;
+		}
+
 		Current = Next;
 	}
 
-	return Depth;
+	return nullptr;
 }
 
-void FNodeScribeBuildContext::FlushPendingData(const FFrame& Frame, int32 StartColumn)
+void FNodeScribeBuildContext::LayoutDataNodes()
 {
-	if (PendingDataNodes.Num() == 0)
+	struct FDataNode
 	{
-		return;
+		UEdGraphNode* Node = nullptr;
+		int32 Depth = 0;
+	};
+
+	TMap<UEdGraphNode*, TArray<FDataNode>> ByConsumer;
+	TArray<UEdGraphNode*> Orphans;
+
+	for (UEdGraphNode* Node : Result.CreatedNodes)
+	{
+		if (!IsPureDataNode(Node))
+		{
+			continue;
+		}
+
+		int32 Depth = 0;
+		if (UEdGraphNode* Consumer = FindConsumingExecNode(Node, Depth))
+		{
+			ByConsumer.FindOrAdd(Consumer).Add({ Node, Depth });
+		}
+		else
+		{
+			Orphans.Add(Node);
+		}
 	}
 
-	// Quem esta' mais longe da execucao fica mais a' esquerda, para os fios de
-	// dado correrem todos no mesmo sentido em vez de se cruzarem.
-	PendingDataNodes.Sort([this](UEdGraphNode& A, UEdGraphNode& B)
+	for (TPair<UEdGraphNode*, TArray<FDataNode>>& Pair : ByConsumer)
 	{
-		return DataDepthToExec(&A) > DataDepthToExec(&B);
-	});
+		TArray<FDataNode>& Group = Pair.Value;
 
-	for (int32 Index = 0; Index < PendingDataNodes.Num(); ++Index)
-	{
-		PendingDataNodes[Index]->NodePosX = Frame.BaseX + ((StartColumn + Index) * ColumnWidth);
-		PendingDataNodes[Index]->NodePosY = Frame.BaseY + DataRowOffsetY;
+		// Quem alimenta a execucao diretamente fica logo abaixo dela; as
+		// dependencias mais fundas descem, recuando para a esquerda, de modo
+		// que os fios de dado corram todos para cima e para a direita.
+		Group.Sort([](const FDataNode& A, const FDataNode& B) { return A.Depth < B.Depth; });
+
+		for (int32 Row = 0; Row < Group.Num(); ++Row)
+		{
+			Group[Row].Node->NodePosX =
+				Pair.Key->NodePosX + DataColumnOffsetX - (Group[Row].Depth * DataDepthIndentX);
+
+			Group[Row].Node->NodePosY =
+				Pair.Key->NodePosY + DataRowOffsetY + (Row * DataRowHeight);
+		}
 	}
 
-	PendingDataNodes.Reset();
+	// Valor que ninguem consome nao tem embaixo de quem ficar. Vai para uma
+	// coluna propria depois do fim da cadeia, em vez de empilhar em (0,0).
+	if (Orphans.Num() > 0 && Frames.Num() > 0)
+	{
+		const FFrame& Frame = Frames[0];
+
+		for (int32 Index = 0; Index < Orphans.Num(); ++Index)
+		{
+			Orphans[Index]->NodePosX = Frame.BaseX + (Frame.Column * ColumnWidth);
+			Orphans[Index]->NodePosY = Frame.BaseY + (Index * DataRowHeight);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -770,17 +828,8 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 		GetNode->VariableReference.SetSelfMember(FName(*Name));
 		FinalizeNode(GetNode);
 
-		if (Consumer)
-		{
-			// Este node nasce durante a ligacao, quando o consumidor ja' esta'
-			// posicionado -- entao ele nao entra na fila, e sim numa segunda
-			// faixa abaixo dela, empilhando quando o mesmo node pede varios.
-			const int32 Slot = AutoGetCounts.FindOrAdd(Consumer)++;
-
-			GetNode->NodePosX = Consumer->NodePosX + DataNodeOffsetX;
-			GetNode->NodePosY = Consumer->NodePosY + DataNodeOffsetY + (Slot * AutoGetRowHeight);
-		}
-
+		// A posicao fica para LayoutDataNodes(): aqui o node que consome este
+		// Get pode ainda nem ter sido posicionado.
 		Result.CreatedNodes.Add(GetNode);
 
 		UEdGraphPin* OutputPin = FindPrimaryOutput(GetNode);
@@ -1318,29 +1367,13 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 		FFrame& Frame = Frames.Top();
 
-		UEdGraphPin* ExecInProbe = FindExecInput(Node);
-		const bool bIsPureNode = !ExecInProbe
-			&& GetExecOutputs(Node).Num() == 0
-			&& !Node->IsA<UEdGraphNode_Comment>();
-
-		if (bIsPureNode)
+		// Nodes de dado nao ocupam coluna: eles descem em pilha embaixo de quem
+		// os consome, e quem cuida disso e' LayoutDataNodes(), no fim.
+		if (!IsPureDataNode(Node))
 		{
-			// Sem posicao ainda: ela depende de quantos irmaos vao dividir a
-			// faixa abaixo do node de execucao que ainda nao apareceu.
-			PendingDataNodes.Add(Node);
-		}
-		else
-		{
-			// O node de execucao pula para a direita da faixa de dados que se
-			// acumulou, e essa faixa ocupa as colunas que ele deixou para tras.
-			const int32 StartColumn = Frame.Column;
-			const int32 DataCount = PendingDataNodes.Num();
-
-			Node->NodePosX = Frame.BaseX + ((StartColumn + DataCount) * ColumnWidth);
+			Node->NodePosX = Frame.BaseX + (Frame.Column * ColumnWidth);
 			Node->NodePosY = Frame.BaseY;
-			Frame.Column = StartColumn + DataCount + 1;
-
-			FlushPendingData(Frame, StartColumn);
+			++Frame.Column;
 		}
 
 		Result.CreatedNodes.Add(Node);
@@ -1405,13 +1438,7 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		Frame.LastNode = Node;
 	}
 
-	// Texto que termina em linhas de dado deixa a fila cheia. Sem isso, esses
-	// nodes ficariam todos em (0,0), empilhados uns sobre os outros.
-	if (PendingDataNodes.Num() > 0 && Frames.Num() > 0)
-	{
-		const FFrame& Frame = Frames.Top();
-		FlushPendingData(Frame, Frame.Column);
-	}
+	LayoutDataNodes();
 }
 
 // ---------------------------------------------------------------------------
