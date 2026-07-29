@@ -82,6 +82,7 @@ Versão 0.2. UE 5.8.1, build limpa sem avisos.
   os nodes de dado descem em pilha embaixo do passo que os consome, recuando
   à esquerda conforme afundam na cadeia. Legível, não bonito.
 - Delegates e event dispatchers ainda não têm forma própria. Na leitura o
-  plugin avisa; na escrita, um `evento X` desses vira Custom Event solto.
+  plugin avisa; ao colar, deixa um comentário vermelho em vez de um Custom
+  Event que compilaria e nunca dispararia.
 - Nodes assíncronos/latentes (`Delay`, AbilityTasks) entram como qualquer função,
   mas as saídas extras exigem rótulos explícitos.

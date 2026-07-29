@@ -31,7 +31,7 @@
 namespace
 {
 	/** Espacamento horizontal entre nodes de uma mesma cadeia de execucao. */
-	constexpr int32 ColumnWidth = 420;
+	constexpr int32 ColumnWidth = 620;
 
 	/** Distancia da linha de execucao ate' o primeiro node de dado, abaixo dela. */
 	constexpr int32 DataRowOffsetY = 200;
@@ -1077,6 +1077,27 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 				Node->bOverrideFunction = true;
 				FinalizeNode(Node);
 				return Node;
+			}
+
+			// `__DelegateSignature` e' o sufixo que a Engine poe na funcao de
+			// assinatura de um delegate. Um Custom Event com esse nome nao e'
+			// algo que alguem escreveria: e' um evento de dispatcher que perdeu
+			// o vinculo. Criar mesmo assim daria um node plausivel e morto, que
+			// e' exatamente o resultado que este plugin recusa a produzir.
+			if (EventName.EndsWith(TEXT("__DelegateSignature"), ESearchCase::CaseSensitive))
+			{
+				FString DispatcherName = EventName;
+				DispatcherName.RemoveFromEnd(TEXT("__DelegateSignature"));
+
+				AddError(Statement.LineNumber, FString::Printf(
+					TEXT("`%s` e' um evento de dispatcher/delegate. O formato ainda nao sabe recriar esse vinculo."),
+					*DispatcherName));
+
+				return CreateErrorComment(Statement, FString::Printf(
+					TEXT("`%s` e' um evento ligado a um dispatcher/delegate.\n\n")
+					TEXT("Um Custom Event com esse nome compilaria e nunca dispararia, entao nao criei nenhum.\n\n")
+					TEXT("Para fazer a mao: botao direito no grafo, procure `%s`, e escolha a opcao de evento."),
+					*DispatcherName, *DispatcherName));
 			}
 
 			UK2Node_CustomEvent* Node = AllocateNode<UK2Node_CustomEvent>();

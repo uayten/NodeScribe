@@ -201,7 +201,7 @@ A tradução não é perfeita, e onde ela não é o plugin fala:
 | Node que o plugin não sabe nomear de volta | sai o título do node + aviso de que pode não voltar igual |
 | Valor com aspas dos dois tipos | aviso: não há escape, copie na mão |
 | Node de dado que não alimenta ninguém | nota: ficou de fora |
-| Evento ligado a dispatcher/delegate | aviso: o vínculo se perde, recrie na mão |
+| Evento ligado a dispatcher/delegate | aviso na leitura; comentário vermelho ao colar |
 
 Reroute (os pontinhos de organizar fio) some na volta — é layout, não lógica.
 Get de variável do próprio Blueprint vira `$Nome` direto, sem linha própria.
