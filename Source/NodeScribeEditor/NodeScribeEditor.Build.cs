@@ -16,6 +16,7 @@ public class NodeScribeEditor : ModuleRules
 			"Slate",
 			"SlateCore",
 			"UnrealEd",
+			"EditorFramework",
 			"ToolMenus",
 			"Projects",
 			"GraphEditor",

@@ -46,12 +46,10 @@ errado. Falhar em voz alta é sempre preferível.
 
 Versão 0.1. Escrito contra UE 5.8, mas **ainda não executado nem uma vez**.
 
-- **Compila:** a primeira build real (UE 5.8.1, MSVC 14.50) acusou dois erros,
-  ambos corrigidos — `MacroGraphReference` é privado (usar `SetMacroGraph()`) e
-  `SNotificationItem` mora em `SNotificationList.h`. Os outros cinco arquivos
-  passaram sem erro nem aviso.
-- **Não verificado:** o passo de *link* nunca chegou a rodar, então dependências
-  de módulo faltando em `NodeScribeEditor.Build.cs` ainda podem aparecer.
+- **Compila e linka:** build limpa na UE 5.8.1 (MSVC 14.50), sem avisos. Três
+  correções foram necessárias: `MacroGraphReference` é privado (usar
+  `SetMacroGraph()`), `SNotificationItem` mora em `SNotificationList.h`, e
+  `FToolkitManager` migrou de `UnrealEd` para o módulo `EditorFramework`.
 - **Não testado:** nenhum node foi criado por este plugin até hoje. Todo o
   comportamento descrito neste README e em `Docs/FORMATO.md` é intenção de
   projeto, não observação.
