@@ -32,6 +32,19 @@ o plugin cria o node de Get automaticamente:
 Print String (In String = $NomeDoJogador)
 ```
 
+### Quando o node tem mais de uma saída
+
+`$nome` sozinho pega a saída principal. Se o node tiver várias — um evento com
+parâmetros, um Break de struct, uma função com *out params* — diga qual com
+`$nome.Pino`:
+
+```
+tecla = evento OnKeySelected
+Map Player Key (New Key = $tecla.Selected Key Key)
+```
+
+Se o pino não existir, o plugin lista as saídas que o node realmente tem.
+
 ## Argumentos
 
 Entre parênteses, separados por vírgula. Aceita nome do pino ou posição:
@@ -157,6 +170,7 @@ A tradução não é perfeita, e onde ela não é o plugin fala:
 | Node que o plugin não sabe nomear de volta | sai o título do node + aviso de que pode não voltar igual |
 | Valor com aspas dos dois tipos | aviso: não há escape, copie na mão |
 | Node de dado que não alimenta ninguém | nota: ficou de fora |
+| Evento ligado a dispatcher/delegate | aviso: o vínculo se perde, recrie na mão |
 
 Reroute (os pontinhos de organizar fio) some na volta — é layout, não lógica.
 Get de variável do próprio Blueprint vira `$Nome` direto, sem linha própria.

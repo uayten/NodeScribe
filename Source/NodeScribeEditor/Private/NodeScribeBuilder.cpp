@@ -348,6 +348,10 @@ private:
 	void ApplyLiteral(UEdGraphPin* Pin, const FString& Value, int32 Line);
 
 	UEdGraphPin* ResolveReference(const FString& Name, int32 Line, UEdGraphNode* Consumer);
+
+	/** Parte antes do ponto de `$nome.Pino`: resolve o node, nao o pino final. */
+	UEdGraphPin* ResolveBaseReference(const FString& Name, int32 Line, UEdGraphNode* Consumer);
+
 	void RegisterOutput(const FString& Name, UEdGraphNode* Node, int32 Line);
 
 	UEdGraphPin* FindPinByFuzzyName(UEdGraphNode* Node, const FString& Name, EEdGraphPinDirection Direction) const;
@@ -565,6 +569,53 @@ void FNodeScribeBuildContext::ApplyLiteral(UEdGraphPin* Pin, const FString& Valu
 }
 
 UEdGraphPin* FNodeScribeBuildContext::ResolveReference(const FString& Name, int32 Line, UEdGraphNode* Consumer)
+{
+	// `$nome` sozinho pega a saida principal do node. Quando o node tem varias
+	// saidas de dado -- um evento com parametros, um Break de struct, uma funcao
+	// com out params -- `$nome.Pino` diz qual delas.
+	FString BaseName = Name;
+	FString PinPath;
+
+	if (Name.Split(TEXT("."), &BaseName, &PinPath))
+	{
+		BaseName.TrimStartAndEndInline();
+		PinPath.TrimStartAndEndInline();
+	}
+
+	UEdGraphPin* BasePin = ResolveBaseReference(BaseName, Line, Consumer);
+	if (!BasePin || PinPath.IsEmpty())
+	{
+		return BasePin;
+	}
+
+	UEdGraphNode* SourceNode = BasePin->GetOwningNodeUnchecked();
+	if (!SourceNode)
+	{
+		return nullptr;
+	}
+
+	if (UEdGraphPin* Chosen = FindPinByFuzzyName(SourceNode, PinPath, EGPD_Output))
+	{
+		return Chosen;
+	}
+
+	TArray<FString> Available;
+	for (UEdGraphPin* Pin : SourceNode->Pins)
+	{
+		if (Pin->Direction == EGPD_Output && !IsExecPin(Pin) && !Pin->bHidden)
+		{
+			Available.Add(Pin->PinName.ToString());
+		}
+	}
+
+	AddError(Line, FString::Printf(
+		TEXT("`$%s` nao tem saida `%s`. Saidas de dado: %s"),
+		*BaseName, *PinPath, *FString::Join(Available, TEXT(", "))));
+
+	return nullptr;
+}
+
+UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, int32 Line, UEdGraphNode* Consumer)
 {
 	if (const FPinRef* Existing = NamedOutputs.Find(Name))
 	{

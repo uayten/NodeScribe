@@ -109,6 +109,28 @@ namespace
 		return nullptr;
 	}
 
+	/** A saida que `$nome` sozinho alcanca. Mesma regra do builder. */
+	UEdGraphPin* FindPrimaryOutput(UEdGraphNode* Node)
+	{
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin->Direction == EGPD_Output && Pin->PinName == UEdGraphSchema_K2::PN_ReturnValue)
+			{
+				return Pin;
+			}
+		}
+
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin->Direction == EGPD_Output && !IsExecPin(Pin))
+			{
+				return Pin;
+			}
+		}
+
+		return nullptr;
+	}
+
 	/** true quando o node participa do fluxo de execucao (tem fio branco). */
 	bool IsExecNode(UEdGraphNode* Node)
 	{
@@ -193,6 +215,27 @@ namespace
 		return Value.Contains(TEXT("//"));
 	}
 
+	/** Tira o verbo da expressao antes de virar nome: `Get Vida` -> `Vida`. */
+	FString MakeNameBase(const FString& Expression)
+	{
+		static const TCHAR* const Verbs[] = {
+			TEXT("event "), TEXT("Get "), TEXT("Set "), TEXT("Cast to ")
+		};
+
+		FString Base = Expression;
+		for (const TCHAR* Verb : Verbs)
+		{
+			if (Base.StartsWith(Verb, ESearchCase::IgnoreCase))
+			{
+				Base = Base.RightChop(FCString::Strlen(Verb));
+				break;
+			}
+		}
+
+		Base.RemoveFromEnd(TEXT("__DelegateSignature"));
+		return Base;
+	}
+
 	/** Primeira letra minuscula, so' alfanumerico: vira um `$nome` legivel. */
 	FString ToIdentifier(const FString& In)
 	{
@@ -243,13 +286,25 @@ private:
 	void AddInfo(const FString& Message);
 	void AddWarning(const FString& Message);
 
+	/**
+	 * Marca, antes de emitir qualquer linha, quais nodes de execucao tem uma
+	 * saida de dado consumida por alguem. Sem essa passagem previa a linha ja'
+	 * teria saido sem o `nome =`, e o consumidor la' na frente acabaria
+	 * emitindo o node de novo -- o que, ao colar de volta, criaria dois.
+	 */
+	void CollectConsumedNodes();
+
 	void EmitExecChain(UEdGraphNode* Node, int32 Indent);
-	void EmitNodeLine(UEdGraphNode* Node, int32 Indent, const FString& AssignedName);
+	void EmitNodeLine(UEdGraphNode* Node, int32 Indent);
 
-	/** Garante que o node de dado ja' tenha linha e nome, e devolve `$nome`. */
-	FString EnsureDataReference(UEdGraphNode* Node, int32 Indent);
+	/** Emite a linha de um node puro de dado e devolve o nome dado a ele. */
+	FString EmitDataNode(UEdGraphNode* Node, int32 Indent);
 
-	FString DescribeNode(UEdGraphNode* Node, bool& bOutRoundTrips);
+	/** O token que aponta para esse pino: `$nome` ou `$nome.Pino`. */
+	FString MakeReferenceTo(UEdGraphPin* SourcePin, int32 Indent);
+
+	/** Devolve vazio quando o node volta igual; senao, o motivo de nao voltar. */
+	FString DescribeNode(UEdGraphNode* Node, FString& OutRoundTripIssue);
 	FString BuildArgumentList(UEdGraphNode* Node, int32 Indent);
 	FString DescribeLiteral(UEdGraphPin* Pin, bool& bOutRepresentable);
 
@@ -266,6 +321,7 @@ private:
 
 	TSet<UEdGraphNode*> Scope;
 	TSet<UEdGraphNode*> EmittedExec;
+	TSet<UEdGraphNode*> NeedsName;
 	TMap<UEdGraphNode*, FString> DataNames;
 	TSet<FString> UsedNames;
 
@@ -333,9 +389,9 @@ FString FNodeScribeReadContext::MakeUniqueName(const FString& Base)
 // Nome do node
 // ---------------------------------------------------------------------------
 
-FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, bool& bOutRoundTrips)
+FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRoundTripIssue)
 {
-	bOutRoundTrips = true;
+	OutRoundTripIssue.Reset();
 
 	// CustomEvent antes de Event: o primeiro deriva do segundo.
 	if (const UK2Node_CustomEvent* CustomEvent = Cast<UK2Node_CustomEvent>(Node))
@@ -345,7 +401,21 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, bool& bOutRound
 
 	if (const UK2Node_Event* Event = Cast<UK2Node_Event>(Node))
 	{
-		return TEXT("event ") + FNodeScribeCatalog::StripEventPrefix(Event->EventReference.GetMemberName().ToString());
+		const FString EventName = FNodeScribeCatalog::StripEventPrefix(
+			Event->EventReference.GetMemberName().ToString());
+
+		// Override de evento da classe pai volta igual. Evento ligado a um
+		// dispatcher ou a um delegate nao: `evento X` recriaria um Custom Event
+		// solto, sem o vinculo, e o node ficaria parecido e morto.
+		if (!Event->bOverrideFunction)
+		{
+			OutRoundTripIssue = FString::Printf(
+				TEXT("`%s` esta' ligado a um dispatcher/delegate. O formato ainda nao tem forma para esse vinculo: ")
+				TEXT("colar de volta criaria um Custom Event solto, que nunca dispara. Recrie esse node na mao."),
+				*ShortTitle(Node));
+		}
+
+		return TEXT("event ") + EventName;
 	}
 
 	if (Node->IsA<UK2Node_IfThenElse>())
@@ -367,7 +437,7 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, bool& bOutRound
 			return TEXT("Cast to ") + ClassName;
 		}
 
-		bOutRoundTrips = false;
+		OutRoundTripIssue = TEXT("Cast sem classe de destino definida.");
 		return TEXT("Cast to ?");
 	}
 
@@ -388,7 +458,7 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, bool& bOutRound
 			return MacroGraph->GetName();
 		}
 
-		bOutRoundTrips = false;
+		OutRoundTripIssue = TEXT("Macro sem grafo definido.");
 		return TEXT("Macro ?");
 	}
 
@@ -401,8 +471,13 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, bool& bOutRound
 	}
 
 	// Sobrou algo que o builder nao sabe recriar a partir do nome.
-	bOutRoundTrips = false;
-	return ShortTitle(Node);
+	const FString Title = ShortTitle(Node);
+	OutRoundTripIssue = FString::Printf(
+		TEXT("Nao sei escrever `%s` de um jeito que volte igual: a linha saiu com o titulo do node, ")
+		TEXT("que o builder pode nao encontrar."),
+		*Title);
+
+	return Title;
 }
 
 FString FNodeScribeReadContext::DescribeExecLabel(UEdGraphPin* Pin)
@@ -495,7 +570,7 @@ FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Inde
 				continue;
 			}
 
-			const FString Reference = EnsureDataReference(SourceNode, Indent);
+			const FString Reference = MakeReferenceTo(SourcePin, Indent);
 			if (!Reference.IsEmpty())
 			{
 				Args.Add(FString::Printf(TEXT("%s = %s"), *GetWrittenPinName(Pin), *Reference));
@@ -545,63 +620,99 @@ FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Inde
 // Nodes de dado
 // ---------------------------------------------------------------------------
 
-FString FNodeScribeReadContext::EnsureDataReference(UEdGraphNode* Node, int32 Indent)
+FString FNodeScribeReadContext::EmitDataNode(UEdGraphNode* Node, int32 Indent)
 {
-	if (const FString* Existing = DataNames.Find(Node))
+	FString RoundTripIssue;
+	const FString Expression = DescribeNode(Node, RoundTripIssue);
+
+	if (!RoundTripIssue.IsEmpty())
 	{
-		return TEXT("$") + *Existing;
+		AddWarning(RoundTripIssue);
 	}
 
-	// Get de variavel propria nao precisa de linha: `$Vida` sozinho ja' faz o
-	// builder criar o node. Uma linha a menos por variavel usada.
-	if (const UK2Node_VariableGet* Getter = Cast<UK2Node_VariableGet>(Node))
-	{
-		if (Getter->VariableReference.IsSelfContext())
-		{
-			const FString VariableName = Getter->VariableReference.GetMemberName().ToString();
-			DataNames.Add(Node, VariableName);
-			UsedNames.Add(VariableName);
-			return TEXT("$") + VariableName;
-		}
-	}
-
-	// Um node de dado alimentado por outro precisa que o de tras venha antes.
-	bool bRoundTrips = true;
-	const FString Expression = DescribeNode(Node, bRoundTrips);
+	// Os argumentos podem emitir mais linhas de dado, que precisam vir antes
+	// desta -- por isso montamos a lista antes de emitir.
 	const FString Arguments = BuildArgumentList(Node, Indent);
 
-	const FString Name = MakeUniqueName(Expression);
+	const FString Name = MakeUniqueName(MakeNameBase(Expression));
 	DataNames.Add(Node, Name);
-
-	if (!bRoundTrips)
-	{
-		AddWarning(FString::Printf(
-			TEXT("Nao sei escrever `%s` de um jeito que volte igual. ")
-			TEXT("A linha saiu com o titulo do node; confira antes de reusar."),
-			*ShortTitle(Node)));
-	}
 
 	EmitLine(Indent, FString::Printf(TEXT("%s = %s%s"), *Name, *Expression, *Arguments));
 	++Result.NodeCount;
 
-	return TEXT("$") + Name;
+	return Name;
+}
+
+FString FNodeScribeReadContext::MakeReferenceTo(UEdGraphPin* SourcePin, int32 Indent)
+{
+	UEdGraphNode* SourceNode = SourcePin->GetOwningNode();
+
+	FString Name;
+
+	if (const FString* Existing = DataNames.Find(SourceNode))
+	{
+		Name = *Existing;
+	}
+	else if (const UK2Node_VariableGet* Getter = Cast<UK2Node_VariableGet>(SourceNode))
+	{
+		// Get de variavel propria nao precisa de linha: `$Vida` sozinho ja' faz
+		// o builder criar o node. Uma linha a menos por variavel usada.
+		if (Getter->VariableReference.IsSelfContext())
+		{
+			Name = Getter->VariableReference.GetMemberName().ToString();
+			DataNames.Add(SourceNode, Name);
+			UsedNames.Add(Name);
+		}
+	}
+
+	if (Name.IsEmpty())
+	{
+		if (EmittedExec.Contains(SourceNode))
+		{
+			// A pre-passagem deveria ter nomeado esse node antes de emiti-lo.
+			// Emitir a linha de novo aqui criaria um segundo node ao colar.
+			AddWarning(FString::Printf(
+				TEXT("`%s` ja' apareceu na cadeia de execucao e nao recebeu nome. ")
+				TEXT("Essa ligacao de dado saiu do texto -- religue na mao."),
+				*ShortTitle(SourceNode)));
+			return FString();
+		}
+
+		Name = EmitDataNode(SourceNode, Indent);
+	}
+
+	FString Token = TEXT("$") + Name;
+
+	// Node com varias saidas de dado precisa dizer qual delas: `$nome.Pino`.
+	if (SourcePin != FindPrimaryOutput(SourceNode))
+	{
+		Token += TEXT(".") + GetWrittenPinName(SourcePin);
+	}
+
+	return Token;
 }
 
 // ---------------------------------------------------------------------------
 // Cadeia de execucao
 // ---------------------------------------------------------------------------
 
-void FNodeScribeReadContext::EmitNodeLine(UEdGraphNode* Node, int32 Indent, const FString& AssignedName)
+void FNodeScribeReadContext::EmitNodeLine(UEdGraphNode* Node, int32 Indent)
 {
-	bool bRoundTrips = true;
-	const FString Expression = DescribeNode(Node, bRoundTrips);
+	FString RoundTripIssue;
+	const FString Expression = DescribeNode(Node, RoundTripIssue);
 
-	if (!bRoundTrips)
+	if (!RoundTripIssue.IsEmpty())
 	{
-		AddWarning(FString::Printf(
-			TEXT("Nao sei escrever `%s` de um jeito que volte igual. ")
-			TEXT("A linha saiu com o titulo do node; confira antes de reusar."),
-			*ShortTitle(Node)));
+		AddWarning(RoundTripIssue);
+	}
+
+	// O nome tem que ser decidido antes da linha sair, mesmo que quem consome
+	// so' apareca bem mais adiante no texto.
+	FString AssignedName;
+	if (NeedsName.Contains(Node) && !DataNames.Contains(Node))
+	{
+		AssignedName = MakeUniqueName(MakeNameBase(Expression));
+		DataNames.Add(Node, AssignedName);
 	}
 
 	// Os argumentos podem emitir linhas de dado, que precisam vir antes desta.
@@ -634,10 +745,7 @@ void FNodeScribeReadContext::EmitExecChain(UEdGraphNode* Node, int32 Indent)
 	}
 
 	EmittedExec.Add(Node);
-
-	// Um node de execucao com saida de dado nomeada e' reusado adiante; so'
-	// damos nome quando alguem de fato consome, o que o builder decide sozinho.
-	EmitNodeLine(Node, Indent, DataNames.FindRef(Node));
+	EmitNodeLine(Node, Indent);
 
 	const TArray<UEdGraphPin*> ExecOutputs = GetExecOutputs(Node);
 
@@ -662,6 +770,36 @@ void FNodeScribeReadContext::EmitExecChain(UEdGraphNode* Node, int32 Indent)
 
 // ---------------------------------------------------------------------------
 
+void FNodeScribeReadContext::CollectConsumedNodes()
+{
+	for (UEdGraphNode* Node : Scope)
+	{
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (!Pin || Pin->Direction != EGPD_Input || IsExecPin(Pin))
+			{
+				continue;
+			}
+
+			UEdGraphPin* SourcePin = FollowToSourcePin(Pin);
+			if (!SourcePin)
+			{
+				continue;
+			}
+
+			UEdGraphNode* SourceNode = SourcePin->GetOwningNode();
+
+			// Nodes puros ganham nome naturalmente na hora em que sao emitidos.
+			// O caso que precisa de aviso previo e' o node de execucao, cuja
+			// linha ja' teria passado quando o consumidor aparece.
+			if (Scope.Contains(SourceNode) && IsExecNode(SourceNode))
+			{
+				NeedsName.Add(SourceNode);
+			}
+		}
+	}
+}
+
 void FNodeScribeReadContext::Run()
 {
 	if (Scope.Num() == 0)
@@ -669,6 +807,8 @@ void FNodeScribeReadContext::Run()
 		AddInfo(TEXT("Nada para ler: nenhum node selecionado."));
 		return;
 	}
+
+	CollectConsumedNodes();
 
 	// Caixas de comentario primeiro: sao contexto, nao passo de execucao.
 	TArray<UEdGraphNode*> Comments;
