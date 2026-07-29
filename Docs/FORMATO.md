@@ -57,6 +57,17 @@ Print String ("oi", 5.0)
 Os nomes são comparados de forma tolerante — `In String`, `instring` e
 `In_String` dão no mesmo. `Target` e `Alvo` apontam para o pino self.
 
+## Quando dois nodes têm o mesmo nome
+
+`Apply Settings` existe em `GameUserSettings` e em `EnhancedInputUserSettings`.
+Nesse caso o plugin não escolhe — e você diz qual com `Classe.Funcao`:
+
+```
+EnhancedInputUserSettings.ApplySettings (Target = $settings)
+```
+
+Parênteses **não** servem para isso: eles já são a lista de argumentos.
+
 ## Ramos (Branch, loops)
 
 Indente e use um rótulo terminado em `:`.

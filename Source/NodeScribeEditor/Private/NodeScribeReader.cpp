@@ -508,9 +508,31 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 
 	if (const UK2Node_CallFunction* Call = Cast<UK2Node_CallFunction>(Node))
 	{
-		if (const UFunction* Function = Call->GetTargetFunction())
+		if (UFunction* Function = Call->GetTargetFunction())
 		{
-			return Function->GetDisplayNameText().ToString();
+			const FString DisplayName = Function->GetDisplayNameText().ToString();
+
+			// O nome curto so' serve se ele voltar para esta mesma funcao.
+			// `Apply Settings` existe em GameUserSettings e em
+			// EnhancedInputUserSettings; escrever o nome ambiguo aqui seria
+			// jogar fora uma informacao que so' nos temos, para o builder
+			// descobrir na hora de colar que nao da' para decidir.
+			UClass* SelfClass = Blueprint
+				? (Blueprint->GeneratedClass ? Blueprint->GeneratedClass.Get() : Blueprint->ParentClass.Get())
+				: nullptr;
+
+			const FNodeScribeLookup Lookup = FNodeScribeCatalog::Get().FindFunction(DisplayName, SelfClass, nullptr);
+			if (Lookup.Function == Function)
+			{
+				return DisplayName;
+			}
+
+			if (const UClass* Owner = Function->GetOwnerClass())
+			{
+				return Owner->GetName() + TEXT(".") + Function->GetName();
+			}
+
+			return DisplayName;
 		}
 	}
 

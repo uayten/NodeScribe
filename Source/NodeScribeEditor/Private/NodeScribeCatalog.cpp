@@ -247,7 +247,22 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 
 	FNodeScribeLookup Result;
 
-	const FString NormalizedQuery = Normalize(Query);
+	// `Classe.Funcao` restringe a busca a uma classe. O separador nao pode ser
+	// parenteses: aquilo ja' e' a lista de argumentos, e a forma antiga sugerida
+	// nos candidatos (`ApplySettings (GameUserSettings)`) nunca funcionou.
+	FString OwnerQuery;
+	FString NameQuery = Query;
+	{
+		FString OwnerPart;
+		FString NamePart;
+		if (Query.Split(TEXT("."), &OwnerPart, &NamePart, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
+		{
+			OwnerQuery = Normalize(OwnerPart);
+			NameQuery = NamePart;
+		}
+	}
+
+	const FString NormalizedQuery = Normalize(NameQuery);
 	if (NormalizedQuery.IsEmpty())
 	{
 		return Result;
@@ -266,6 +281,15 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 		if (!Entry.Function.IsValid())
 		{
 			continue;
+		}
+
+		if (!OwnerQuery.IsEmpty())
+		{
+			const UClass* Owner = Entry.OwnerClass.Get();
+			if (!Owner || Normalize(Owner->GetName()) != OwnerQuery)
+			{
+				continue;
+			}
 		}
 
 		const int32 Score = ScoreEntry(Entry, NormalizedQuery, SelfClass, ContextClass);
@@ -316,7 +340,8 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 
 		if (Owner && Function)
 		{
-			Result.Candidates.Add(FString::Printf(TEXT("%s (%s)"), *Function->GetName(), *Owner->GetName()));
+			// Formato copiavel: e' exatamente o que o usuario pode digitar de volta.
+			Result.Candidates.Add(FString::Printf(TEXT("%s.%s"), *Owner->GetName(), *Function->GetName()));
 		}
 	}
 
