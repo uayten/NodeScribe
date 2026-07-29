@@ -12,6 +12,7 @@
 #include "K2Node_BreakStruct.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_ComponentBoundEvent.h"
+#include "K2Node_ConstructObjectFromClass.h"
 #include "K2Node_CustomEvent.h"
 #include "K2Node_GetSubsystem.h"
 #include "K2Node_MakeStruct.h"
@@ -146,6 +147,44 @@ namespace
 		}
 
 		return FString::Join(Names, TEXT(", ")) + (bTruncated ? TEXT(", ...") : TEXT(""));
+	}
+
+	/**
+	 * Nodes que constroem um objeto a partir de uma classe.
+	 *
+	 * Os pinos deles dependem do valor do pino `Class`: os campos marcados como
+	 * *Expose on Spawn* so' aparecem depois que a classe e' escolhida. Por isso
+	 * este e' o unico tipo de node em que a ordem dos argumentos importa.
+	 *
+	 * Resolvidos por caminho, e nao por include: `K2Node_CreateWidget` mora no
+	 * Private do UMGEditor, e linkar aquele modulo inteiro por causa de um
+	 * ponteiro de classe seria caro demais.
+	 */
+	struct FConstructNodeForm
+	{
+		const TCHAR* Name;
+		const TCHAR* NodeClassPath;
+	};
+
+	const FConstructNodeForm ConstructNodeForms[] = {
+		{ TEXT("createwidget"),            TEXT("/Script/UMGEditor.K2Node_CreateWidget") },
+		{ TEXT("criarwidget"),             TEXT("/Script/UMGEditor.K2Node_CreateWidget") },
+		{ TEXT("spawnactorfromclass"),     TEXT("/Script/BlueprintGraph.K2Node_SpawnActorFromClass") },
+		{ TEXT("spawnactor"),              TEXT("/Script/BlueprintGraph.K2Node_SpawnActorFromClass") },
+		{ TEXT("constructobjectfromclass"),TEXT("/Script/BlueprintGraph.K2Node_ConstructObjectFromClass") }
+	};
+
+	UClass* FindConstructNodeClass(const FString& NormalizedExpression)
+	{
+		for (const FConstructNodeForm& Form : ConstructNodeForms)
+		{
+			if (NormalizedExpression == Form.Name)
+			{
+				return FindObject<UClass>(nullptr, Form.NodeClassPath);
+			}
+		}
+
+		return nullptr;
 	}
 
 	/** Busca de struct por nome, aceitando `MapPlayerKeyArgs` e `Map Player Key Args`. */
@@ -823,6 +862,18 @@ void FNodeScribeBuildContext::ApplyLiteral(UEdGraphPin* Pin, const FString& Valu
 			return;
 		}
 
+		// Pino de classe aceita nome curto: `WBP_LinhaRemapear` acha a classe
+		// gerada `WBP_LinhaRemapear_C`. Mesmo atalho que `Cast to BP_Boss` usa.
+		const FName Category = Pin->PinType.PinCategory;
+		if (Category == UEdGraphSchema_K2::PC_Class || Category == UEdGraphSchema_K2::PC_SoftClass)
+		{
+			if (UClass* Found = FindClassByFriendlyName(Value))
+			{
+				Schema->TrySetDefaultObject(*Pin, Found);
+				return;
+			}
+		}
+
 		// Sem caminho completo nao da' para saber qual asset e'. Nao chutamos.
 		AddWarning(Line, FString::Printf(
 			TEXT("`%s` nao e' um caminho de asset. Escolha no pino `%s` do node."),
@@ -1346,6 +1397,64 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 
 			return Node;
 		}
+	}
+
+	// --- Create Widget / Spawn Actor from Class --------------------------
+	if (UClass* NodeClass = FindConstructNodeClass(Normalized))
+	{
+		UK2Node_ConstructObjectFromClass* Node = NewObject<UK2Node_ConstructObjectFromClass>(Graph, NodeClass);
+		Graph->AddNode(Node, false, false);
+		Node->CreateNewGuid();
+		FinalizeNode(Node);
+
+		// A classe tem que entrar antes dos outros argumentos: e' ela que faz
+		// os pinos de Expose on Spawn existirem. Aplicada na ordem normal, os
+		// outros argumentos chegariam antes dos pinos deles e virariam
+		// "o node nao tem pino X" -- um erro que nao explicaria nada.
+		FString ClassValue;
+		for (const FNodeScribeArg& Arg : Statement.Args)
+		{
+			const FString PinName = FNodeScribeCatalog::Normalize(Arg.PinName);
+			if (PinName == TEXT("class") || PinName == TEXT("classe"))
+			{
+				ClassValue = Arg.Value;
+				break;
+			}
+		}
+
+		// Sem nome de pino, o primeiro argumento e' a classe: `Create Widget (WBP_X)`.
+		if (ClassValue.IsEmpty() && Statement.Args.Num() > 0 && Statement.Args[0].PinName.IsEmpty())
+		{
+			ClassValue = Statement.Args[0].Value;
+		}
+
+		if (ClassValue.IsEmpty() || ClassValue.StartsWith(TEXT("?")))
+		{
+			AddWarning(Statement.LineNumber,
+				TEXT("Sem `Class`, este node nao tem os pinos de Expose on Spawn. Escolha a classe nele."));
+			return Node;
+		}
+
+		UClass* SpawnClass = ClassValue.StartsWith(TEXT("/"))
+			? LoadObject<UClass>(nullptr, *ClassValue)
+			: FindClassByFriendlyName(ClassValue);
+
+		if (!SpawnClass)
+		{
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("Nao achei a classe `%s`, entao os pinos de Expose on Spawn nao existem."), *ClassValue));
+			return Node;
+		}
+
+		if (UEdGraphPin* ClassPin = Node->GetClassPin())
+		{
+			Schema->TrySetDefaultObject(*ClassPin, SpawnClass);
+
+			// E' a reconstrucao que faz nascerem os pinos de Expose on Spawn.
+			Node->ReconstructNode();
+		}
+
+		return Node;
 	}
 
 	// --- Make / Break de struct ------------------------------------------

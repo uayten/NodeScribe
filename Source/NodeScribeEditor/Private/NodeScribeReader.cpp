@@ -11,6 +11,7 @@
 #include "K2Node_BreakStruct.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_ComponentBoundEvent.h"
+#include "K2Node_ConstructObjectFromClass.h"
 #include "K2Node_CustomEvent.h"
 #include "K2Node_GetSubsystem.h"
 #include "K2Node_MakeStruct.h"
@@ -514,6 +515,36 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 
 		OutRoundTripIssue = TEXT("Break de struct sem struct definida.");
 		return TEXT("Break ?");
+	}
+
+	if (Node->IsA<UK2Node_ConstructObjectFromClass>())
+	{
+		// O titulo muda com a classe escolhida ("Create WBP_X Widget"), entao
+		// nao serve de nome. A classe do node e' estavel e diz a mesma coisa;
+		// qual classe construir sai no argumento `Class`.
+		const FString NodeClassName = Node->GetClass()->GetName();
+
+		if (NodeClassName == TEXT("K2Node_CreateWidget"))
+		{
+			return TEXT("Create Widget");
+		}
+
+		if (NodeClassName == TEXT("K2Node_SpawnActorFromClass"))
+		{
+			return TEXT("Spawn Actor from Class");
+		}
+
+		if (NodeClassName == TEXT("K2Node_ConstructObjectFromClass"))
+		{
+			return TEXT("Construct Object from Class");
+		}
+
+		OutRoundTripIssue = FString::Printf(
+			TEXT("`%s` constroi objeto a partir de classe, mas o formato so' conhece Create Widget, ")
+			TEXT("Spawn Actor from Class e Construct Object from Class."),
+			*ShortTitle(Node));
+
+		return ShortTitle(Node);
 	}
 
 	if (const UK2Node_MacroInstance* Macro = Cast<UK2Node_MacroInstance>(Node))

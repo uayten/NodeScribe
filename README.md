@@ -104,5 +104,6 @@ Versão 0.2. UE 5.8.1, build limpa sem avisos.
   à esquerda conforme afundam na cadeia. Legível, não bonito.
 - Dos dispatchers, só o **evento vinculado** (`evento X de $Variavel`) existe.
   Chamar, vincular e desvincular ainda não têm forma.
+- Timeline, Switch, Select e variáveis locais ainda não têm forma.
 - Nodes assíncronos/latentes (`Delay`, AbilityTasks) entram como qualquer função,
   mas as saídas extras exigem rótulos explícitos.

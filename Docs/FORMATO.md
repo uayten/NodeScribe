@@ -156,6 +156,20 @@ settings = Get EnhancedInputLocalPlayerSubsystem (PlayerController = $pc)
 O plugin escolhe o node certo conforme onde o subsistema vive: os de
 LocalPlayer pedem um PlayerController, os de Engine não pedem nada.
 
+## Criar widget e spawnar ator
+
+```
+linha = Create Widget (Class = WBP_LinhaRemapear, Owning Player = $pc, Nome do Input = $nome)
+Spawn Actor from Class (Class = BP_Boss, Spawn Transform = $t)
+```
+
+Também `Construct Object from Class`.
+
+Nesses nodes o pino `Class` vem primeiro **por necessidade**: os pinos de
+*Expose on Spawn* só existem depois que a classe é escolhida. O plugin cuida
+disso sozinho — você pode escrever os argumentos em qualquer ordem. Sem `Class`,
+o node entra sem esses pinos e sai um aviso.
+
 ## Macros padrão
 
 Nomes da biblioteca da Engine funcionam direto:
