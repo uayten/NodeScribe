@@ -50,9 +50,11 @@ Versão 0.1. Escrito contra UE 5.8, mas **ainda não executado nem uma vez**.
   correções foram necessárias: `MacroGraphReference` é privado (usar
   `SetMacroGraph()`), `SNotificationItem` mora em `SNotificationList.h`, e
   `FToolkitManager` migrou de `UnrealEd` para o módulo `EditorFramework`.
-- **Não testado:** nenhum node foi criado por este plugin até hoje. Todo o
-  comportamento descrito neste README e em `Docs/FORMATO.md` é intenção de
-  projeto, não observação.
+- **Primeiro uso real:** funcionou. `evento BeginPlay` + `Print String` viraram
+  dois nodes ligados, com a string preenchida, via **Copiar para clipboard**.
+- **Pouco testado:** só esse caminho foi exercitado. Ramos, casts, macros,
+  variáveis e o botão **Inserir no grafo** continuam sendo intenção de projeto,
+  não observação.
 
 O caminho inverso (grafo → texto, para editar algo que já existe) não existe —
 hoje, para pedir ajuda com um grafo pronto, use um print ou selecione alguns

@@ -73,6 +73,12 @@ evento MinhaHabilidadeAtivou
 Se o nome existir na classe pai, vira o evento de override. Se não existir,
 vira um Custom Event com esse nome (e o plugin avisa que fez isso).
 
+Se o nome for um evento **que existe na Engine, mas não nesta classe** — o caso
+clássico é `BeginPlay` num Widget Blueprint, que só tem `Construct` — o aviso
+sobe para **amarelo** e lista os eventos que a classe pai realmente oferece.
+Um Custom Event chamado `BeginPlay` compila, parece certo no grafo, e nunca
+dispara; é o tipo de erro que só aparece em playtest.
+
 ## Cast
 
 ```

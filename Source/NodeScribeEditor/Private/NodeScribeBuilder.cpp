@@ -57,6 +57,96 @@ namespace
 			|| Category == UEdGraphSchema_K2::PC_Interface;
 	}
 
+	/** Nome como o usuario escreve: `ReceiveBeginPlay` -> `BeginPlay`. */
+	FString StripEventPrefix(const FString& FunctionName)
+	{
+		if (FunctionName.StartsWith(TEXT("Receive"), ESearchCase::CaseSensitive))
+		{
+			return FunctionName.RightChop(7);
+		}
+
+		if (FunctionName.StartsWith(TEXT("K2_"), ESearchCase::CaseSensitive))
+		{
+			return FunctionName.RightChop(3);
+		}
+
+		return FunctionName;
+	}
+
+	/** true para o que aparece na lista de eventos sobrescreviveis do grafo. */
+	bool IsOverridableEvent(const UFunction* Function)
+	{
+		// BlueprintNativeEvent com retorno e' funcao, nao evento: nao tem pino de exec.
+		return Function
+			&& Function->HasAnyFunctionFlags(FUNC_BlueprintEvent)
+			&& Function->GetReturnProperty() == nullptr;
+	}
+
+	/**
+	 * Procura um evento de Blueprint com esse nome em qualquer classe carregada.
+	 *
+	 * Separa dois casos que merecem tratamento bem diferente: "voce inventou um
+	 * evento novo" (legitimo, e' o que `evento MinhaHabilidadeAtivou` faz) e
+	 * "esse evento existe, mas nao nesta classe" -- `BeginPlay` num Widget, por
+	 * exemplo. O segundo e' quase sempre engano, e o Custom Event resultante
+	 * compila sem reclamar e nunca dispara.
+	 */
+	UClass* FindClassOwningBlueprintEvent(const FString& EventName)
+	{
+		const TArray<FString> Attempts = {
+			EventName,
+			FString(TEXT("Receive")) + EventName,
+			FString(TEXT("K2_")) + EventName
+		};
+
+		for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
+		{
+			for (const FString& Attempt : Attempts)
+			{
+				const UFunction* Found = ClassIt->FindFunctionByName(FName(*Attempt), EIncludeSuperFlag::ExcludeSuper);
+				if (IsOverridableEvent(Found))
+				{
+					return *ClassIt;
+				}
+			}
+		}
+
+		return nullptr;
+	}
+
+	/** Os eventos que a classe realmente oferece, para o usuario escolher outro. */
+	FString ListAvailableEvents(UClass* Class, int32 MaxCount)
+	{
+		if (!Class)
+		{
+			return FString();
+		}
+
+		TArray<FString> Names;
+		for (TFieldIterator<UFunction> FunctionIt(Class); FunctionIt; ++FunctionIt)
+		{
+			if (IsOverridableEvent(*FunctionIt))
+			{
+				Names.AddUnique(StripEventPrefix(FunctionIt->GetName()));
+			}
+		}
+
+		if (Names.Num() == 0)
+		{
+			return FString();
+		}
+
+		Names.Sort();
+
+		const bool bTruncated = Names.Num() > MaxCount;
+		if (bTruncated)
+		{
+			Names.SetNum(MaxCount);
+		}
+
+		return FString::Join(Names, TEXT(", ")) + (bTruncated ? TEXT(", ...") : TEXT(""));
+	}
+
 	/** Busca de classe por nome curto, aceitando tanto `BP_Boss` quanto `BP_Boss_C`. */
 	UClass* FindClassByFriendlyName(const FString& Name)
 	{
@@ -767,8 +857,34 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			Node->CustomFunctionName = FName(*EventName);
 			FinalizeNode(Node);
 
-			AddInfo(Statement.LineNumber, FString::Printf(
-				TEXT("`%s` nao existe na classe pai; criei um Custom Event com esse nome."), *EventName));
+			UClass* SelfParentClass = Blueprint ? Blueprint->ParentClass.Get() : nullptr;
+
+			if (UClass* OwningClass = FindClassOwningBlueprintEvent(EventName))
+			{
+				// O evento existe -- so' que em outra hierarquia. Um Custom Event com
+				// o nome de um evento da Engine compila, fica plausivel no grafo e
+				// nunca dispara. Isso e' aviso, nao nota de rodape.
+				FString Message = FString::Printf(
+					TEXT("`%s` e' evento de `%s`, mas este Blueprint deriva de `%s`. ")
+					TEXT("Criei um Custom Event com esse nome, e ele nunca vai disparar sozinho."),
+					*EventName,
+					*OwningClass->GetName(),
+					SelfParentClass ? *SelfParentClass->GetName() : TEXT("?"));
+
+				const FString Available = ListAvailableEvents(SelfParentClass, 8);
+				if (!Available.IsEmpty())
+				{
+					Message += FString::Printf(TEXT(" Aqui existem: %s."), *Available);
+				}
+
+				AddWarning(Statement.LineNumber, Message);
+			}
+			else
+			{
+				AddInfo(Statement.LineNumber, FString::Printf(
+					TEXT("`%s` nao existe na classe pai; criei um Custom Event com esse nome."), *EventName));
+			}
+
 			return Node;
 		}
 	}
