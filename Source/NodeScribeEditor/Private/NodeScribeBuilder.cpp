@@ -467,10 +467,11 @@ private:
 	void ApplyArguments(UEdGraphNode* Node, const FNodeScribeStatement& Statement);
 	void ApplyLiteral(UEdGraphPin* Pin, const FString& Value, int32 Line);
 
-	UEdGraphPin* ResolveReference(const FString& Name, int32 Line, UEdGraphNode* Consumer);
+	/** @param ConsumerPin  onde o valor vai entrar; e' dele que sai o tipo de uma variavel nova. */
+	UEdGraphPin* ResolveReference(const FString& Name, int32 Line, UEdGraphPin* ConsumerPin);
 
 	/** Parte antes do ponto de `$nome.Pino`: resolve o node, nao o pino final. */
-	UEdGraphPin* ResolveBaseReference(const FString& Name, int32 Line, UEdGraphNode* Consumer);
+	UEdGraphPin* ResolveBaseReference(const FString& Name, int32 Line, UEdGraphPin* ConsumerPin);
 
 	void RegisterOutput(const FString& Name, UEdGraphNode* Node, int32 Line);
 
@@ -884,7 +885,7 @@ void FNodeScribeBuildContext::ApplyLiteral(UEdGraphPin* Pin, const FString& Valu
 	Schema->TrySetDefaultValue(*Pin, Value);
 }
 
-UEdGraphPin* FNodeScribeBuildContext::ResolveReference(const FString& Name, int32 Line, UEdGraphNode* Consumer)
+UEdGraphPin* FNodeScribeBuildContext::ResolveReference(const FString& Name, int32 Line, UEdGraphPin* ConsumerPin)
 {
 	// `$nome` sozinho pega a saida principal do node. Quando o node tem varias
 	// saidas de dado -- um evento com parametros, um Break de struct, uma funcao
@@ -898,7 +899,7 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveReference(const FString& Name, int3
 		PinPath.TrimStartAndEndInline();
 	}
 
-	UEdGraphPin* BasePin = ResolveBaseReference(BaseName, Line, Consumer);
+	UEdGraphPin* BasePin = ResolveBaseReference(BaseName, Line, ConsumerPin);
 	if (!BasePin || PinPath.IsEmpty())
 	{
 		return BasePin;
@@ -936,7 +937,7 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveReference(const FString& Name, int3
 	return nullptr;
 }
 
-UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, int32 Line, UEdGraphNode* Consumer)
+UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, int32 Line, UEdGraphPin* ConsumerPin)
 {
 	if (const FPinRef* Existing = NamedOutputs.Find(Name))
 	{
@@ -976,6 +977,42 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 			*Name, *FailedLine));
 
 		return nullptr;
+	}
+
+	// A variavel ainda nao existe. Em vez de descartar a ligacao, criamos o Get
+	// nao resolvido -- e' o que a Unreal faz ao colar nodes entre Blueprints
+	// diferentes. O grafo acusa o erro e o botao direito no node oferece criar
+	// a variavel, o que e' um clique contra reconstruir a cadeia na mao.
+	//
+	// Isso nao afrouxa a regra de nao chutar: o Blueprint continua sem
+	// compilar ate' voce agir. So' muda onde a pendencia fica visivel.
+	if (ConsumerPin)
+	{
+		UK2Node_VariableGet* GetNode = AllocateNode<UK2Node_VariableGet>();
+		GetNode->VariableReference.SetSelfMember(FName(*Name));
+		FinalizeNode(GetNode);
+
+		// Sem a propriedade, AllocateDefaultPins nao cria pino nenhum. O tipo
+		// vem de quem vai consumir o valor: e' a unica fonte disponivel aqui, e
+		// e' exatamente o tipo que a variavel precisa ter.
+		UEdGraphPin* OutputPin = FindPrimaryOutput(GetNode);
+		if (!OutputPin)
+		{
+			OutputPin = GetNode->CreatePin(EGPD_Output, ConsumerPin->PinType, FName(*Name));
+		}
+
+		Result.CreatedNodes.Add(GetNode);
+
+		AddWarning(Line, FString::Printf(
+			TEXT("`%s` nao existe neste Blueprint. Criei o Get assim mesmo: o grafo vai acusar o erro, ")
+			TEXT("e o botao direito no node oferece criar a variavel."), *Name));
+
+		if (OutputPin)
+		{
+			NamedOutputs.Add(Name, FPinRef(OutputPin));
+		}
+
+		return OutputPin;
 	}
 
 	AddError(Line, FString::Printf(
@@ -1052,7 +1089,7 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 
 		if (Arg.bIsReference)
 		{
-			if (UEdGraphPin* Source = ResolveReference(Arg.Value, Statement.LineNumber, Node))
+			if (UEdGraphPin* Source = ResolveReference(Arg.Value, Statement.LineNumber, Pin))
 			{
 				Connect(Source, Pin, Statement.LineNumber);
 			}

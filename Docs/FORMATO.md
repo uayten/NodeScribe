@@ -136,6 +136,21 @@ Só é tratado como variável se ela existir no Blueprint. Por isso
 `Get Player Controller` continua sendo a função, não uma variável chamada
 "Player Controller".
 
+### Variável que ainda não existe
+
+`$Alguma Coisa` que não existe **não perde a ligação**: o node de Get entra
+assim mesmo, com o tipo do pino que ia consumi-lo. O Blueprint acusa o erro e
+o botão direito no node oferece criar a variável — o mesmo comportamento de
+colar nodes entre dois Blueprints diferentes.
+
+Sai um aviso amarelo. O Blueprint continua sem compilar até você criar a
+variável; o que muda é que a pendência fica no grafo, a um clique de resolver,
+em vez de virar uma cadeia perdida.
+
+Isso vale para `$nome` usado como argumento. Uma linha `Get X` solta, com `X`
+inexistente, continua sendo erro — ali não há pino consumidor de onde tirar o
+tipo.
+
 ## Structs
 
 ```
