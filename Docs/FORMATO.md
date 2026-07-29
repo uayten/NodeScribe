@@ -109,6 +109,26 @@ Só é tratado como variável se ela existir no Blueprint. Por isso
 `Get Player Controller` continua sendo a função, não uma variável chamada
 "Player Controller".
 
+## Structs
+
+```
+args = Make MapPlayerKeyArgs (Mapping Name = $Nome, Slot = First)
+Break Vector (In Vec = $posicao)
+```
+
+Aceita o nome interno (`MapPlayerKeyArgs`) ou o de exibição
+(`Map Player Key Args`). Só vira node de struct se a struct existir — assim
+`Make Literal Int` continua sendo a função que sempre foi.
+
+## Subsistemas
+
+```
+settings = Get EnhancedInputLocalPlayerSubsystem (PlayerController = $pc)
+```
+
+O plugin escolhe o node certo conforme onde o subsistema vive: os de
+LocalPlayer pedem um PlayerController, os de Engine não pedem nada.
+
 ## Macros padrão
 
 Nomes da biblioteca da Engine funcionam direto:

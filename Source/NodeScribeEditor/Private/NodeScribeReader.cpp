@@ -8,8 +8,11 @@
 #include "EdGraphNode_Comment.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
+#include "K2Node_BreakStruct.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_CustomEvent.h"
+#include "K2Node_GetSubsystem.h"
+#include "K2Node_MakeStruct.h"
 #include "K2Node_DynamicCast.h"
 #include "K2Node_Event.h"
 #include "K2Node_ExecutionSequence.h"
@@ -219,7 +222,8 @@ namespace
 	FString MakeNameBase(const FString& Expression)
 	{
 		static const TCHAR* const Verbs[] = {
-			TEXT("event "), TEXT("Get "), TEXT("Set "), TEXT("Cast to ")
+			TEXT("event "), TEXT("Get "), TEXT("Set "), TEXT("Cast to "),
+			TEXT("Make "), TEXT("Break ")
 		};
 
 		FString Base = Expression;
@@ -449,6 +453,46 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 	if (const UK2Node_VariableGet* Getter = Cast<UK2Node_VariableGet>(Node))
 	{
 		return TEXT("Get ") + Getter->VariableReference.GetMemberName().ToString();
+	}
+
+	if (Node->IsA<UK2Node_GetSubsystem>())
+	{
+		// `CustomClass` e' protegido no node, mas o tipo do pino de saida
+		// carrega a mesma informacao e e' publico.
+		if (const UEdGraphPin* Output = FindPrimaryOutput(Node))
+		{
+			if (const UClass* SubsystemClass = Cast<UClass>(Output->PinType.PinSubCategoryObject.Get()))
+			{
+				return TEXT("Get ") + SubsystemClass->GetName();
+			}
+		}
+
+		OutRoundTripIssue = TEXT("Node de subsistema sem classe definida.");
+		return TEXT("Get ?");
+	}
+
+	// MakeStruct antes de BreakStruct: nao ha' heranca entre eles, mas os dois
+	// carregam StructType e a ordem deixa a leitura obvia.
+	if (const UK2Node_MakeStruct* MakeStruct = Cast<UK2Node_MakeStruct>(Node))
+	{
+		if (const UScriptStruct* Struct = MakeStruct->StructType)
+		{
+			return TEXT("Make ") + Struct->GetName();
+		}
+
+		OutRoundTripIssue = TEXT("Make de struct sem struct definida.");
+		return TEXT("Make ?");
+	}
+
+	if (const UK2Node_BreakStruct* BreakStruct = Cast<UK2Node_BreakStruct>(Node))
+	{
+		if (const UScriptStruct* Struct = BreakStruct->StructType)
+		{
+			return TEXT("Break ") + Struct->GetName();
+		}
+
+		OutRoundTripIssue = TEXT("Break de struct sem struct definida.");
+		return TEXT("Break ?");
 	}
 
 	if (const UK2Node_MacroInstance* Macro = Cast<UK2Node_MacroInstance>(Node))

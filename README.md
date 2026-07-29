@@ -82,7 +82,5 @@ Versão 0.2. UE 5.8.1, build limpa sem avisos.
   Legível, não bonito.
 - Delegates e event dispatchers ainda não têm forma própria. Na leitura o
   plugin avisa; na escrita, um `evento X` desses vira Custom Event solto.
-- Nodes de subsistema (`Get EnhancedInputLocalPlayerSubsystem` e afins) são
-  lidos pelo título e não voltam a ser criados pelo nome.
 - Nodes assíncronos/latentes (`Delay`, AbilityTasks) entram como qualquer função,
   mas as saídas extras exigem rótulos explícitos.

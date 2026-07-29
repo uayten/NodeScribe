@@ -9,8 +9,11 @@
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "K2Node_BreakStruct.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_CustomEvent.h"
+#include "K2Node_GetSubsystem.h"
+#include "K2Node_MakeStruct.h"
 #include "K2Node_DynamicCast.h"
 #include "K2Node_Event.h"
 #include "K2Node_ExecutionSequence.h"
@@ -20,6 +23,9 @@
 #include "K2Node_Self.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
+#include "Subsystems/EngineSubsystem.h"
+#include "Subsystems/LocalPlayerSubsystem.h"
+#include "Subsystems/Subsystem.h"
 #include "UObject/UObjectIterator.h"
 
 namespace
@@ -129,6 +135,59 @@ namespace
 		}
 
 		return FString::Join(Names, TEXT(", ")) + (bTruncated ? TEXT(", ...") : TEXT(""));
+	}
+
+	/** Busca de struct por nome, aceitando `MapPlayerKeyArgs` e `Map Player Key Args`. */
+	UScriptStruct* FindStructByFriendlyName(const FString& Name)
+	{
+		const FString Normalized = FNodeScribeCatalog::Normalize(Name);
+		if (Normalized.IsEmpty())
+		{
+			return nullptr;
+		}
+
+		for (TObjectIterator<UScriptStruct> StructIt; StructIt; ++StructIt)
+		{
+			UScriptStruct* Struct = *StructIt;
+
+			if (FNodeScribeCatalog::Normalize(Struct->GetName()) == Normalized
+				|| FNodeScribeCatalog::Normalize(Struct->GetDisplayNameText().ToString()) == Normalized)
+			{
+				return Struct;
+			}
+		}
+
+		return nullptr;
+	}
+
+	/**
+	 * O node de Get muda conforme onde o subsistema vive: um de LocalPlayer
+	 * precisa do PlayerController, um de Engine nao precisa de nada. Escolher
+	 * errado da' um node que nem compila.
+	 */
+	UClass* ChooseSubsystemNodeClass(UClass* SubsystemClass)
+	{
+		if (SubsystemClass->IsChildOf(ULocalPlayerSubsystem::StaticClass()))
+		{
+			return UK2Node_GetSubsystemFromPC::StaticClass();
+		}
+
+		if (SubsystemClass->IsChildOf(UEngineSubsystem::StaticClass()))
+		{
+			return UK2Node_GetEngineSubsystem::StaticClass();
+		}
+
+		// UEditorSubsystem vive num modulo que este plugin nao linka; procuramos
+		// a classe pelo caminho para nao criar a dependencia so' por isso.
+		static const UClass* EditorSubsystemClass =
+			FindObject<UClass>(nullptr, TEXT("/Script/EditorSubsystem.EditorSubsystem"));
+
+		if (EditorSubsystemClass && SubsystemClass->IsChildOf(EditorSubsystemClass))
+		{
+			return UK2Node_GetEditorSubsystem::StaticClass();
+		}
+
+		return UK2Node_GetSubsystem::StaticClass();
 	}
 
 	/** Busca de classe por nome curto, aceitando tanto `BP_Boss` quanto `BP_Boss_C`. */
@@ -924,6 +983,44 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		}
 	}
 
+	// --- Make / Break de struct ------------------------------------------
+	{
+		FString StructName;
+		bool bIsBreak = false;
+
+		if (Expression.StartsWith(TEXT("Make "), ESearchCase::IgnoreCase))
+		{
+			StructName = Expression.RightChop(5);
+		}
+		else if (Expression.StartsWith(TEXT("Break "), ESearchCase::IgnoreCase))
+		{
+			StructName = Expression.RightChop(6);
+			bIsBreak = true;
+		}
+
+		StructName.TrimStartAndEndInline();
+
+		// So' vira node de struct se a struct existir mesmo. `Make Literal Int`
+		// e afins continuam caindo no catalogo de funcoes, que e' onde moram.
+		if (UScriptStruct* Struct = FindStructByFriendlyName(StructName))
+		{
+			if (bIsBreak)
+			{
+				UK2Node_BreakStruct* Node = AllocateNode<UK2Node_BreakStruct>();
+				Node->StructType = Struct;
+				Node->bMadeAfterOverridePinRemoval = true;
+				FinalizeNode(Node);
+				return Node;
+			}
+
+			UK2Node_MakeStruct* Node = AllocateNode<UK2Node_MakeStruct>();
+			Node->StructType = Struct;
+			Node->bMadeAfterOverridePinRemoval = true;
+			FinalizeNode(Node);
+			return Node;
+		}
+	}
+
 	// --- Get / Set de variavel -------------------------------------------
 	{
 		FString VariableName;
@@ -962,6 +1059,26 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			Node->VariableReference.SetSelfMember(FName(*VariableName));
 			FinalizeNode(Node);
 			return Node;
+		}
+
+		// Nao e' variavel, mas pode ser subsistema: `Get EnhancedInputLocalPlayerSubsystem`.
+		// Esses nodes nao sao chamada de funcao e nunca apareceriam no catalogo.
+		if (!bIsSetter && !VariableName.IsEmpty())
+		{
+			if (UClass* SubsystemClass = FindClassByFriendlyName(VariableName))
+			{
+				if (SubsystemClass->IsChildOf(USubsystem::StaticClass()))
+				{
+					UClass* NodeClass = ChooseSubsystemNodeClass(SubsystemClass);
+
+					UK2Node_GetSubsystem* Node = NewObject<UK2Node_GetSubsystem>(Graph, NodeClass);
+					Graph->AddNode(Node, false, false);
+					Node->CreateNewGuid();
+					Node->Initialize(SubsystemClass);
+					FinalizeNode(Node);
+					return Node;
+				}
+			}
 		}
 	}
 
