@@ -1,0 +1,11 @@
+# Geradas pela Unreal ao compilar o plugin. Nada aqui vai para o repositorio.
+Binaries/
+Intermediate/
+Saved/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.sln
+*.suo
+*.VC.db
