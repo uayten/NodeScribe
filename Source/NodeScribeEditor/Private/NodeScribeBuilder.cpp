@@ -412,6 +412,17 @@ private:
 	UEdGraphNode* TryCreateSpecialNode(const FNodeScribeStatement& Statement, bool& bOutHandled);
 	UEdGraphNode* CreateErrorComment(const FNodeScribeStatement& Statement, const FString& Reason);
 
+	/**
+	 * Um evento com a mesma identidade ja' no grafo.
+	 *
+	 * A Unreal permite um node por evento: dois `BeginPlay`, ou dois eventos do
+	 * mesmo dispatcher, deixam o Blueprint sem compilar. Colar por cima de um
+	 * grafo que ja' tem o evento e' o jeito mais facil de cair nisso.
+	 */
+	UEdGraphNode* FindExistingEvent(const TFunctionRef<bool(UEdGraphNode*)>& Matches) const;
+
+	UEdGraphNode* CreateDuplicateEventComment(const FNodeScribeStatement& Statement, const FString& EventLabel);
+
 	// --- Ligacao ----------------------------------------------------------
 
 	void ApplyArguments(UEdGraphNode* Node, const FNodeScribeStatement& Statement);
@@ -1022,6 +1033,34 @@ UEdGraphNode* FNodeScribeBuildContext::CreateErrorComment(const FNodeScribeState
 	return Comment;
 }
 
+UEdGraphNode* FNodeScribeBuildContext::FindExistingEvent(const TFunctionRef<bool(UEdGraphNode*)>& Matches) const
+{
+	for (UEdGraphNode* Existing : Graph->Nodes)
+	{
+		if (Existing && Matches(Existing))
+		{
+			return Existing;
+		}
+	}
+
+	return nullptr;
+}
+
+UEdGraphNode* FNodeScribeBuildContext::CreateDuplicateEventComment(
+	const FNodeScribeStatement& Statement,
+	const FString& EventLabel)
+{
+	AddError(Statement.LineNumber, FString::Printf(
+		TEXT("O evento `%s` ja' existe neste grafo; a Unreal so' permite um."), *EventLabel));
+
+	return CreateErrorComment(Statement, FString::Printf(
+		TEXT("`%s` ja' existe neste grafo.\n\n")
+		TEXT("A Unreal so' permite um node por evento, entao nao criei outro nem mexi no que ja' estava la'.\n\n")
+		TEXT("A cadeia desta linha ficou sem inicio: ligue ela no evento que ja' existe, ")
+		TEXT("ou apague aquele node antes de colar."),
+		*EventLabel));
+}
+
 UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeStatement& Statement, bool& bOutHandled)
 {
 	bOutHandled = true;
@@ -1147,6 +1186,19 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 
 			if (EventFunction)
 			{
+				const FName WantedEvent = EventFunction->GetFName();
+
+				if (FindExistingEvent([&](UEdGraphNode* Existing)
+					{
+						const UK2Node_Event* EventNode = Cast<UK2Node_Event>(Existing);
+						return EventNode
+							&& EventNode->bOverrideFunction
+							&& EventNode->EventReference.GetMemberName() == WantedEvent;
+					}))
+				{
+					return CreateDuplicateEventComment(Statement, EventName);
+				}
+
 				UK2Node_Event* Node = AllocateNode<UK2Node_Event>();
 				Node->EventReference.SetExternalMember(EventFunction->GetFName(), EventFunction->GetOwnerClass());
 				Node->bOverrideFunction = true;
@@ -1206,6 +1258,21 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 							TEXT("`%s` nao expoe um dispatcher chamado `%s`."), *ComponentName, *DelegateName));
 					}
 
+					const FName WantedDelegate = DelegateProperty->GetFName();
+					const FName WantedComponent = ComponentProperty->GetFName();
+
+					if (FindExistingEvent([&](UEdGraphNode* Existing)
+						{
+							const UK2Node_ComponentBoundEvent* Bound = Cast<UK2Node_ComponentBoundEvent>(Existing);
+							return Bound
+								&& Bound->DelegatePropertyName == WantedDelegate
+								&& Bound->GetComponentPropertyName() == WantedComponent;
+						}))
+					{
+						return CreateDuplicateEventComment(Statement,
+							FString::Printf(TEXT("%s de %s"), *DelegateName, *ComponentName));
+					}
+
 					UK2Node_ComponentBoundEvent* Node = AllocateNode<UK2Node_ComponentBoundEvent>();
 					Node->InitializeComponentBoundEventParams(ComponentProperty, DelegateProperty);
 					FinalizeNode(Node);
@@ -1232,6 +1299,17 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 					TEXT("Um Custom Event com esse nome compilaria e nunca dispararia, entao nao criei nenhum.\n\n")
 					TEXT("Para fazer a mao: botao direito no grafo, procure `%s`, e escolha a opcao de evento."),
 					*DispatcherName, *DispatcherName));
+			}
+
+			const FName WantedCustomEvent(*EventName);
+
+			if (FindExistingEvent([&](UEdGraphNode* Existing)
+				{
+					const UK2Node_CustomEvent* CustomEvent = Cast<UK2Node_CustomEvent>(Existing);
+					return CustomEvent && CustomEvent->CustomFunctionName == WantedCustomEvent;
+				}))
+			{
+				return CreateDuplicateEventComment(Statement, EventName);
 			}
 
 			UK2Node_CustomEvent* Node = AllocateNode<UK2Node_CustomEvent>();

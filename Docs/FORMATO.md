@@ -232,6 +232,7 @@ Nada disso falha em silêncio:
 | Situação | O que acontece |
 |---|---|
 | Nome de node não encontrado | comentário **vermelho** no grafo com a linha original |
+| Evento que já existe no grafo | comentário vermelho; nada é criado nem alterado |
 | Nome ambíguo | comentário vermelho listando os candidatos, nenhum escolhido |
 | Pino inexistente | erro no painel listando os pinos que o node realmente tem |
 | `$algo` que não existe | erro no painel |
