@@ -840,7 +840,7 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 		if (UEdGraph* MacroGraph = FindStandardMacroGraph(Statement.NodeExpression))
 		{
 			UK2Node_MacroInstance* Node = AllocateNode<UK2Node_MacroInstance>();
-			Node->MacroGraphReference.SetGraph(MacroGraph);
+			Node->SetMacroGraph(MacroGraph);
 			FinalizeNode(Node);
 			return Node;
 		}
