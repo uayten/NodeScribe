@@ -515,6 +515,22 @@ private:
 	/** Nomes cuja linha nao resolveu, e em que linha isso aconteceu. */
 	TMap<FString, int32> FailedOutputs;
 
+	/**
+	 * Nodes de varias saidas de execucao ainda sem rotulo.
+	 *
+	 * O aviso so' pode sair no fim: na hora em que o node nasce, o rotulo que
+	 * o resolve costuma estar na linha seguinte, e avisar ali seria alarme
+	 * falso em todo Branch e todo laco bem escrito.
+	 */
+	struct FUnbranchedNode
+	{
+		UEdGraphNode* Node = nullptr;
+		int32 Line = 0;
+		FString Outputs;
+	};
+
+	TArray<FUnbranchedNode> UnbranchedNodes;
+
 	/** true quando o node nao participa do fluxo de execucao: e' so' um valor. */
 	bool IsPureDataNode(UEdGraphNode* Node) const;
 
@@ -1742,6 +1758,12 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 				continue;
 			}
 
+			// Este node ganhou rotulo: sai da lista de "parou sem escolher ramo".
+			UnbranchedNodes.RemoveAll([Owner](const FUnbranchedNode& Entry)
+			{
+				return Entry.Node == Owner;
+			});
+
 			FFrame Branch;
 			Branch.Indent = Statement.Indent;
 			Branch.PendingExec = FPinRef(Chosen);
@@ -1835,9 +1857,7 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 				Names.Add(Pin->PinName.ToString());
 			}
 
-			AddInfo(Statement.LineNumber, FString::Printf(
-				TEXT("Este node tem varias saidas (%s). Use rotulos indentados para continuar."),
-				*FString::Join(Names, TEXT(", "))));
+			UnbranchedNodes.Add({ Node, Statement.LineNumber, FString::Join(Names, TEXT(", ")) });
 		}
 		else
 		{
@@ -1845,6 +1865,14 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		}
 
 		Frame.LastNode = Node;
+	}
+
+	// So' agora da' para saber quais ficaram mesmo sem rotulo.
+	for (const FUnbranchedNode& Entry : UnbranchedNodes)
+	{
+		AddInfo(Entry.Line, FString::Printf(
+			TEXT("Este node tem varias saidas (%s) e nenhum rotulo indentado. A cadeia parou aqui."),
+			*Entry.Outputs));
 	}
 
 	LayoutDataNodes();
