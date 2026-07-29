@@ -1487,8 +1487,11 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		{
 			Schema->TrySetDefaultObject(*ClassPin, SpawnClass);
 
-			// E' a reconstrucao que faz nascerem os pinos de Expose on Spawn.
-			Node->ReconstructNode();
+			// `PinDefaultValueChanged` e' o hook que o editor dispara quando voce
+			// escolhe a classe no dropdown, e e' ele que cria os pinos de Expose
+			// on Spawn. `ReconstructNode` sozinho refaz o node com os pinos
+			// padrao -- o titulo ate' muda, o que engana, mas os pinos nao vem.
+			Node->PinDefaultValueChanged(ClassPin);
 		}
 
 		return Node;
@@ -1611,10 +1614,22 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 		return nullptr;
 	}
 
+	const FNodeScribeLookup Lookup = FNodeScribeCatalog::Get().FindFunction(
+		Statement.NodeExpression, GetSelfClass(), nullptr);
+
 	// Macros da biblioteca padrao (ForEachLoop, DoOnce, Gate...).
-	// Quando a linha nomeia uma saida (`x = ...`), o usuario quer um valor,
-	// entao a funcao pura tem prioridade sobre a macro de mesmo nome.
-	if (Statement.OutputName.IsEmpty())
+	//
+	// Nomear a saida (`x = ...`) faz uma funcao PURA de mesmo nome ter
+	// prioridade: `valido = Is Valid (...)` quer o bool, nao a macro. Mas so'
+	// quando essa funcao existe de fato -- `loop = For Each Loop (...)` nomeia
+	// a saida para poder escrever `$loop.Array Element`, e nao ha' funcao
+	// nenhuma com esse nome. Antes o nome sozinho descartava a macro, e o
+	// ForEachLoop nomeado simplesmente nao era encontrado.
+	const bool bPureFunctionWins = !Statement.OutputName.IsEmpty()
+		&& Lookup.IsConfident()
+		&& Lookup.Function->HasAnyFunctionFlags(FUNC_BlueprintPure);
+
+	if (!bPureFunctionWins)
 	{
 		if (UEdGraph* MacroGraph = FindStandardMacroGraph(Statement.NodeExpression))
 		{
@@ -1624,9 +1639,6 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 			return Node;
 		}
 	}
-
-	const FNodeScribeLookup Lookup = FNodeScribeCatalog::Get().FindFunction(
-		Statement.NodeExpression, GetSelfClass(), nullptr);
 
 	if (Lookup.IsConfident())
 	{
@@ -1685,6 +1697,14 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 			{
 				AddError(Statement.LineNumber, FString::Printf(
 					TEXT("O rotulo `%s:` nao tem node antes dele."), *Statement.Label));
+				continue;
+			}
+
+			// O node anterior nao resolveu e virou comentario. Reclamar que o
+			// rotulo nao casa com as saidas dele mandaria procurar o problema
+			// na linha errada -- a causa ja' foi relatada uma linha acima.
+			if (Owner->IsA<UEdGraphNode_Comment>())
+			{
 				continue;
 			}
 
