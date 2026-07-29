@@ -1,5 +1,6 @@
 #include "NodeScribeEditorModule.h"
 
+#include "NodeScribeGraphActions.h"
 #include "NodeScribeTypes.h"
 #include "SNodeScribePanel.h"
 
@@ -40,11 +41,15 @@ void FNodeScribeEditorModule::StartupModule()
 		.SetTooltipText(LOCTEXT("TabTooltip", "Transcreve uma lista de nodes em texto para nodes reais no Blueprint."))
 		.SetGroup(MenuStructure.GetToolsCategory());
 
-	UE_LOG(LogNodeScribe, Log, TEXT("NodeScribe pronto. Janela -> Ferramentas -> NodeScribe."));
+	FNodeScribeGraphActions::RegisterStartupHook();
+
+	UE_LOG(LogNodeScribe, Log, TEXT("NodeScribe pronto. Botoes na barra do editor de Blueprint."));
 }
 
 void FNodeScribeEditorModule::ShutdownModule()
 {
+	FNodeScribeGraphActions::Unregister();
+
 	if (FSlateApplication::IsInitialized())
 	{
 		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(TabName);

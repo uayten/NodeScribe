@@ -57,22 +57,6 @@ namespace
 			|| Category == UEdGraphSchema_K2::PC_Interface;
 	}
 
-	/** Nome como o usuario escreve: `ReceiveBeginPlay` -> `BeginPlay`. */
-	FString StripEventPrefix(const FString& FunctionName)
-	{
-		if (FunctionName.StartsWith(TEXT("Receive"), ESearchCase::CaseSensitive))
-		{
-			return FunctionName.RightChop(7);
-		}
-
-		if (FunctionName.StartsWith(TEXT("K2_"), ESearchCase::CaseSensitive))
-		{
-			return FunctionName.RightChop(3);
-		}
-
-		return FunctionName;
-	}
-
 	/** true para o que aparece na lista de eventos sobrescreviveis do grafo. */
 	bool IsOverridableEvent(const UFunction* Function)
 	{
@@ -127,7 +111,7 @@ namespace
 		{
 			if (IsOverridableEvent(*FunctionIt))
 			{
-				Names.AddUnique(StripEventPrefix(FunctionIt->GetName()));
+				Names.AddUnique(FNodeScribeCatalog::StripEventPrefix(FunctionIt->GetName()));
 			}
 		}
 

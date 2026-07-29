@@ -99,6 +99,21 @@ FString FNodeScribeCatalog::Normalize(const FString& In)
 	return Out;
 }
 
+FString FNodeScribeCatalog::StripEventPrefix(const FString& FunctionName)
+{
+	if (FunctionName.StartsWith(TEXT("Receive"), ESearchCase::CaseSensitive))
+	{
+		return FunctionName.RightChop(7);
+	}
+
+	if (FunctionName.StartsWith(TEXT("K2_"), ESearchCase::CaseSensitive))
+	{
+		return FunctionName.RightChop(3);
+	}
+
+	return FunctionName;
+}
+
 void FNodeScribeCatalog::Invalidate()
 {
 	Entries.Reset();

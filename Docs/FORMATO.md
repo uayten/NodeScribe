@@ -143,6 +143,26 @@ marcadores `-` e `*`, numeração `1.` / `1)`.
 
 ---
 
+## O caminho de volta
+
+**Copiar selecionado** e **Copiar grafo inteiro** produzem texto neste mesmo
+formato, pronto para colar num chat e editar.
+
+A tradução não é perfeita, e onde ela não é o plugin fala:
+
+| Situação | O que acontece |
+|---|---|
+| Cadeia de execução que reconverge | aviso: o formato é uma árvore, essa volta se perde |
+| Pino alimentado por node fora da seleção | aviso: o pino sai sem valor |
+| Node que o plugin não sabe nomear de volta | sai o título do node + aviso de que pode não voltar igual |
+| Valor com aspas dos dois tipos | aviso: não há escape, copie na mão |
+| Node de dado que não alimenta ninguém | nota: ficou de fora |
+
+Reroute (os pontinhos de organizar fio) some na volta — é layout, não lógica.
+Get de variável do próprio Blueprint vira `$Nome` direto, sem linha própria.
+
+---
+
 ## Quando não dá
 
 Nada disso falha em silêncio:

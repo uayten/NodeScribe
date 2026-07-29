@@ -22,14 +22,34 @@ O NodeScribe faz essa expansão localmente, de graça e sem errar um identificad
 
 ## Uso
 
-1. **Janela → Ferramentas → NodeScribe**
-2. Confira o **Destino** (qual Blueprint e qual grafo). Se acabou de abrir um
-   Blueprint, clique em **Atualizar**.
-3. Cole o texto.
-4. **Inserir no grafo** — os nodes aparecem. `Ctrl+Z` desfaz.
-   Ou **Copiar para clipboard** — não toca no asset; você cola com `Ctrl+V` onde quiser.
+Três botões na barra do editor de Blueprint, ao lado de **Compile**:
+
+| botão | o que faz |
+|---|---|
+| **Colar** | lê o texto do NodeScribe que está no clipboard e cria os nodes no grafo aberto. `Ctrl+Z` desfaz. |
+| **Copiar selecionado** | transcreve os nodes selecionados para texto. Não altera nada. |
+| **Copiar grafo inteiro** | idem, para o grafo todo. |
+
+Aparecem no editor de Blueprint comum, no de Widget e no de Animation.
+
+Avisos e erros vão para o **Message Log**, no canal *NodeScribe* — ele abre
+sozinho quando algo precisa da sua atenção e fica quieto quando não precisa.
+
+Para editar o texto antes de inserir, a janela continua lá:
+**Janela → Ferramentas → NodeScribe**.
 
 O formato do texto está em [`Docs/FORMATO.md`](Docs/FORMATO.md).
+
+## O ciclo completo
+
+`Copiar grafo inteiro` → cola no chat → o assistente lê e devolve o texto
+alterado → `Colar`. Um grafo de 15 nodes custa ~200 tokens nesse formato,
+contra ~15.000 no formato de clipboard da Unreal.
+
+O caminho de volta tem o mesmo cuidado do de ida: quando o grafo tem algo que
+o texto não sabe dizer — uma cadeia de execução que reconverge, um node sem
+nome estável, um pino que vem de fora da seleção — ele avisa em vez de emitir
+um texto que parece completo e volta diferente.
 
 ## Princípio de projeto
 
@@ -44,21 +64,15 @@ errado. Falhar em voz alta é sempre preferível.
 
 ## Estado
 
-Versão 0.1. Escrito contra UE 5.8, mas **ainda não executado nem uma vez**.
+Versão 0.2. UE 5.8.1, build limpa sem avisos.
 
-- **Compila e linka:** build limpa na UE 5.8.1 (MSVC 14.50), sem avisos. Três
-  correções foram necessárias: `MacroGraphReference` é privado (usar
-  `SetMacroGraph()`), `SNotificationItem` mora em `SNotificationList.h`, e
-  `FToolkitManager` migrou de `UnrealEd` para o módulo `EditorFramework`.
-- **Primeiro uso real:** funcionou. `evento BeginPlay` + `Print String` viraram
-  dois nodes ligados, com a string preenchida, via **Copiar para clipboard**.
-- **Pouco testado:** só esse caminho foi exercitado. Ramos, casts, macros,
-  variáveis e o botão **Inserir no grafo** continuam sendo intenção de projeto,
-  não observação.
-
-O caminho inverso (grafo → texto, para editar algo que já existe) não existe —
-hoje, para pedir ajuda com um grafo pronto, use um print ou selecione alguns
-nodes e cole o `Ctrl+C` no chat.
+- **Funciona, no mínimo:** `evento BeginPlay` + `Print String` viraram dois
+  nodes ligados, com a string preenchida.
+- **Pouco testado:** só esse caminho foi exercitado de ponta a ponta. Ramos,
+  casts, macros, variáveis, os três botões novos da barra e o caminho de volta
+  (grafo → texto) compilam, mas nunca rodaram.
+- **Idioma:** interface e mensagens em português. O formato aceita palavras em
+  PT e EN desde sempre (`evento`/`event`, `verdadeiro`/`true`).
 
 ## Limitações conhecidas
 

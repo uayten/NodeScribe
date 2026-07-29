@@ -48,6 +48,12 @@ public:
 	/** Normaliza para comparacao: minusculas, so letras e numeros. */
 	static FString Normalize(const FString& In);
 
+	/**
+	 * Nome do evento como o usuario escreve: `ReceiveBeginPlay` -> `BeginPlay`.
+	 * A Engine prefixa os eventos implementaveis; ninguem digita o prefixo.
+	 */
+	static FString StripEventPrefix(const FString& FunctionName);
+
 private:
 	struct FEntry
 	{

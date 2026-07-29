@@ -23,6 +23,7 @@ public class NodeScribeEditor : ModuleRules
 			"BlueprintGraph",
 			"KismetCompiler",
 			"Kismet",
+			"MessageLog",
 			"WorkspaceMenuStructure"
 		});
 	}
