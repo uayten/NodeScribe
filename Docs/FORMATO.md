@@ -45,6 +45,10 @@ Map Player Key (New Key = $tecla.Selected Key Key)
 
 Se o pino não existir, o plugin lista as saídas que o node realmente tem.
 
+Isso também alcança **parte de uma struct**. Se você pedir `$tecla.Selected Key
+Key` e o node só tiver o pino `Selected Key` inteiro, o plugin divide a struct
+(o mesmo que *Split Struct Pin*) para achar a parte pedida.
+
 ## Argumentos
 
 Entre parênteses, separados por vírgula. Aceita nome do pino ou posição:
@@ -195,7 +199,8 @@ Comentario Lógica de rebind começa aqui
 ## O que o parser ignora sozinho
 
 Ao colar uma resposta de chat, isto some sem atrapalhar: cercas ```` ``` ````,
-marcadores `-` e `*`, numeração `1.` / `1)`.
+marcadores `-` e `*`, e numeração de passo em qualquer forma comum —
+`1.`, `1)`, `[2]`, `3.1`.
 
 ---
 

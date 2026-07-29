@@ -425,6 +425,15 @@ private:
 	void RegisterOutput(const FString& Name, UEdGraphNode* Node, int32 Line);
 
 	UEdGraphPin* FindPinByFuzzyName(UEdGraphNode* Node, const FString& Name, EEdGraphPinDirection Direction) const;
+
+	/**
+	 * Divide um pino de struct quando o texto pede uma parte dele.
+	 *
+	 * No grafo, `Selected Key` pode aparecer dividido em `Selected Key Key`,
+	 * `Selected Key Shift` e afins. O node nasce sempre inteiro; sem dividir,
+	 * a metade pedida simplesmente nao existe e a ligacao se perde.
+	 */
+	UEdGraphPin* TrySplitToFindPin(UEdGraphNode* Node, const FString& PinPath);
 	static UEdGraphPin* FindExecInput(UEdGraphNode* Node);
 	static TArray<UEdGraphPin*> GetExecOutputs(UEdGraphNode* Node);
 	static UEdGraphPin* FindPrimaryOutput(UEdGraphNode* Node);
@@ -709,6 +718,52 @@ UEdGraphPin* FNodeScribeBuildContext::FindPinByFuzzyName(UEdGraphNode* Node, con
 	return nullptr;
 }
 
+UEdGraphPin* FNodeScribeBuildContext::TrySplitToFindPin(UEdGraphNode* Node, const FString& PinPath)
+{
+	const FString Wanted = FNodeScribeCatalog::Normalize(PinPath);
+
+	// Copia: dividir um pino mexe em Node->Pins durante a iteracao.
+	TArray<UEdGraphPin*> Candidates = Node->Pins;
+
+	for (UEdGraphPin* Pin : Candidates)
+	{
+		if (!Pin || Pin->Direction != EGPD_Output || IsExecPin(Pin) || Pin->SubPins.Num() > 0)
+		{
+			continue;
+		}
+
+		if (Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Struct)
+		{
+			continue;
+		}
+
+		// `Selected Key Key` comeca com `Selected Key`: e' parte dessa struct.
+		const FString PinName = FNodeScribeCatalog::Normalize(Pin->PinName.ToString());
+		const FString FriendlyName = Pin->PinFriendlyName.IsEmpty()
+			? PinName
+			: FNodeScribeCatalog::Normalize(Pin->PinFriendlyName.ToString());
+
+		if (!Wanted.StartsWith(PinName) && !Wanted.StartsWith(FriendlyName))
+		{
+			continue;
+		}
+
+		if (!Schema->CanSplitStructPin(*Pin))
+		{
+			continue;
+		}
+
+		Schema->SplitPin(Pin, false);
+
+		if (UEdGraphPin* Found = FindPinByFuzzyName(Node, PinPath, EGPD_Output))
+		{
+			return Found;
+		}
+	}
+
+	return nullptr;
+}
+
 void FNodeScribeBuildContext::Connect(UEdGraphPin* From, UEdGraphPin* To, int32 Line)
 {
 	if (!From || !To)
@@ -796,6 +851,11 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveReference(const FString& Name, int3
 	if (UEdGraphPin* Chosen = FindPinByFuzzyName(SourceNode, PinPath, EGPD_Output))
 	{
 		return Chosen;
+	}
+
+	if (UEdGraphPin* Split = TrySplitToFindPin(SourceNode, PinPath))
+	{
+		return Split;
 	}
 
 	TArray<FString> Available;

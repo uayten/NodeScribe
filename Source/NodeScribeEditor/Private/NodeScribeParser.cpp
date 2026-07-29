@@ -268,17 +268,40 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 			Line.TrimStartAndEndInline();
 		}
 
-		// Numeracao: `1. Print String` / `1) Print String`.
+		// Numeracao de passo, em todas as formas que um assistente costuma usar:
+		// `1. Print String`, `1) Print String`, `[2] Print String`, `3.1 Print
+		// String`. Sao rotulos de leitura humana; o node comeca depois deles.
 		{
-			int32 Digits = 0;
-			while (Digits < Line.Len() && FChar::IsDigit(Line[Digits]))
+			int32 Cursor = 0;
+
+			const bool bBracketed = Line.Len() > 0 && Line[0] == TEXT('[');
+			if (bBracketed)
 			{
-				++Digits;
+				++Cursor;
 			}
-			if (Digits > 0 && Digits < Line.Len() && (Line[Digits] == TEXT('.') || Line[Digits] == TEXT(')')))
+
+			const int32 NumberStart = Cursor;
+			while (Cursor < Line.Len() && (FChar::IsDigit(Line[Cursor]) || Line[Cursor] == TEXT('.')))
 			{
-				Line = Line.Mid(Digits + 1);
-				Line.TrimStartAndEndInline();
+				++Cursor;
+			}
+
+			const bool bHasDigits = Cursor > NumberStart;
+
+			if (bHasDigits && Cursor < Line.Len())
+			{
+				const TCHAR Terminator = Line[Cursor];
+
+				const bool bValidEnd = bBracketed
+					? (Terminator == TEXT(']'))
+					: (Terminator == TEXT('.') || Terminator == TEXT(')') || Terminator == TEXT(' '));
+
+				if (bValidEnd)
+				{
+					// O espaco nao faz parte do rotulo; os outros terminadores sim.
+					Line = Line.Mid(Terminator == TEXT(' ') ? Cursor : Cursor + 1);
+					Line.TrimStartAndEndInline();
+				}
 			}
 		}
 

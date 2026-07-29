@@ -238,6 +238,17 @@ namespace
 		}
 
 		Base.RemoveFromEnd(TEXT("__DelegateSignature"));
+
+		// `OnKeySelected of SelecionarInputKey` vira `onKeySelected`: o dono do
+		// dispatcher ja' esta' na linha, repeti-lo no nome so' faz ruido.
+		FString BeforeOwner;
+		FString Ignored;
+		if (Base.Split(TEXT(" of "), &BeforeOwner, &Ignored, ESearchCase::IgnoreCase)
+			|| Base.Split(TEXT(" de "), &BeforeOwner, &Ignored, ESearchCase::IgnoreCase))
+		{
+			Base = BeforeOwner;
+		}
+
 		return Base;
 	}
 
