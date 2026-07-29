@@ -40,6 +40,27 @@ Para editar o texto antes de inserir, a janela continua lá:
 
 O formato do texto está em [`Docs/FORMATO.md`](Docs/FORMATO.md).
 
+## Usando com um assistente de IA
+
+O assistente não adivinha o formato — ele precisa ler a especificação uma vez.
+
+Se você usa **Claude Code**, cole isto no `CLAUDE.md` do seu projeto e ele passa
+a saber sozinho, em toda conversa:
+
+```markdown
+## Grafos de Blueprint
+
+Ao entregar um grafo de Blueprint, use o formato do NodeScribe, especificado em
+`Plugins/NodeScribe/Docs/FORMATO.md`. Leia esse arquivo antes de escrever ou
+interpretar um grafo. Nunca descreva nodes em prosa.
+```
+
+Em qualquer outro assistente, cole o conteúdo de `Docs/FORMATO.md` no começo da
+conversa. São ~150 linhas, uma vez por conversa.
+
+O ciclo então fica: **Copiar grafo inteiro** → cola no chat → o assistente
+devolve o texto alterado → **Colar**.
+
 ## O ciclo completo
 
 `Copiar grafo inteiro` → cola no chat → o assistente lê e devolve o texto
