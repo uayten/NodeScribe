@@ -44,11 +44,21 @@ errado. Falhar em voz alta é sempre preferível.
 
 ## Estado
 
-Versão 0.1. Funciona no sentido texto → nodes.
+Versão 0.1. Escrito contra UE 5.8, mas **ainda não executado nem uma vez**.
 
-O caminho inverso (grafo → texto, para editar algo que já existe) ainda não
-existe — hoje, para pedir ajuda com um grafo pronto, use um print ou selecione
-alguns nodes e cole o `Ctrl+C` no chat.
+- **Compila:** a primeira build real (UE 5.8.1, MSVC 14.50) acusou dois erros,
+  ambos corrigidos — `MacroGraphReference` é privado (usar `SetMacroGraph()`) e
+  `SNotificationItem` mora em `SNotificationList.h`. Os outros cinco arquivos
+  passaram sem erro nem aviso.
+- **Não verificado:** o passo de *link* nunca chegou a rodar, então dependências
+  de módulo faltando em `NodeScribeEditor.Build.cs` ainda podem aparecer.
+- **Não testado:** nenhum node foi criado por este plugin até hoje. Todo o
+  comportamento descrito neste README e em `Docs/FORMATO.md` é intenção de
+  projeto, não observação.
+
+O caminho inverso (grafo → texto, para editar algo que já existe) não existe —
+hoje, para pedir ajuda com um grafo pronto, use um print ou selecione alguns
+nodes e cole o `Ctrl+C` no chat.
 
 ## Limitações conhecidas
 
