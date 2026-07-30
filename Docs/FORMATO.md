@@ -150,6 +150,18 @@ Só é tratado como variável se ela existir no Blueprint. Por isso
 `Get Player Controller` continua sendo a função, não uma variável chamada
 "Player Controller".
 
+### Variável de outro objeto
+
+Passe `Target`, e o plugin acha a variável na classe dele:
+
+```
+pc = Get Player Controller
+Set Show Mouse Cursor (Target = $pc, Show Mouse Cursor = true)
+```
+
+O nome pode ser o que aparece na tela: `Show Mouse Cursor` acha
+`bShowMouseCursor`.
+
 ### Variável que ainda não existe
 
 `$Alguma Coisa` que não existe **não perde a ligação**: o node de Get entra

@@ -537,6 +537,12 @@ private:
 	/** true se o Blueprint (ou um pai dele) tem uma variavel visivel com esse nome. */
 	bool IsBlueprintVariable(const FString& Name) const;
 
+	/** Classe do objeto apontado por `Target = $algo`, quando a linha tem um. */
+	UClass* FindTargetClassFromArgs(const FNodeScribeStatement& Statement) const;
+
+	/** Propriedade por nome tolerante: `Show Mouse Cursor` acha `bShowMouseCursor`. */
+	static FProperty* FindPropertyByFriendlyName(UClass* Class, const FString& Name);
+
 	UEdGraph* Graph = nullptr;
 	UBlueprint* Blueprint = nullptr;
 	FVector2D Origin = FVector2D::ZeroVector;
@@ -741,6 +747,77 @@ bool FNodeScribeBuildContext::IsBlueprintVariable(const FString& Name) const
 
 	const FProperty* Property = SelfClass->FindPropertyByName(FName(*Name));
 	return Property != nullptr && Property->HasAnyPropertyFlags(CPF_BlueprintVisible);
+}
+
+UClass* FNodeScribeBuildContext::FindTargetClassFromArgs(const FNodeScribeStatement& Statement) const
+{
+	for (const FNodeScribeArg& Arg : Statement.Args)
+	{
+		if (!Arg.bIsReference)
+		{
+			continue;
+		}
+
+		const FString PinName = FNodeScribeCatalog::Normalize(Arg.PinName);
+		if (PinName != TEXT("target") && PinName != TEXT("alvo") && PinName != TEXT("self"))
+		{
+			continue;
+		}
+
+		// Consulta sem efeito colateral: `ResolveReference` criaria nodes, e
+		// aqui ainda estamos decidindo se este node existe.
+		FString BaseName = Arg.Value;
+		FString Ignored;
+		BaseName.Split(TEXT("."), &BaseName, &Ignored);
+
+		const FPinRef* Ref = NamedOutputs.Find(BaseName);
+		if (!Ref)
+		{
+			continue;
+		}
+
+		UEdGraphPin* Pin = const_cast<FPinRef*>(Ref)->Resolve();
+		if (!Pin)
+		{
+			continue;
+		}
+
+		if (UClass* Class = Cast<UClass>(Pin->PinType.PinSubCategoryObject.Get()))
+		{
+			return Class;
+		}
+	}
+
+	return nullptr;
+}
+
+FProperty* FNodeScribeBuildContext::FindPropertyByFriendlyName(UClass* Class, const FString& Name)
+{
+	if (!Class)
+	{
+		return nullptr;
+	}
+
+	const FString Wanted = FNodeScribeCatalog::Normalize(Name);
+
+	for (TFieldIterator<FProperty> PropertyIt(Class); PropertyIt; ++PropertyIt)
+	{
+		FProperty* Property = *PropertyIt;
+		if (!Property->HasAnyPropertyFlags(CPF_BlueprintVisible))
+		{
+			continue;
+		}
+
+		// O nome interno de um bool leva `b` na frente, e o nome que aparece na
+		// tela nao. `Show Mouse Cursor` tem que achar `bShowMouseCursor`.
+		if (FNodeScribeCatalog::Normalize(Property->GetName()) == Wanted
+			|| FNodeScribeCatalog::Normalize(Property->GetDisplayNameText().ToString()) == Wanted)
+		{
+			return Property;
+		}
+	}
+
+	return nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -1665,6 +1742,31 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			Node->VariableReference.SetSelfMember(FName(*VariableName));
 			FinalizeNode(Node);
 			return Node;
+		}
+
+		// Variavel de OUTRO objeto: `Set Show Mouse Cursor (Target = $pc, ...)`.
+		// A classe sai do pino que `Target` aponta -- e' a mesma informacao que
+		// o editor usa quando voce arrasta de um pino de objeto e pede o Set.
+		if (!VariableName.IsEmpty())
+		{
+			if (UClass* TargetClass = FindTargetClassFromArgs(Statement))
+			{
+				if (FProperty* Property = FindPropertyByFriendlyName(TargetClass, VariableName))
+				{
+					if (bIsSetter)
+					{
+						UK2Node_VariableSet* Node = AllocateNode<UK2Node_VariableSet>();
+						Node->VariableReference.SetExternalMember(Property->GetFName(), TargetClass);
+						FinalizeNode(Node);
+						return Node;
+					}
+
+					UK2Node_VariableGet* Node = AllocateNode<UK2Node_VariableGet>();
+					Node->VariableReference.SetExternalMember(Property->GetFName(), TargetClass);
+					FinalizeNode(Node);
+					return Node;
+				}
+			}
 		}
 
 		// Nao e' variavel, mas pode ser subsistema: `Get EnhancedInputLocalPlayerSubsystem`.
