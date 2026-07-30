@@ -20,7 +20,13 @@
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_Knot.h"
+#include "K2Node_AddDelegate.h"
+#include "K2Node_BaseMCDelegate.h"
+#include "K2Node_CallDelegate.h"
+#include "K2Node_ClearDelegate.h"
 #include "K2Node_MacroInstance.h"
+#include "K2Node_RemoveDelegate.h"
+#include "K2Node_Select.h"
 #include "K2Node_SwitchEnum.h"
 #include "K2Node_SwitchInteger.h"
 #include "K2Node_SwitchName.h"
@@ -456,6 +462,26 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 	if (Node->IsA<UK2Node_ExecutionSequence>())
 	{
 		return TEXT("Sequence");
+	}
+
+	if (Node->IsA<UK2Node_Select>())
+	{
+		return TEXT("Select");
+	}
+
+	if (const UK2Node_BaseMCDelegate* Delegate = Cast<UK2Node_BaseMCDelegate>(Node))
+	{
+		const FString DelegateName = Delegate->GetPropertyName().ToString();
+
+		if (Node->IsA<UK2Node_CallDelegate>())   { return TEXT("Call ") + DelegateName; }
+		if (Node->IsA<UK2Node_AddDelegate>())    { return TEXT("Bind ") + DelegateName; }
+		if (Node->IsA<UK2Node_RemoveDelegate>()) { return TEXT("Unbind ") + DelegateName; }
+		if (Node->IsA<UK2Node_ClearDelegate>())  { return TEXT("Clear ") + DelegateName; }
+
+		OutRoundTripIssue = FString::Printf(
+			TEXT("`%s` mexe num dispatcher de um jeito que o formato ainda nao tem."), *ShortTitle(Node));
+
+		return ShortTitle(Node);
 	}
 
 	if (const UK2Node_SwitchEnum* SwitchEnum = Cast<UK2Node_SwitchEnum>(Node))

@@ -22,6 +22,11 @@
 #include "K2Node_FunctionResult.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_MacroInstance.h"
+#include "K2Node_AddDelegate.h"
+#include "K2Node_CallDelegate.h"
+#include "K2Node_ClearDelegate.h"
+#include "K2Node_RemoveDelegate.h"
+#include "K2Node_Select.h"
 #include "K2Node_Self.h"
 #include "K2Node_SwitchEnum.h"
 #include "K2Node_SwitchInteger.h"
@@ -1564,6 +1569,76 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 					TEXT("`%s` nao existe na classe pai; criei um Custom Event com esse nome."), *EventName));
 			}
 
+			return Node;
+		}
+	}
+
+	// --- Select ----------------------------------------------------------
+	if (Normalized == TEXT("select") || Normalized == TEXT("selecionar"))
+	{
+		UK2Node_Select* Node = AllocateNode<UK2Node_Select>();
+		FinalizeNode(Node);
+		return Node;
+	}
+
+	// --- Chamar / Vincular / Desvincular / Limpar dispatcher -------------
+	{
+		struct FDelegateForm
+		{
+			const TCHAR* Prefix;
+			int32 PrefixLength;
+			UClass* (*MakeClass)();
+		};
+
+		static const FDelegateForm DelegateForms[] = {
+			{ TEXT("Chamar "),      7,  []() { return UK2Node_CallDelegate::StaticClass(); } },
+			{ TEXT("Call "),        5,  []() { return UK2Node_CallDelegate::StaticClass(); } },
+			{ TEXT("Vincular "),    9,  []() { return UK2Node_AddDelegate::StaticClass(); } },
+			{ TEXT("Bind "),        5,  []() { return UK2Node_AddDelegate::StaticClass(); } },
+			{ TEXT("Desvincular "), 12, []() { return UK2Node_RemoveDelegate::StaticClass(); } },
+			{ TEXT("Unbind "),      7,  []() { return UK2Node_RemoveDelegate::StaticClass(); } },
+			{ TEXT("Limpar "),      7,  []() { return UK2Node_ClearDelegate::StaticClass(); } },
+			{ TEXT("Clear "),       6,  []() { return UK2Node_ClearDelegate::StaticClass(); } }
+		};
+
+		for (const FDelegateForm& Form : DelegateForms)
+		{
+			if (!Expression.StartsWith(Form.Prefix, ESearchCase::IgnoreCase))
+			{
+				continue;
+			}
+
+			FString DelegateName = Expression.RightChop(Form.PrefixLength);
+			DelegateName.TrimStartAndEndInline();
+
+			// Sem `Target`, o dispatcher e' deste Blueprint. Com ele, e' do
+			// objeto apontado -- mesma regra de `Set X (Target = $obj)`.
+			UClass* OwnerClass = FindTargetClassFromArgs(Statement);
+			const bool bSelfContext = (OwnerClass == nullptr);
+
+			if (bSelfContext)
+			{
+				OwnerClass = GetSelfClass();
+			}
+
+			FMulticastDelegateProperty* DelegateProperty = OwnerClass
+				? FindFProperty<FMulticastDelegateProperty>(OwnerClass, FName(*DelegateName))
+				: nullptr;
+
+			if (!DelegateProperty)
+			{
+				// Nao e' dispatcher: pode ser uma funcao que so' comeca com
+				// "Clear" ou "Call". Deixa o catalogo tentar.
+				break;
+			}
+
+			UK2Node_BaseMCDelegate* Node = static_cast<UK2Node_BaseMCDelegate*>(
+				NewObject<UEdGraphNode>(Graph, Form.MakeClass()));
+
+			Graph->AddNode(Node, false, false);
+			Node->CreateNewGuid();
+			Node->SetFromProperty(DelegateProperty, bSelfContext, OwnerClass);
+			FinalizeNode(Node);
 			return Node;
 		}
 	}

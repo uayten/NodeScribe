@@ -146,6 +146,26 @@ Os rótulos são os gatilhos: `Started`, `Triggered`, `Completed`, `Canceled`,
 Aceita o nome curto (`IA_Ataque`) se o asset já estiver carregado no editor,
 mas o caminho completo é o que sempre funciona.
 
+## Dispatchers
+
+```
+Call OnVidaMudou (Nova Vida = $vida)
+Bind OnVidaMudou
+Unbind OnVidaMudou
+Clear OnVidaMudou
+```
+
+Em PT: `Chamar`, `Vincular`, `Desvincular`, `Limpar`.
+
+Sem `Target`, o dispatcher é deste Blueprint. Com `Target = $obj`, é do objeto
+apontado. Para o **evento** de um dispatcher, veja `evento X de $Variavel`.
+
+## Select
+
+```
+Select (Index = $bEstaVivo, Option 0 = "morto", Option 1 = "vivo")
+```
+
 ## Cast
 
 ```
