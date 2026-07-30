@@ -598,6 +598,22 @@ private:
 	TMap<FString, int32> FailedOutputs;
 
 	/**
+	 * Linhas que criaram node e nao deram nome a' saida.
+	 *
+	 * Existe por causa de um erro que se comete o tempo todo: escrever
+	 * `evento X` e depois `$X`, esquecendo que so' `nome = evento X` cria a
+	 * referencia. Sem isso o plugin criava uma variavel chamada X, que nao e'
+	 * nem de longe o que a pessoa quis dizer.
+	 */
+	struct FUnnamedLine
+	{
+		int32 Line = 0;
+		FString Expression;
+	};
+
+	TArray<FUnnamedLine> UnnamedLines;
+
+	/**
 	 * Nodes de varias saidas de execucao ainda sem rotulo.
 	 *
 	 * O aviso so' pode sair no fim: na hora em que o node nasce, o rotulo que
@@ -1198,6 +1214,32 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 			*Name, *FailedLine));
 
 		return nullptr;
+	}
+
+	// Antes de tratar como variavel: o nome pode ser de uma linha anterior que
+	// simplesmente nao foi nomeada. Criar uma variavel nesse caso seria obedecer
+	// a letra e ignorar a intencao -- e o texto costuma vir de quem escreveu
+	// `evento X` e logo abaixo `$X`.
+	{
+		const FString Wanted = FNodeScribeCatalog::Normalize(Name);
+
+		// Nome curto casa por acaso com qualquer coisa; exigir tres letras
+		// evita transformar coincidencia em diagnostico.
+		if (Wanted.Len() >= 3)
+		{
+			for (const FUnnamedLine& Candidate : UnnamedLines)
+			{
+				if (FNodeScribeCatalog::Normalize(Candidate.Expression).Contains(Wanted))
+				{
+					AddError(Line, FString::Printf(
+						TEXT("`$%s` nao existe, mas a linha %d parece ser o que voce quis. ")
+						TEXT("Para poder referencia-la, de' nome a ela: escreva `%s = ` no comeco dela."),
+						*Name, Candidate.Line, *Name));
+
+					return nullptr;
+				}
+			}
+		}
 	}
 
 	// A variavel ainda nao existe. Em vez de descartar a ligacao, criamos o Get
@@ -2252,6 +2294,11 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		if (!Node->IsA<UEdGraphNode_Comment>())
 		{
 			ApplyArguments(Node, Statement);
+		}
+
+		if (Statement.OutputName.IsEmpty() && !Node->IsA<UEdGraphNode_Comment>())
+		{
+			UnnamedLines.Add({ Statement.LineNumber, Statement.NodeExpression });
 		}
 
 		if (!Statement.OutputName.IsEmpty())
