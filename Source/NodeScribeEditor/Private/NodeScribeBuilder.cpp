@@ -23,6 +23,10 @@
 #include "K2Node_IfThenElse.h"
 #include "K2Node_MacroInstance.h"
 #include "K2Node_Self.h"
+#include "K2Node_SwitchEnum.h"
+#include "K2Node_SwitchInteger.h"
+#include "K2Node_SwitchName.h"
+#include "K2Node_SwitchString.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "Subsystems/EngineSubsystem.h"
@@ -1560,6 +1564,75 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 					TEXT("`%s` nao existe na classe pai; criei um Custom Event com esse nome."), *EventName));
 			}
 
+			return Node;
+		}
+	}
+
+	// --- Switch on <Enum|Int|String|Name> --------------------------------
+	{
+		FString SwitchOn;
+
+		if (Expression.StartsWith(TEXT("Switch on "), ESearchCase::IgnoreCase))
+		{
+			SwitchOn = Expression.RightChop(10);
+		}
+		else if (Expression.StartsWith(TEXT("Switch "), ESearchCase::IgnoreCase))
+		{
+			SwitchOn = Expression.RightChop(7);
+		}
+
+		SwitchOn.TrimStartAndEndInline();
+
+		if (!SwitchOn.IsEmpty())
+		{
+			const FString NormalizedSwitch = FNodeScribeCatalog::Normalize(SwitchOn);
+
+			if (NormalizedSwitch == TEXT("int") || NormalizedSwitch == TEXT("integer"))
+			{
+				UK2Node_SwitchInteger* Node = AllocateNode<UK2Node_SwitchInteger>();
+				FinalizeNode(Node);
+				return Node;
+			}
+
+			if (NormalizedSwitch == TEXT("string"))
+			{
+				UK2Node_SwitchString* Node = AllocateNode<UK2Node_SwitchString>();
+				FinalizeNode(Node);
+				return Node;
+			}
+
+			if (NormalizedSwitch == TEXT("name"))
+			{
+				UK2Node_SwitchName* Node = AllocateNode<UK2Node_SwitchName>();
+				FinalizeNode(Node);
+				return Node;
+			}
+
+			// Sobrou enum. Cada valor dele vira uma saida de execucao, entao o
+			// enum precisa estar posto antes de alocar os pinos.
+			UEnum* Enum = nullptr;
+			for (TObjectIterator<UEnum> EnumIt; EnumIt; ++EnumIt)
+			{
+				if (FNodeScribeCatalog::Normalize(EnumIt->GetName()) == NormalizedSwitch)
+				{
+					Enum = *EnumIt;
+					break;
+				}
+			}
+
+			if (!Enum)
+			{
+				AddError(Statement.LineNumber, FString::Printf(
+					TEXT("Nao achei o enum `%s`."), *SwitchOn));
+
+				return CreateErrorComment(Statement, FString::Printf(
+					TEXT("Enum `%s` nao encontrado.\n\nUse o nome exato dele, como `EJSL4UBatteryLevel`."),
+					*SwitchOn));
+			}
+
+			UK2Node_SwitchEnum* Node = AllocateNode<UK2Node_SwitchEnum>();
+			Node->SetEnum(Enum);
+			FinalizeNode(Node);
 			return Node;
 		}
 	}

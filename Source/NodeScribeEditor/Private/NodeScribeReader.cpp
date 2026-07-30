@@ -21,6 +21,10 @@
 #include "K2Node_IfThenElse.h"
 #include "K2Node_Knot.h"
 #include "K2Node_MacroInstance.h"
+#include "K2Node_SwitchEnum.h"
+#include "K2Node_SwitchInteger.h"
+#include "K2Node_SwitchName.h"
+#include "K2Node_SwitchString.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 
@@ -452,6 +456,32 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 	if (Node->IsA<UK2Node_ExecutionSequence>())
 	{
 		return TEXT("Sequence");
+	}
+
+	if (const UK2Node_SwitchEnum* SwitchEnum = Cast<UK2Node_SwitchEnum>(Node))
+	{
+		if (const UEnum* Enum = SwitchEnum->GetEnum())
+		{
+			return TEXT("Switch on ") + Enum->GetName();
+		}
+
+		OutRoundTripIssue = TEXT("Switch de enum sem enum definido.");
+		return TEXT("Switch on ?");
+	}
+
+	if (Node->IsA<UK2Node_SwitchInteger>())
+	{
+		return TEXT("Switch on Int");
+	}
+
+	if (Node->IsA<UK2Node_SwitchString>())
+	{
+		return TEXT("Switch on String");
+	}
+
+	if (Node->IsA<UK2Node_SwitchName>())
+	{
+		return TEXT("Switch on Name");
 	}
 
 	if (const UK2Node_DynamicCast* CastNode = Cast<UK2Node_DynamicCast>(Node))

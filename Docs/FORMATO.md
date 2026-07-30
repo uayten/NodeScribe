@@ -91,6 +91,19 @@ Qualquer outro nome é comparado direto com o nome do pino de saída.
 Quando um node tem mais de uma saída de execução e você **não** abre um rótulo,
 a cadeia para ali de propósito — escolher um ramo por você seria adivinhar.
 
+## Switch
+
+```
+Switch on EJSL4UBatteryLevel (Selection = $nivel)
+  Empty:
+    Print String (In String = "sem bateria")
+  Full:
+    Print String (In String = "cheia")
+```
+
+Os rótulos são os valores do enum. Também `Switch on Int`, `Switch on String`
+e `Switch on Name`.
+
 ## Eventos
 
 ```
