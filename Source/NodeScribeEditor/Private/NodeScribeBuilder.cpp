@@ -187,6 +187,41 @@ namespace
 		return nullptr;
 	}
 
+	/**
+	 * Asset de um tipo qualquer, por caminho completo ou por nome curto.
+	 *
+	 * O nome curto so' alcanca o que ja' esta' carregado -- o suficiente para o
+	 * asset que voce acabou de abrir, e por isso vale a conveniencia. Quando
+	 * falha, quem chama manda usar o caminho, que sempre funciona.
+	 */
+	UObject* FindAssetByPathOrName(const TCHAR* ClassPath, const FString& Value)
+	{
+		if (Value.StartsWith(TEXT("/")))
+		{
+			return LoadObject<UObject>(nullptr, *Value);
+		}
+
+		UClass* AssetClass = FindObject<UClass>(nullptr, ClassPath);
+		if (!AssetClass)
+		{
+			return nullptr;
+		}
+
+		const FString Normalized = FNodeScribeCatalog::Normalize(Value);
+
+		for (TObjectIterator<UObject> ObjectIt; ObjectIt; ++ObjectIt)
+		{
+			UObject* Candidate = *ObjectIt;
+			if (Candidate->IsA(AssetClass)
+				&& FNodeScribeCatalog::Normalize(Candidate->GetName()) == Normalized)
+			{
+				return Candidate;
+			}
+		}
+
+		return nullptr;
+	}
+
 	/** Busca de struct por nome, aceitando `MapPlayerKeyArgs` e `Map Player Key Args`. */
 	UScriptStruct* FindStructByFriendlyName(const FString& Name)
 	{
@@ -1450,6 +1485,47 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 
 			return Node;
 		}
+	}
+
+	// --- EnhancedInputAction <Action> ------------------------------------
+	if (Expression.StartsWith(TEXT("EnhancedInputAction "), ESearchCase::IgnoreCase))
+	{
+		FString ActionName = Expression.RightChop(20);
+		ActionName.TrimStartAndEndInline();
+
+		// Resolvido por caminho para nao arrastar o modulo InputBlueprintNodes
+		// como dependencia: o plugin nao deve exigir Enhanced Input instalado.
+		UClass* NodeClass = FindObject<UClass>(nullptr, TEXT("/Script/InputBlueprintNodes.K2Node_EnhancedInputAction"));
+		if (!NodeClass)
+		{
+			AddError(Statement.LineNumber, TEXT("O plugin Enhanced Input nao esta' habilitado neste projeto."));
+			return CreateErrorComment(Statement, TEXT("Enhanced Input nao esta' habilitado."));
+		}
+
+		UObject* Action = FindAssetByPathOrName(TEXT("/Script/EnhancedInput.InputAction"), ActionName);
+		if (!Action)
+		{
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("Nao achei a Input Action `%s`. Use o caminho completo se ela nao estiver aberta."), *ActionName));
+
+			return CreateErrorComment(Statement, FString::Printf(
+				TEXT("Input Action `%s` nao encontrada.\n\nUse o caminho completo, algo como\n/Game/.../IA_Ataque.IA_Ataque"),
+				*ActionName));
+		}
+
+		UEdGraphNode* Node = NewObject<UEdGraphNode>(Graph, NodeClass);
+		Graph->AddNode(Node, false, false);
+		Node->CreateNewGuid();
+
+		// A action define quais pinos de gatilho existem (Started, Triggered,
+		// Completed...), entao ela precisa estar posta antes de alocar pinos.
+		if (FObjectProperty* ActionProperty = FindFProperty<FObjectProperty>(NodeClass, TEXT("InputAction")))
+		{
+			ActionProperty->SetObjectPropertyValue_InContainer(Node, Action);
+		}
+
+		FinalizeNode(Node);
+		return Node;
 	}
 
 	// --- Create Widget / Spawn Actor from Class --------------------------

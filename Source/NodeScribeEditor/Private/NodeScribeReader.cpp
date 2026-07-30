@@ -517,6 +517,25 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		return TEXT("Break ?");
 	}
 
+	// Evento de Input Action. A classe vem por nome porque o modulo dela nao e'
+	// dependencia deste plugin -- Enhanced Input pode nem estar instalado.
+	if (Node->GetClass()->GetName() == TEXT("K2Node_EnhancedInputAction"))
+	{
+		if (const FObjectProperty* ActionProperty =
+			FindFProperty<FObjectProperty>(Node->GetClass(), TEXT("InputAction")))
+		{
+			if (const UObject* Action = ActionProperty->GetObjectPropertyValue_InContainer(Node))
+			{
+				// Caminho completo: o nome curto so' resolve se o asset ja'
+				// estiver carregado, e um texto colado dias depois nao garante isso.
+				return TEXT("EnhancedInputAction ") + Action->GetPathName();
+			}
+		}
+
+		OutRoundTripIssue = TEXT("Node de Input Action sem action definida.");
+		return TEXT("EnhancedInputAction ?");
+	}
+
 	if (Node->IsA<UK2Node_ConstructObjectFromClass>())
 	{
 		// O titulo muda com a classe escolhida ("Create WBP_X Widget"), entao

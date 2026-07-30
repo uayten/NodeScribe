@@ -119,6 +119,20 @@ sobe para **amarelo** e lista os eventos que a classe pai realmente oferece.
 Um Custom Event chamado `BeginPlay` compila, parece certo no grafo, e nunca
 dispara; é o tipo de erro que só aparece em playtest.
 
+## Evento de Input Action
+
+```
+EnhancedInputAction /Game/BossRush/Player/Inputs/IA_Ataque.IA_Ataque
+  Started:
+    Print String (In String = "atacou")
+```
+
+Os rótulos são os gatilhos: `Started`, `Triggered`, `Completed`, `Canceled`,
+`Ongoing`.
+
+Aceita o nome curto (`IA_Ataque`) se o asset já estiver carregado no editor,
+mas o caminho completo é o que sempre funciona.
+
 ## Cast
 
 ```

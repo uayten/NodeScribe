@@ -62,11 +62,24 @@ namespace
 		return static_cast<FBlueprintEditor*>(Toolkit.Get());
 	}
 
-	void ShowToast(const FText& Message, bool bSuccess)
+	void ShowToast(const FText& Message, bool bSuccess, bool bOfferLog = false)
 	{
 		FNotificationInfo Info(Message);
 		Info.ExpireDuration = 5.0f;
 		Info.bFireAndForget = true;
+
+		// Link em vez de abrir sozinho: `FMessageLog::Open` traz para a frente a
+		// aba onde o log foi ancorado da primeira vez, que costuma ser dentro de
+		// OUTRO editor de asset. O efeito era o editor pular de Blueprint no meio
+		// do trabalho -- barulho que nao vale o atalho.
+		if (bOfferLog)
+		{
+			Info.HyperlinkText = LOCTEXT("OpenLog", "Ver detalhes no Message Log");
+			Info.Hyperlink = FSimpleDelegate::CreateLambda([]()
+			{
+				FMessageLog(FNodeScribeGraphActions::LogListingName).Open(EMessageSeverity::Info, true);
+			});
+		}
 
 		TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info);
 		if (Item.IsValid())
@@ -110,16 +123,7 @@ namespace
 			Log.Message(ToMessageSeverity(Diagnostic.Severity), FText::FromString(Prefix + Diagnostic.Message));
 		}
 
-		ShowToast(Summary, ErrorCount == 0);
-
-		if (ErrorCount > 0)
-		{
-			Log.Open(EMessageSeverity::Error, false);
-		}
-		else if (WarningCount > 0)
-		{
-			Log.Open(EMessageSeverity::Warning, false);
-		}
+		ShowToast(Summary, ErrorCount == 0, Diagnostics.Num() > 0);
 	}
 
 	// --- Acoes -----------------------------------------------------------
