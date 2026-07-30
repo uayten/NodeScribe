@@ -58,11 +58,8 @@ conversa. São ~150 linhas, uma vez por conversa.
 O ciclo então fica: **Copiar grafo inteiro** → cola no chat → o assistente
 devolve o texto alterado → **Colar**.
 
-## O ciclo completo
-
-`Copiar grafo inteiro` → cola no chat → o assistente lê e devolve o texto
-alterado → `Colar`. Um grafo de 15 nodes custa ~200 tokens nesse formato,
-contra ~15.000 no formato de clipboard da Unreal.
+Um grafo de 15 nodes custa ~200 tokens nesse formato, contra ~15.000 no
+formato de clipboard da Unreal.
 
 O caminho de volta tem o mesmo cuidado do de ida: quando o grafo tem algo que
 o texto não sabe dizer — uma cadeia de execução que reconverge, um node sem
@@ -82,13 +79,14 @@ errado. Falhar em voz alta é sempre preferível.
 
 ## Estado
 
-Versão 0.2. UE 5.8.1, build limpa sem avisos.
+Versão 0.3. UE 5.8.1, build limpa sem avisos.
 
-- **Funciona, no mínimo:** `evento BeginPlay` + `Print String` viraram dois
-  nodes ligados, com a string preenchida.
-- **Pouco testado:** só esse caminho foi exercitado de ponta a ponta. Ramos,
-  casts, macros, variáveis, os três botões novos da barra e o caminho de volta
-  (grafo → texto) compilam, mas nunca rodaram.
+- **Exercitado num projeto real:** ida e volta em grafos de UI e de gameplay.
+  Rodaram: eventos (override, custom, de dispatcher, de Input Action), Branch,
+  For Each Loop, Switch, Cast, structs (Make/Break e pino dividido),
+  subsistemas, Create Widget com Expose on Spawn, variáveis próprias e de
+  outro objeto, e os três botões.
+- **Compila mas nunca rodou:** Select, Call/Bind/Unbind de dispatcher.
 - **Idioma:** interface e mensagens em português. O formato aceita palavras em
   PT e EN desde sempre (`evento`/`event`, `verdadeiro`/`true`).
 
@@ -99,8 +97,6 @@ Versão 0.2. UE 5.8.1, build limpa sem avisos.
 - Layout é simples: execução da esquerda para a direita, uma coluna por passo;
   os nodes de dado descem em pilha embaixo do passo que os consome, recuando
   à esquerda conforme afundam na cadeia. Legível, não bonito.
-- Dos dispatchers, só o **evento vinculado** (`evento X de $Variavel`) existe.
-  Chamar, vincular e desvincular ainda não têm forma.
 - Timeline e variáveis locais ainda não têm forma.
 - Nodes assíncronos/latentes (`Delay`, AbilityTasks) entram como qualquer função,
   mas as saídas extras exigem rótulos explícitos.
