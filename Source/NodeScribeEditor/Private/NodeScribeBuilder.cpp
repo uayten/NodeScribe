@@ -231,6 +231,38 @@ namespace
 		return nullptr;
 	}
 
+	/**
+	 * Dispatcher por nome tolerante.
+	 *
+	 * O nome de um dispatcher e' digitado a mao e aceita espaco -- inclusive no
+	 * fim, onde ninguem ve'. O parser apara os espacos da linha, entao a busca
+	 * exata nunca acharia `OnVidaMudou ` a partir de `Call OnVidaMudou`.
+	 */
+	FMulticastDelegateProperty* FindDelegateByFriendlyName(UClass* Class, const FString& Name)
+	{
+		if (!Class || Name.IsEmpty())
+		{
+			return nullptr;
+		}
+
+		if (FMulticastDelegateProperty* Exact = FindFProperty<FMulticastDelegateProperty>(Class, FName(*Name)))
+		{
+			return Exact;
+		}
+
+		const FString Wanted = FNodeScribeCatalog::Normalize(Name);
+
+		for (TFieldIterator<FMulticastDelegateProperty> It(Class); It; ++It)
+		{
+			if (FNodeScribeCatalog::Normalize(It->GetName()) == Wanted)
+			{
+				return *It;
+			}
+		}
+
+		return nullptr;
+	}
+
 	/** Busca de struct por nome, aceitando `MapPlayerKeyArgs` e `Map Player Key Args`. */
 	UScriptStruct* FindStructByFriendlyName(const FString& Name)
 	{
@@ -1473,7 +1505,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 					}
 
 					FMulticastDelegateProperty* DelegateProperty =
-						FindFProperty<FMulticastDelegateProperty>(ComponentProperty->PropertyClass, FName(*DelegateName));
+						FindDelegateByFriendlyName(ComponentProperty->PropertyClass, DelegateName);
 
 					if (!DelegateProperty)
 					{
@@ -1630,9 +1662,8 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 				OwnerClass = GetSelfClass();
 			}
 
-			FMulticastDelegateProperty* DelegateProperty = OwnerClass
-				? FindFProperty<FMulticastDelegateProperty>(OwnerClass, FName(*DelegateName))
-				: nullptr;
+			FMulticastDelegateProperty* DelegateProperty =
+				FindDelegateByFriendlyName(OwnerClass, DelegateName);
 
 			if (!DelegateProperty)
 			{
