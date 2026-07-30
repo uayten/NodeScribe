@@ -16,15 +16,13 @@ public class NodeScribeEditor : ModuleRules
 			"Slate",
 			"SlateCore",
 			"UnrealEd",
-			"EditorFramework",
 			"ToolMenus",
 			"Projects",
 			"GraphEditor",
 			"BlueprintGraph",
 			"KismetCompiler",
 			"Kismet",
-			"MessageLog",
-			"WorkspaceMenuStructure"
+			"MessageLog"
 		});
 	}
 }

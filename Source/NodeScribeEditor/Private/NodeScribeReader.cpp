@@ -991,8 +991,20 @@ void FNodeScribeReadContext::Run()
 			continue;
 		}
 
+		// Raiz e' quem nao recebe execucao de dentro do que foi selecionado.
+		//
+		// Olhar so' "o pino esta' ligado?" quebrava Copiar selecionado: numa
+		// selecao no meio da cadeia, o primeiro node recebe execucao de fora
+		// dela, entao nenhum node era raiz e o texto saia vazio.
 		UEdGraphPin* ExecInput = FindExecInput(Node);
-		if (!ExecInput || FollowToSourcePin(ExecInput) == nullptr)
+		if (!ExecInput)
+		{
+			Roots.Add(Node);
+			continue;
+		}
+
+		UEdGraphPin* ExecSource = FollowToSourcePin(ExecInput);
+		if (!ExecSource || !Scope.Contains(ExecSource->GetOwningNode()))
 		{
 			Roots.Add(Node);
 		}

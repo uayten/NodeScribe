@@ -30,6 +30,5 @@ errado. Ao mexer aqui, preserve isso — em caso de dúvida, falhe em voz alta.
 | `NodeScribeBuilder` | statements → nodes reais, ligados e posicionados. |
 | `NodeScribeReader` | o caminho de volta: nodes → texto. |
 | `NodeScribeGraphActions` | os três botões na barra do editor. |
-| `SNodeScribePanel` | a janela, para editar o texto antes de inserir. |
 
 Leitor e builder são espelhos: ao ensinar um tipo de node novo, os dois mudam.

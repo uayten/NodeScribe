@@ -1,75 +1,7 @@
 #include "NodeScribeTarget.h"
 
-#include "BlueprintEditor.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
-#include "Editor.h"
-#include "Engine/Blueprint.h"
-#include "Subsystems/AssetEditorSubsystem.h"
-#include "Toolkits/ToolkitManager.h"
-
-FText FNodeScribeTarget::GetDisplayText() const
-{
-	if (!IsValid())
-	{
-		return NSLOCTEXT("NodeScribe", "InvalidTarget", "(grafo fechado)");
-	}
-
-	return FText::FromString(FString::Printf(
-		TEXT("%s  \x2192  %s"),
-		*Blueprint->GetName(),
-		*Graph->GetName()));
-}
-
-TArray<TSharedPtr<FNodeScribeTarget>> FNodeScribeTarget::FindAllOpen()
-{
-	TArray<TSharedPtr<FNodeScribeTarget>> Targets;
-
-	if (!GEditor)
-	{
-		return Targets;
-	}
-
-	UAssetEditorSubsystem* AssetEditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
-	if (!AssetEditorSubsystem)
-	{
-		return Targets;
-	}
-
-	for (UObject* Asset : AssetEditorSubsystem->GetAllEditedAssets())
-	{
-		UBlueprint* Blueprint = Cast<UBlueprint>(Asset);
-		if (!Blueprint)
-		{
-			continue;
-		}
-
-		TSharedPtr<IToolkit> Toolkit = FToolkitManager::Get().FindEditorForAsset(Asset);
-		if (!Toolkit.IsValid() || !Toolkit->IsBlueprintEditor())
-		{
-			continue;
-		}
-
-		FBlueprintEditor* BlueprintEditor = StaticCastSharedPtr<FBlueprintEditor>(Toolkit).Get();
-		if (!BlueprintEditor)
-		{
-			continue;
-		}
-
-		UEdGraph* FocusedGraph = BlueprintEditor->GetFocusedGraph();
-		if (!FocusedGraph)
-		{
-			continue;
-		}
-
-		TSharedPtr<FNodeScribeTarget> Target = MakeShared<FNodeScribeTarget>();
-		Target->Blueprint = Blueprint;
-		Target->Graph = FocusedGraph;
-		Targets.Add(Target);
-	}
-
-	return Targets;
-}
 
 FVector2D FNodeScribeTarget::FindFreeOrigin(const UEdGraph* Graph)
 {

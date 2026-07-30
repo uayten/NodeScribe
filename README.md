@@ -32,11 +32,8 @@ Três botões na barra do editor de Blueprint, ao lado de **Compile**:
 
 Aparecem no editor de Blueprint comum, no de Widget e no de Animation.
 
-Avisos e erros vão para o **Message Log**, no canal *NodeScribe* — ele abre
-sozinho quando algo precisa da sua atenção e fica quieto quando não precisa.
-
-Para editar o texto antes de inserir, a janela continua lá:
-**Janela → Ferramentas → NodeScribe**.
+Avisos e erros vão para o **Message Log**, no canal *NodeScribe*. O aviso
+aparece como notificação; o link nela abre o log com os detalhes.
 
 O formato do texto está em [`Docs/FORMATO.md`](Docs/FORMATO.md).
 
