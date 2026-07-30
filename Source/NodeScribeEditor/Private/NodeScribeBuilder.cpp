@@ -736,6 +736,15 @@ UClass* FNodeScribeBuildContext::GetSelfClass() const
 		return nullptr;
 	}
 
+	// O esqueleto reflete o Blueprint como ele esta' agora, com as variaveis e
+	// dispatchers que voce acabou de criar. GeneratedClass so' alcanca o que ja'
+	// foi compilado, e ninguem compila antes de colar -- e' o esqueleto que o
+	// proprio editor usa para montar o grafo.
+	if (Blueprint->SkeletonGeneratedClass)
+	{
+		return Blueprint->SkeletonGeneratedClass;
+	}
+
 	return Blueprint->GeneratedClass ? Blueprint->GeneratedClass.Get() : Blueprint->ParentClass.Get();
 }
 
