@@ -2012,10 +2012,49 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 		return CreateErrorComment(Statement, Reason);
 	}
 
-	AddError(Statement.LineNumber, FString::Printf(
-		TEXT("Nao achei nenhum node chamado `%s`."), *Statement.NodeExpression));
+	// A linha comeca com verbo de dispatcher e mesmo assim nao virou node: em vez
+	// de repetir "nao achei", diga quais dispatchers a classe realmente tem. E'
+	// a diferenca entre "errei o nome" e "esse recurso nao existe".
+	FString DelegateHint;
+	{
+		static const TCHAR* const DelegateVerbs[] = {
+			TEXT("Chamar "), TEXT("Call "), TEXT("Vincular "), TEXT("Bind "),
+			TEXT("Desvincular "), TEXT("Unbind "), TEXT("Limpar "), TEXT("Clear ")
+		};
 
-	return CreateErrorComment(Statement, TEXT("Nenhum node com esse nome foi encontrado."));
+		const FString Expression = Statement.NodeExpression.TrimStartAndEnd();
+
+		for (const TCHAR* Verb : DelegateVerbs)
+		{
+			if (!Expression.StartsWith(Verb, ESearchCase::IgnoreCase))
+			{
+				continue;
+			}
+
+			TArray<FString> Available;
+			if (UClass* SelfClass = GetSelfClass())
+			{
+				for (TFieldIterator<FMulticastDelegateProperty> It(SelfClass); It; ++It)
+				{
+					Available.Add(It->GetName());
+				}
+			}
+
+			DelegateHint = Available.Num() > 0
+				? FString::Printf(TEXT("\n\nSe era um dispatcher: os deste Blueprint sao %s"),
+					*FString::Join(Available, TEXT(", ")))
+				: TEXT("\n\nSe era um dispatcher: este Blueprint nao tem nenhum.");
+
+			break;
+		}
+	}
+
+	AddError(Statement.LineNumber, FString::Printf(
+		TEXT("Nao achei nenhum node chamado `%s`.%s"),
+		*Statement.NodeExpression, *DelegateHint.Replace(TEXT("\n\n"), TEXT(" "))));
+
+	return CreateErrorComment(Statement,
+		TEXT("Nenhum node com esse nome foi encontrado.") + DelegateHint);
 }
 
 // ---------------------------------------------------------------------------
