@@ -297,6 +297,14 @@ marcadores `-` e `*`, e numeração de passo em qualquer forma comum —
 **Copiar selecionado** e **Copiar grafo inteiro** produzem texto neste mesmo
 formato, pronto para colar num chat e editar.
 
+A primeira linha diz de onde o texto veio:
+
+```
+# WBP_LinhaRemapear -> EventGraph (selecao parcial)
+```
+
+É comentário, então some sozinha na volta.
+
 A tradução não é perfeita, e onde ela não é o plugin fala:
 
 | Situação | O que acontece |

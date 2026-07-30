@@ -1003,6 +1003,25 @@ void FNodeScribeReadContext::Run()
 
 	CollectConsumedNodes();
 
+	// Cabecalho: quem le' esse texto num chat nao tem como saber de onde ele
+	// veio, e "qual asset e' esse" e' a primeira pergunta. Sai como comentario,
+	// entao o parser ignora quando o texto volta.
+	if (UEdGraph* SourceGraph = Nodes.Num() > 0 && Nodes[0] ? Nodes[0]->GetGraph() : nullptr)
+	{
+		FString Header = FString::Printf(TEXT("# %s -> %s"),
+			Blueprint ? *Blueprint->GetName() : TEXT("?"),
+			*SourceGraph->GetName());
+
+		// Sem isso, um trecho parece um grafo inteiro com nodes faltando.
+		if (Nodes.Num() < SourceGraph->Nodes.Num())
+		{
+			Header += TEXT(" (selecao parcial)");
+		}
+
+		Lines.Add(Header);
+		Lines.Add(FString());
+	}
+
 	// Caixas de comentario primeiro: sao contexto, nao passo de execucao.
 	TArray<UEdGraphNode*> Comments;
 	for (UEdGraphNode* Node : Nodes)
