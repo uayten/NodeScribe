@@ -711,10 +711,11 @@ void FNodeScribeBuildContext::LayoutDataNodes()
 	{
 		TArray<FDataNode>& Group = Pair.Value;
 
-		// Quem alimenta a execucao diretamente fica logo abaixo dela; as
-		// dependencias mais fundas descem, recuando para a esquerda, de modo
-		// que os fios de dado corram todos para cima e para a direita.
-		Group.Sort([](const FDataNode& A, const FDataNode& B) { return A.Depth < B.Depth; });
+		// Quem alimenta a execucao diretamente fica no topo da pilha, e as
+		// dependencias descem a partir dele: lendo de cima para baixo, voce vai
+		// do valor pronto para de onde ele veio, que e' a ordem em que se
+		// pergunta "e isso ai', de onde saiu?".
+		Group.Sort([](const FDataNode& A, const FDataNode& B) { return A.Depth > B.Depth; });
 
 		for (int32 Row = 0; Row < Group.Num(); ++Row)
 		{
