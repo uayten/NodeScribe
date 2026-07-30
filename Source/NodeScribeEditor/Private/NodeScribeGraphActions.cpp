@@ -109,10 +109,18 @@ namespace
 		const TArray<FNodeScribeDiagnostic>& Diagnostics,
 		int32 ErrorCount,
 		int32 WarningCount,
-		const FText& Summary)
+		const FText& Summary,
+		const FString& SourceLabel = FString())
 	{
 		FMessageLog Log(FNodeScribeGraphActions::LogListingName);
-		Log.NewPage(Summary);
+
+		// O canal do Message Log e' um so' para o editor inteiro, e a aba dele
+		// fica ancorada onde foi aberta pela primeira vez -- pode ser outro
+		// asset. Nao da' para mover a aba, entao a pagina diz de onde veio.
+		Log.NewPage(SourceLabel.IsEmpty()
+			? Summary
+			: FText::Format(NSLOCTEXT("NodeScribe", "LogPage", "{0}  -  {1}"),
+				FText::FromString(SourceLabel), Summary));
 
 		for (const FNodeScribeDiagnostic& Diagnostic : Diagnostics)
 		{
@@ -266,7 +274,8 @@ namespace
 				LOCTEXT("PasteDone", "{0} node(s) colados. Ctrl+Z desfaz."),
 				FText::AsNumber(Result.CreatedNodes.Num()));
 
-		Report(Result.Diagnostics, Result.ErrorCount, Result.WarningCount, Summary);
+		Report(Result.Diagnostics, Result.ErrorCount, Result.WarningCount, Summary,
+			FString::Printf(TEXT("%s -> %s"), *Blueprint->GetName(), *Graph->GetName()));
 	}
 
 	bool HasGraph(const FToolMenuContext& Context)

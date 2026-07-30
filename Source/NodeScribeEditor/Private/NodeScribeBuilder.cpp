@@ -622,6 +622,9 @@ private:
 	 */
 	UEdGraphNode* FindConsumingExecNode(UEdGraphNode* Node, int32& OutDepth) const;
 
+	/** Quantos saltos de dado ainda faltam ate' o fim da cadeia. 0 = ninguem consome. */
+	int32 DataChainRemaining(UEdGraphNode* Node) const;
+
 	/**
 	 * Posiciona todos os nodes de dado, depois que o grafo inteiro existe.
 	 *
@@ -678,6 +681,36 @@ UEdGraphNode* FNodeScribeBuildContext::FindConsumingExecNode(UEdGraphNode* Node,
 	return nullptr;
 }
 
+int32 FNodeScribeBuildContext::DataChainRemaining(UEdGraphNode* Node) const
+{
+	int32 Hops = 0;
+	UEdGraphNode* Current = Node;
+
+	for (int32 Guard = 0; Guard < 64; ++Guard)
+	{
+		UEdGraphNode* Next = nullptr;
+
+		for (UEdGraphPin* Pin : Current->Pins)
+		{
+			if (Pin->Direction == EGPD_Output && !IsExecPin(Pin) && Pin->LinkedTo.Num() > 0)
+			{
+				Next = Pin->LinkedTo[0]->GetOwningNodeUnchecked();
+				break;
+			}
+		}
+
+		if (!Next)
+		{
+			return Hops;
+		}
+
+		++Hops;
+		Current = Next;
+	}
+
+	return Hops;
+}
+
 void FNodeScribeBuildContext::LayoutDataNodes()
 {
 	struct FDataNode
@@ -711,11 +744,10 @@ void FNodeScribeBuildContext::LayoutDataNodes()
 	{
 		TArray<FDataNode>& Group = Pair.Value;
 
-		// Quem alimenta a execucao diretamente fica no topo da pilha, e as
-		// dependencias descem a partir dele: lendo de cima para baixo, voce vai
-		// do valor pronto para de onde ele veio, que e' a ordem em que se
-		// pergunta "e isso ai', de onde saiu?".
-		Group.Sort([](const FDataNode& A, const FDataNode& B) { return A.Depth > B.Depth; });
+		// Quem alimenta a execucao diretamente fica logo abaixo dela, e as
+		// dependencias descem a partir dai'. Lendo de cima para baixo voce vai
+		// do valor pronto para de onde ele veio.
+		Group.Sort([](const FDataNode& A, const FDataNode& B) { return A.Depth < B.Depth; });
 
 		for (int32 Row = 0; Row < Group.Num(); ++Row)
 		{
@@ -729,8 +761,18 @@ void FNodeScribeBuildContext::LayoutDataNodes()
 
 	// Valor que ninguem consome nao tem embaixo de quem ficar. Vai para uma
 	// coluna propria depois do fim da cadeia, em vez de empilhar em (0,0).
+	//
+	// Aqui nao ha' node de execucao para medir distancia, entao a ordem sai da
+	// propria cadeia de dados: o node que ninguem consome fica no topo e as
+	// dependencias descem -- mesma leitura do caso com execucao. Sem isso a
+	// ordem era a de criacao, que e' a do texto, e saia de cabeca para baixo.
 	if (Orphans.Num() > 0 && Frames.Num() > 0)
 	{
+		Orphans.Sort([this](UEdGraphNode& A, UEdGraphNode& B)
+		{
+			return DataChainRemaining(&A) < DataChainRemaining(&B);
+		});
+
 		const FFrame& Frame = Frames[0];
 
 		for (int32 Index = 0; Index < Orphans.Num(); ++Index)
