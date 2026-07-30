@@ -264,8 +264,12 @@ Escreva `?` num pino cujo valor é uma escolha sua:
 Spawn Sound 2D (Sound = ?)
 ```
 
-O node entra, o pino fica vazio, e o Blueprint não compila até você escolher.
-Isso é intencional: um asset chutado passa despercebido e vira bug de playtest.
+O node entra e o pino fica vazio. Alguns pinos impedem a compilação; outros
+compilam com valor nulo e só falham ao rodar. Nos dois casos a pendência é sua
+e está visível — melhor que um asset chutado, que passa despercebido e vira bug
+de playtest.
+
+**Confira os pinos com `?` antes de dar Play.** Nem todo pino vazio grita.
 
 Assets também podem ser passados por caminho completo, se você souber:
 

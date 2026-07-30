@@ -71,7 +71,7 @@ um texto que parece completo e volta diferente.
 Quando não dá para decidir com segurança, **não decide**.
 
 - Nome de node ambíguo → comentário vermelho no grafo com os candidatos, nenhum escolhido.
-- Asset não especificado → pino vazio, e o Blueprint não compila até você escolher.
+- Asset não especificado → pino vazio, e a escolha fica visível esperando você.
 - Node com vários caminhos de execução → a cadeia para, esperando um rótulo.
 
 Um node plausível chutado é o pior resultado possível: compila, roda, e está
