@@ -241,6 +241,39 @@ int32 FNodeScribeCatalog::ScoreEntry(const FEntry& Entry, const FString& Normali
 	return Score;
 }
 
+namespace
+{
+	/**
+	 * Funcao ou Custom Event declarado no proprio Blueprint.
+	 *
+	 * O catalogo e' montado uma vez por sessao e nao conhece o que nasceu
+	 * depois -- e criar um Custom Event e usar na linha seguinte e' o fluxo
+	 * normal de quem esta' montando um grafo. Olhar a propria classe custa
+	 * quase nada e cobre exatamente esse caso.
+	 */
+	UFunction* FindOwnFunction(UClass* SelfClass, const FString& NormalizedQuery)
+	{
+		if (!SelfClass || NormalizedQuery.IsEmpty())
+		{
+			return nullptr;
+		}
+
+		for (TFieldIterator<UFunction> FuncIt(SelfClass, EFieldIteratorFlags::ExcludeSuper); FuncIt; ++FuncIt)
+		{
+			UFunction* Function = *FuncIt;
+			const FString RawName = Function->GetName();
+
+			if (FNodeScribeCatalog::Normalize(RawName) == NormalizedQuery
+				|| FNodeScribeCatalog::Normalize(FName::NameToDisplayString(RawName, false)) == NormalizedQuery)
+			{
+				return Function;
+			}
+		}
+
+		return nullptr;
+	}
+}
+
 FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass* SelfClass, UClass* ContextClass) const
 {
 	EnsureBuilt();
@@ -301,6 +334,7 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 
 	if (Scored.Num() == 0)
 	{
+		Result.Function = FindOwnFunction(SelfClass, NormalizedQuery);
 		return Result;
 	}
 
@@ -328,6 +362,14 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 	if (bConfident)
 	{
 		Result.Function = Scored[0].Entry->Function.Get();
+		return Result;
+	}
+
+	// Empate entre funcoes da Engine nao e' ambiguidade quando o proprio
+	// Blueprint tem uma com esse nome: ali a intencao esta' clara.
+	if (UFunction* Own = FindOwnFunction(SelfClass, NormalizedQuery))
+	{
+		Result.Function = Own;
 		return Result;
 	}
 

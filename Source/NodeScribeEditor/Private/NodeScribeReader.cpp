@@ -656,7 +656,22 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 
 			if (const UClass* Owner = Function->GetOwnerClass())
 			{
-				return Owner->GetName() + TEXT(".") + Function->GetName();
+				// `SKEL_WBP_X_C.PreencherLista` nao volta: essa classe e' um
+				// artefato de compilacao e nao existe para quem le'. Funcao do
+				// proprio Blueprint sai pelo nome puro, que o builder resolve
+				// olhando a classe de destino.
+				const FString OwnerName = Owner->GetName();
+				const bool bIsCompilationArtifact =
+					OwnerName.StartsWith(TEXT("SKEL_"))
+					|| OwnerName.StartsWith(TEXT("REINST_"))
+					|| OwnerName.StartsWith(TEXT("TRASHCLASS_"));
+
+				if (!bIsCompilationArtifact && Owner != SelfClass)
+				{
+					return OwnerName + TEXT(".") + Function->GetName();
+				}
+
+				return Function->GetName();
 			}
 
 			return DisplayName;

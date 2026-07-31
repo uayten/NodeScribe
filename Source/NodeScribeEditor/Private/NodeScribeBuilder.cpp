@@ -112,6 +112,18 @@ namespace
 
 		for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
 		{
+			// SKEL_/REINST_/TRASHCLASS_ sao restos de compilacao de Blueprint.
+			// Sem esse filtro o aviso dizia coisas como "`PreencherLista` e'
+			// evento de `REINST_SKEL_WBP_TelaDeRemap_C_21`", que nao e' um nome
+			// que exista para o usuario.
+			const FString ClassName = ClassIt->GetName();
+			if (ClassName.StartsWith(TEXT("SKEL_"))
+				|| ClassName.StartsWith(TEXT("REINST_"))
+				|| ClassName.StartsWith(TEXT("TRASHCLASS_")))
+			{
+				continue;
+			}
+
 			for (const FString& Attempt : Attempts)
 			{
 				const UFunction* Found = ClassIt->FindFunctionByName(FName(*Attempt), EIncludeSuperFlag::ExcludeSuper);
