@@ -520,10 +520,18 @@ private:
 
 	// --- Criacao de nodes -------------------------------------------------
 
+	/**
+	 * RF_Transactional e' o que faz o node entrar no sistema de undo.
+	 *
+	 * Sem ele, `FBlueprintEditorUtils::UpdateTransactionalFlags` conserta o node
+	 * toda vez que o Blueprint abre e marca o asset como sujo -- e' de onde vem
+	 * o "was updated to fix issues detected on load. Please resave." que
+	 * reaparecia depois de compilar e salvar.
+	 */
 	template <typename TNode>
 	TNode* AllocateNode()
 	{
-		TNode* Node = NewObject<TNode>(Graph);
+		TNode* Node = NewObject<TNode>(Graph, NAME_None, RF_Transactional);
 		Graph->AddNode(Node, false, false);
 		Node->CreateNewGuid();
 		return Node;
@@ -1787,7 +1795,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			}
 
 			UK2Node_BaseMCDelegate* Node = static_cast<UK2Node_BaseMCDelegate*>(
-				NewObject<UEdGraphNode>(Graph, Form.MakeClass()));
+				NewObject<UEdGraphNode>(Graph, Form.MakeClass(), NAME_None, RF_Transactional));
 
 			Graph->AddNode(Node, false, false);
 			Node->CreateNewGuid();
@@ -1892,7 +1900,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 				*ActionName));
 		}
 
-		UEdGraphNode* Node = NewObject<UEdGraphNode>(Graph, NodeClass);
+		UEdGraphNode* Node = NewObject<UEdGraphNode>(Graph, NodeClass, NAME_None, RF_Transactional);
 		Graph->AddNode(Node, false, false);
 		Node->CreateNewGuid();
 
@@ -1910,7 +1918,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 	// --- Create Widget / Spawn Actor from Class --------------------------
 	if (UClass* NodeClass = FindConstructNodeClass(Normalized))
 	{
-		UK2Node_ConstructObjectFromClass* Node = NewObject<UK2Node_ConstructObjectFromClass>(Graph, NodeClass);
+		UK2Node_ConstructObjectFromClass* Node = NewObject<UK2Node_ConstructObjectFromClass>(Graph, NodeClass, NAME_None, RF_Transactional);
 		Graph->AddNode(Node, false, false);
 		Node->CreateNewGuid();
 		FinalizeNode(Node);
@@ -2081,7 +2089,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 				{
 					UClass* NodeClass = ChooseSubsystemNodeClass(SubsystemClass);
 
-					UK2Node_GetSubsystem* Node = NewObject<UK2Node_GetSubsystem>(Graph, NodeClass);
+					UK2Node_GetSubsystem* Node = NewObject<UK2Node_GetSubsystem>(Graph, NodeClass, NAME_None, RF_Transactional);
 					Graph->AddNode(Node, false, false);
 					Node->CreateNewGuid();
 					Node->Initialize(SubsystemClass);
