@@ -178,55 +178,80 @@ Intervalo Entre Pedras = 0.25
 ~ 22 propriedades no padrao
 ```
 
-#### Etapa 1 — Chaves do Blackboard
+#### Etapa 1 — Chaves do Blackboard — **pronta**
 
-Vem primeiro porque decorator de BT referencia chave **por nome**: sem as
-chaves, a árvore sai cheia de nome solto sem sentido.
+Veio primeiro porque decorator de BT referencia chave **por nome**: sem as
+chaves, a árvore sairia cheia de nome solto sem sentido.
 
-Hoje falha com `nao sei escrever o valor de: Keys`. `UBlackboardData::Keys` é
-um `TArray<FBlackboardEntry>`, e cada entrada guarda um `KeyType` que é
-**subobjeto instanciado** — é isso que o formatador genérico não sabe abrir.
-O detalhe do tipo mora em propriedade da subclasse (`UBlackboardKeyType_Object`
-tem `BaseClass`, `_Enum` tem `EnumType`).
+Antes falhava com `nao sei escrever o valor de: Keys`.
+`UBlackboardData::Keys` é um `TArray<FBlackboardEntry>`, e cada entrada guarda
+um `KeyType` que é **subobjeto instanciado** — é isso que o formatador
+genérico não abre.
 
 ```
 blackboard BB_Golem
-chave Alvo : Object (Actor)
-chave PosicaoInicial : Vector
-chave Fase : Int
+chave Jogador : Object (Actor)
+chave Distância do Ataque : Float
+chave Pode usar Laser? : Bool
 ```
+
+O detalhe que qualifica o tipo (`BaseClass` de Object, `EnumType` de Enum) sai
+**por reflexão**, não por um caso para cada subclasse conhecida: são dez tipos
+na Engine e qualquer projeto pode escrever o seu, e um `switch` de casts
+responderia vazio para a chave que o próprio projeto criou, sem dizer que
+estava ignorando algo. Pelo mesmo motivo, o `Build.cs` ganhou `AIModule` mas só
+dois headers entram por include.
 
 O nome do tipo sai da classe do `KeyType`, sem o prefixo
 `BlackboardKeyType_`. `UBlackboardData::Parent` vira uma linha de cabeçalho
 quando existir.
 
-#### Etapa 2 — Árvore do BT
+#### Etapa 2 — Árvore do BT — **pronta**
 
-É o trabalho grande, e onde está a economia. Hoje a ficha vê só a raiz
-(`Root Node = ...BTComposite_Selector_0`); ver a árvore exige seguir ponteiro
-node a node.
-
-**O `AIModuleToolset` nem está ligado neste projeto** — não existe ferramenta
-nativa de BT aqui. A árvore numa chamada não é "mais barata", é a diferença
-entre viável e não viável.
+A árvore inteira numa chamada. Antes, ver o que a IA faz exigia seguir ponteiro
+node a node, e **o `AIModuleToolset` nem está ligado neste projeto** — não
+havia alternativa nativa.
 
 ```
 arvore BT_Golem  (blackboard BB_Golem)
 Selector
-  Blackboard (Alvo esta definido):
-    Sequence
-      Move To (Blackboard Key = Alvo, Acceptable Radius = 150)
-      Wait (Wait Time = 0.5)
   Sequence
-    Patrulhar (Raio = 800)
+    Move To (Blackboard Key = Jogador)
+  Sequence
+    Patrulhar
+    Wait (Wait Time = 1.00)
 ```
 
 Percurso: `UBehaviorTree::RootNode` e `RootDecorators`, depois
-`UBTCompositeNode::Children` — cada `FBTCompositeChild` tem `Decorators`,
-`ChildComposite` e `ChildTask` —, mais `Services` em cada composite.
-Decorator e service viram rótulo indentado, o mesmo mecanismo do
-`verdadeiro:`. Os parâmetros de cada node saem pelo formatador de valor que a
-ficha já usa — é por isso que a ficha veio antes.
+`UBTCompositeNode::Children` — cada `FBTCompositeChild` tem os seus
+`Decorators` —, mais `Services` do composite e da task. Há guarda contra ciclo,
+que BT não tem por construção mas asset corrompido pode.
+
+**Decorator e service saem como linha com palavra-chave** (`decorador X`,
+`servico Y`), e não como rótulo indentado terminado em `:` como o esboço antigo
+previa. Rótulo funciona para ramo de grafo, onde cada ramo é um caminho; aqui
+um node pode ter vários decorators, e aninhar cada um criaria níveis de
+indentação que não existem na árvore. Decorator sai junto com o filho que ele
+guarda, que é onde o editor mostra.
+
+Os parâmetros saem pelo formatador da ficha, comparados com o CDO da classe do
+node — é por isso que a ficha veio antes. `Move To` com raio de fábrica não
+ganha parâmetro nenhum.
+
+Duas formas precisaram de tratamento próprio:
+
+- **Seletor de chave de blackboard** vira só o nome da chave. A forma canônica
+  traz junto a lista de tipos aceitos, que enche a linha e esconde qual é a
+  chave.
+- **`FValueOrBBKey_*`** (`Wait Time`, `Acceptable Radius`) tem `ToString()`
+  próprio, que dá o número quando o valor é fixo e o nome da chave quando está
+  amarrado ao blackboard. **A 5.8 aposentou `FAIDataProviderValue` em favor
+  dessa família** — mirar só na antiga compila, roda e devolve
+  `(DefaultValue=1.000000)`. Foi o que aconteceu na primeira tentativa.
+
+`GetNodeName()` resolve os nodes da Engine, mas em classe de Blueprint só tira
+o `_C`: `BTTask_Patrulhar` aparecia com o prefixo técnico do lado de um
+`Move To` limpo. O prefixo é removido na leitura.
 
 **BT é o melhor encaixe que este formato já teve:** uma BT é literalmente uma
 árvore e não reconverge, então a perda que o `FORMATO.md` declara para grafo
