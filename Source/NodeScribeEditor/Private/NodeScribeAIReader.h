@@ -2,7 +2,9 @@
 
 #include "CoreMinimal.h"
 
+class UBehaviorTree;
 class UBlackboardData;
+class UBTNode;
 
 /**
  * Os assets de IA como texto: blackboard hoje, Behavior Tree em seguida.
@@ -24,4 +26,5 @@ public:
 
 private:
 	static FString ReadBlackboard(UBlackboardData* Blackboard);
+	static FString ReadBehaviorTree(UBehaviorTree* Tree);
 };
