@@ -283,21 +283,34 @@ arrastado no editor vive como template no `SimpleConstructionScript`. A busca
 sobe a cadeia de Blueprints pais, porque componente que o pai criou também é
 do filho. Ler só uma das origens esconde metade dos componentes sem avisar.
 
-**Teto no valor (160 caracteres) na visão geral.** `Body Instance` de uma
-cápsula sai com a tabela inteira de resposta de colisão: ~2.000 caracteres,
-mais outros ~2.000 do valor de fábrica ao lado. Sozinho era maior que toda a
-ficha do Golem — exatamente o despejo que este formato existe para não fazer.
-O corte **nomeia** o que cortou, com o componente na frente, e não vale no
-modo filtrado: quem pede pelo nome está pedindo aquilo.
+**Struct longa demais abre e mostra só o membro que mudou.** É o princípio da
+ficha um nível abaixo. `Body Instance` de uma cápsula sai plano com a tabela
+inteira de resposta de colisão — ~2.000 caracteres, mais outros ~2.000 do valor
+de fábrica ao lado, sozinho maior que toda a ficha do Golem. Aberto, são três
+linhas que dizem a coisa:
+
+```
+  Body Instance:
+    Object Type = ECC_GameTraceChannel2 # padrao ECC_Pawn
+    Collision Profile Name = Corpo      # padrao Pawn
+```
+
+**Abre só quando a forma plana estoura os 160 caracteres.** Abrir sempre
+custaria legibilidade nas structs pequenas: `Relative Location` vale mais como
+uma linha do que como três, e o `Z` sozinho perderia a companhia do `X` e do
+`Y` que dizem que aquilo é uma posição.
+
+Recursão até três níveis. Quando abrir não ajuda — o membro de dentro também é
+grande e não é struct —, tudo é desfeito, **inclusive o que a tentativa
+anotou**: sem isso a nota nomeava o membro de dentro e o de fora, que são a
+mesma coisa dita duas vezes. O que sobra é nomeado com o caminho inteiro
+(`CharacterMesh0.Body Instance.Collision Responses`) e sai inteiro se você
+pedir pelo nome — o corte não vale no modo filtrado.
 
 **Teto na coluna de alinhamento (64).** Sem ele, uma linha larga empurra o
 comentário de todas as outras para a mesma distância — com aquela struct de
 2.000 caracteres, as vizinhas ganhavam 2.000 espaços cada. Alinhamento é para
 ler; passou disso, atrapalha e ainda custa token.
-
-**Ainda por fazer aqui:** recursar dentro da struct e mostrar só o membro que
-mudou. `Body Instance` difere em três campos, não em cinquenta. É a correção
-certa para o teto acima, que hoje é remendo honesto.
 
 #### Etapa 4 — Variáveis do Blueprint com a linha `variavel` — **pronta**
 

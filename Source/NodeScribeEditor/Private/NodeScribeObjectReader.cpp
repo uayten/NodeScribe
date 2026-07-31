@@ -20,6 +20,7 @@ namespace
 	{
 		FString Left;      // `Max Walk Speed = 250`, ou com o tipo no modo filtrado
 		FString Default;   // valor de fabrica, vazio quando nao mudou ou nao ha'
+		int32 Depth = 0;   // membro de struct entra recuado sob ela
 	};
 
 	/**
@@ -136,25 +137,33 @@ namespace
 		// de espacos. Alinhamento e' para ler; passou disso, atrapalha e custa.
 		const int32 MaxColumn = 64;
 
+		auto Indented = [](const FEntry& Entry)
+		{
+			return FString::ChrN(Entry.Depth * 2, TEXT(' ')) + Entry.Left;
+		};
+
 		int32 Widest = 0;
 		for (const FEntry& Entry : Entries)
 		{
-			if (!Entry.Default.IsEmpty() && Entry.Left.Len() <= MaxColumn)
+			const int32 Length = Indented(Entry).Len();
+			if (!Entry.Default.IsEmpty() && Length <= MaxColumn)
 			{
-				Widest = FMath::Max(Widest, Entry.Left.Len());
+				Widest = FMath::Max(Widest, Length);
 			}
 		}
 
 		for (const FEntry& Entry : Entries)
 		{
+			const FString Left = Indented(Entry);
+
 			if (Entry.Default.IsEmpty())
 			{
-				OutLines.Add(Entry.Left);
+				OutLines.Add(Left);
 				continue;
 			}
 
-			const int32 Padding = FMath::Max(1, Widest - Entry.Left.Len() + 1);
-			OutLines.Add(Entry.Left + FString::ChrN(Padding, TEXT(' '))
+			const int32 Padding = FMath::Max(1, Widest - Left.Len() + 1);
+			OutLines.Add(Left + FString::ChrN(Padding, TEXT(' '))
 				+ TEXT("# padrao ") + Entry.Default);
 		}
 	}
@@ -183,6 +192,110 @@ namespace
 	 * esta' pedindo aquilo, e ai' sai inteiro.
 	 */
 	const int32 MaxSurveyValueLength = 160;
+
+	/** Ate' onde abrir struct dentro de struct antes de desistir e so' avisar. */
+	const int32 MaxStructDepth = 3;
+
+	/**
+	 * Abre uma struct e emite so' os membros que mudaram.
+	 *
+	 * E' o mesmo principio da ficha, um nivel abaixo: `Body Instance` difere do
+	 * padrao em tres campos, nao nos cinquenta que a forma plana despeja.
+	 *
+	 * So' e' chamada quando a forma plana estourou o teto. Abrir sempre custaria
+	 * legibilidade nas structs pequenas -- `Relative Location` vale mais como uma
+	 * linha do que como tres, e o `Z` sozinho perderia a companhia do `X` e do
+	 * `Y` que dizem que aquilo e' uma posicao.
+	 *
+	 * @return quantos membros entraram. Zero significa que abrir nao ajudou, e
+	 *         quem chamou desfaz.
+	 */
+	int32 CollectStructMembers(const FStructProperty* StructProperty,
+		const void* ValuePtr, const void* DefaultPtr, int32 Depth,
+		const FString& Context, TArray<FEntry>& OutEntries, FCollectStats& Stats)
+	{
+		int32 Added = 0;
+
+		for (TFieldIterator<FProperty> It(StructProperty->Struct); It; ++It)
+		{
+			const FProperty* Member = *It;
+			if (!IsVisible(Member))
+			{
+				continue;
+			}
+
+			const void* MemberValue = Member->ContainerPtrToValuePtr<void>(ValuePtr);
+			const void* MemberDefault = DefaultPtr
+				? Member->ContainerPtrToValuePtr<void>(DefaultPtr) : nullptr;
+
+			if (!DiffersFromDefault(Member, MemberValue, MemberDefault))
+			{
+				continue;
+			}
+
+			const FString Name = DisplayName(Member);
+			const FString Qualified = Context + TEXT(".") + Name;
+
+			FString Value;
+			if (!ValueToText(Member, MemberValue, Value))
+			{
+				Stats.Unreadable.Add(Qualified);
+				continue;
+			}
+
+			if (Value.Len() > MaxSurveyValueLength)
+			{
+				const FStructProperty* Inner = CastField<FStructProperty>(Member);
+
+				if (Inner && Depth < MaxStructDepth)
+				{
+					const int32 Before = OutEntries.Num();
+					const int32 TooLongBefore = Stats.TooLong.Num();
+					const int32 UnreadableBefore = Stats.Unreadable.Num();
+
+					FEntry Head;
+					Head.Left = Name + TEXT(":");
+					Head.Depth = Depth;
+					OutEntries.Add(Head);
+
+					const int32 InnerAdded = CollectStructMembers(Inner, MemberValue,
+						MemberDefault, Depth + 1, Qualified, OutEntries, Stats);
+
+					if (InnerAdded > 0)
+					{
+						Added += InnerAdded;
+						continue;
+					}
+
+					// Abrir nao ajudou: desfaz tudo, inclusive o que a tentativa
+					// anotou. Sem isto a nota nomeia o membro de dentro e o de
+					// fora, que sao a mesma coisa dita duas vezes.
+					OutEntries.SetNum(Before);
+					Stats.TooLong.SetNum(TooLongBefore);
+					Stats.Unreadable.SetNum(UnreadableBefore);
+				}
+
+				Stats.TooLong.Add(Qualified);
+				continue;
+			}
+
+			FEntry Entry;
+			Entry.Left = FString::Printf(TEXT("%s = %s"), *Name, *Value);
+			Entry.Depth = Depth;
+
+			FString DefaultText;
+			if (MemberDefault && ValueToText(Member, MemberDefault, DefaultText)
+				&& DefaultText.Len() <= MaxSurveyValueLength)
+			{
+				Entry.Default = DefaultText;
+			}
+
+			OutEntries.Add(MoveTemp(Entry));
+			++Added;
+		}
+
+		return Added;
+	}
 
 	/**
 	 * Percorre as propriedades de um objeto e devolve as linhas.
@@ -243,6 +356,28 @@ namespace
 
 			if (!bFiltering && Value.Len() > MaxSurveyValueLength)
 			{
+				// Longa demais plana: tenta abrir e mostrar so' o que mudou.
+				if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+				{
+					const int32 Before = OutEntries.Num();
+					const int32 TooLongBefore = Stats.TooLong.Num();
+					const int32 UnreadableBefore = Stats.Unreadable.Num();
+
+					FEntry Head;
+					Head.Left = Name + TEXT(":");
+					OutEntries.Add(Head);
+
+					if (CollectStructMembers(StructProperty, ValuePtr, DefaultPtr, 1,
+						Qualify(Name), OutEntries, Stats) > 0)
+					{
+						continue;
+					}
+
+					OutEntries.SetNum(Before);
+					Stats.TooLong.SetNum(TooLongBefore);
+					Stats.Unreadable.SetNum(UnreadableBefore);
+				}
+
 				// Nomeado, nao sumido: quem le' fica sabendo que aquilo mudou e
 				// que da' para pedir. Some em silencio seria mentir por omissao.
 				Stats.TooLong.Add(Qualify(Name));
