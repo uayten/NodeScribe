@@ -52,6 +52,22 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
     @toolset_registry.tool_call
     @staticmethod
+    def save_all_and_quit() -> str:
+        """Salva tudo e fecha o editor.
+
+        Serve para recompilar o plugin sem depender de alguem clicar no X --
+        a Unreal segura os binarios enquanto esta' aberta.
+
+        Recusa se houver Play In Editor rodando. Depois disto a conexao MCP
+        cai; reabrir o editor e' por fora.
+
+        Returns:
+            O que foi salvo, ou o motivo de nao ter fechado.
+        """
+        return unreal.NodeScribeLibrary.save_all_and_quit()
+
+    @toolset_registry.tool_call
+    @staticmethod
     def get_format_docs() -> str:
         """Devolve a especificacao do formato NodeScribe.
 

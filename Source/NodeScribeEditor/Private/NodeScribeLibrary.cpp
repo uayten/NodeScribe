@@ -7,7 +7,9 @@
 #include "NodeScribeTypes.h"
 
 #include "EdGraph/EdGraph.h"
+#include "Editor.h"
 #include "Engine/Blueprint.h"
+#include "FileHelpers.h"
 #include "Interfaces/IPluginManager.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Misc/FileHelper.h"
@@ -117,6 +119,43 @@ FString UNodeScribeLibrary::ReadGraph(UEdGraph* Graph)
 	}
 
 	return Result.Text + TEXT("\n\n") + FString::Join(Commented, TEXT("\n"));
+}
+
+FString UNodeScribeLibrary::SaveAllAndQuit()
+{
+	if (!GEditor)
+	{
+		return TEXT("[erro]: sem editor.");
+	}
+
+	// Fechar no meio de um teste surpreende, e o ganho de tempo nao paga isso.
+	if (GEditor->IsPlaySessionInProgress())
+	{
+		return TEXT("[erro]: ha' um Play In Editor rodando. Pare o Play antes.");
+	}
+
+	bool bNeededSaving = false;
+	const bool bSaved = FEditorFileUtils::SaveDirtyPackages(
+		/*bPromptUserToSave*/ false,
+		/*bSaveMapPackages*/ true,
+		/*bSaveContentPackages*/ true,
+		/*bFastSave*/ false,
+		/*bNotifyNoPackagesSaved*/ false,
+		/*bCanBeDeclined*/ false,
+		&bNeededSaving);
+
+	if (bNeededSaving && !bSaved)
+	{
+		return TEXT("[erro]: algo nao pode ser salvo. Nao fechei -- resolva e chame de novo.");
+	}
+
+	// Adiado: sair aqui derrubaria a conexao antes desta resposta sair, e quem
+	// chamou veria um erro de rede em vez da confirmacao.
+	GEngine->DeferredCommands.Add(TEXT("QUIT_EDITOR"));
+
+	return bNeededSaving
+		? TEXT("Tudo salvo. Fechando o editor.")
+		: TEXT("Nada pendente para salvar. Fechando o editor.");
 }
 
 FString UNodeScribeLibrary::GetFormatDocs()

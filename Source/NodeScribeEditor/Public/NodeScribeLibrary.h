@@ -38,4 +38,17 @@ public:
 	/** A especificacao do formato, para quem nunca a viu. */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString GetFormatDocs();
+
+	/**
+	 * Salva tudo e fecha o editor.
+	 *
+	 * Existe porque recompilar o plugin exige o editor fechado, e sem isto cada
+	 * ciclo de correcao para' esperando alguem clicar no X.
+	 *
+	 * Recusa enquanto houver Play In Editor rodando: fechar no meio de um teste
+	 * surpreende, e o ganho de tempo nao paga isso. O fechamento e' adiado um
+	 * instante para esta resposta conseguir sair antes de a conexao cair.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
+	static FString SaveAllAndQuit();
 };

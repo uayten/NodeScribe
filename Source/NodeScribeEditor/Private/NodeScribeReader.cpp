@@ -160,6 +160,47 @@ namespace
 		return false;
 	}
 
+	/**
+	 * Nome de tipo que o builder sabe ler de volta.
+	 *
+	 * `UEdGraphSchema_K2::TypeToText` devolve o que a interface mostra em painel
+	 * de detalhes -- `IntProperty`, `Timer Handle Structure` --, e nenhum desses
+	 * volta: o builder espera `Integer` e `TimerHandle`. Esta funcao e' o espelho
+	 * exato de `ResolvePinTypeFromName`, entao o que sai daqui entra la'.
+	 */
+	FString DescribePinType(const FEdGraphPinType& PinType)
+	{
+		FString Base;
+
+		const FName Category = PinType.PinCategory;
+		UObject* SubCategory = PinType.PinSubCategoryObject.Get();
+
+		if (Category == UEdGraphSchema_K2::PC_Boolean)      { Base = TEXT("Boolean"); }
+		else if (Category == UEdGraphSchema_K2::PC_Int)     { Base = TEXT("Integer"); }
+		else if (Category == UEdGraphSchema_K2::PC_Int64)   { Base = TEXT("Int64"); }
+		else if (Category == UEdGraphSchema_K2::PC_Real)    { Base = TEXT("Float"); }
+		else if (Category == UEdGraphSchema_K2::PC_String)  { Base = TEXT("String"); }
+		else if (Category == UEdGraphSchema_K2::PC_Name)    { Base = TEXT("Name"); }
+		else if (Category == UEdGraphSchema_K2::PC_Text)    { Base = TEXT("Text"); }
+		else if (Category == UEdGraphSchema_K2::PC_Byte)
+		{
+			// Enum e byte compartilham categoria; o objeto e' quem distingue.
+			Base = SubCategory ? SubCategory->GetName() : TEXT("Byte");
+		}
+		else if (SubCategory)
+		{
+			Base = SubCategory->GetName();
+		}
+		else
+		{
+			return FString();
+		}
+
+		return PinType.ContainerType == EPinContainerType::Array
+			? TEXT("Array de ") + Base
+			: Base;
+	}
+
 	/** O nome que o usuario ve' e digita, que raramente e' o nome interno. */
 	FString GetWrittenPinName(const UEdGraphPin* Pin)
 	{
@@ -1131,7 +1172,17 @@ void FNodeScribeReadContext::Run()
 					continue;
 				}
 
-				const FString TypeName = UEdGraphSchema_K2::TypeToText(Property).ToString();
+				FEdGraphPinType PinType;
+				if (!UEdGraphSchema_K2().ConvertPropertyToPinType(Property, PinType))
+				{
+					continue;
+				}
+
+				const FString TypeName = DescribePinType(PinType);
+				if (TypeName.IsEmpty())
+				{
+					continue;
+				}
 
 				bool bIsDesignerWidget = false;
 				if (bIsWidgetBlueprint && WidgetClass)

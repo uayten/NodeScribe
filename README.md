@@ -132,6 +132,28 @@ Versão 0.3. UE 5.8.1, build limpa sem avisos.
 - **Idioma:** interface e mensagens em português. O formato aceita palavras em
   PT e EN desde sempre (`evento`/`event`, `verdadeiro`/`true`).
 
+## Possíveis recursos futuros
+
+### Enviar só o que mudou
+
+Hoje, editar um node num grafo de 40 custa o grafo inteiro em cada direção:
+ler tudo, devolver tudo, reescrever tudo.
+
+A ideia é `read_graph` devolver um identificador do estado junto do texto, e
+`write_graph` aceitar só as linhas alteradas mais esse identificador. Se o
+grafo tiver mudado no meio do caminho, a escrita é recusada em vez de
+sobrescrever cego.
+
+**Por que vale:** é a única compressão que escala sem custar legibilidade. As
+outras — encurtar nomes, usar identificadores numéricos — economizam ~1% do
+custo total (o texto já é ~2% dele; o resto era descoberta, e essa já foi
+eliminada) e destroem a capacidade de conferir o que a IA escreveu. Mandar
+menos linhas economiza ordens de grandeza, e as poucas que trafegam continuam
+sendo texto legível.
+
+O ganho aparece em grafos grandes e em edições pequenas — que é exatamente o
+caso comum depois que o grafo existe.
+
 ## Limitações conhecidas
 
 - Um node por linha; expressões aninhadas (`Print(Concat(a, b))`) não são suportadas.
