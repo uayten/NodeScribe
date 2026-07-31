@@ -1,6 +1,7 @@
 #include "NodeScribeObjectWriter.h"
 
 #include "NodeScribeAIWriter.h"
+#include "NodeScribeBuilder.h"
 #include "NodeScribeCatalog.h"
 #include "NodeScribePropertyText.h"
 
@@ -10,6 +11,7 @@
 #include "Engine/SimpleConstructionScript.h"
 #include "GameFramework/Actor.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "ScopedTransaction.h"
 #include "UObject/UnrealType.h"
 
@@ -222,6 +224,7 @@ FNodeScribeObjectWriter::FResult FNodeScribeObjectWriter::WriteObject(
 	int32 OpenStructIndent = -1;
 
 	TSet<UObject*> Touched;
+	bool bTouchedBlueprint = false;
 
 	for (int32 Index = 0; Index < Lines.Num(); ++Index)
 	{
@@ -259,25 +262,149 @@ FNodeScribeObjectWriter::FResult FNodeScribeObjectWriter::WriteObject(
 			OpenStructValue = nullptr;
 		}
 
-		// `variavel Nome : Tipo = valor` -- so' o valor e' aplicado. Criar
-		// variavel e' outra coisa, e nao e' isto que a linha esta' pedindo.
+		// `apagar variavel Nome`. Precisa de palavra propria: este escritor nao
+		// apaga nada por principio, e apagar variavel derruba todo node que a
+		// usava. Nao pode acontecer por descuido de formatacao.
+		if (Line.StartsWith(TEXT("apagar variavel "), ESearchCase::IgnoreCase)
+			|| Line.StartsWith(TEXT("remover variavel "), ESearchCase::IgnoreCase))
+		{
+			const FString VarName = Line.RightChop(Line.Find(TEXT("variavel "),
+				ESearchCase::IgnoreCase) + 9).TrimStartAndEnd();
+
+			if (!Blueprint)
+			{
+				Result.Diagnostics.Add(FString::Printf(
+					TEXT("linha %d [erro]: `%s` nao e' um Blueprint; nao ha' variavel para apagar."),
+					LineNumber, *Object->GetName()));
+				continue;
+			}
+
+			const bool bExists = Blueprint->NewVariables.ContainsByPredicate(
+				[&VarName](const FBPVariableDescription& Variable)
+				{
+					return Variable.VarName.ToString().Equals(VarName, ESearchCase::IgnoreCase);
+				});
+
+			if (!bExists)
+			{
+				Result.Diagnostics.Add(FString::Printf(
+					TEXT("linha %d [erro]: `%s` nao e' variavel deste Blueprint."),
+					LineNumber, *VarName));
+				continue;
+			}
+
+			Blueprint->Modify();
+			FBlueprintEditorUtils::RemoveMemberVariable(Blueprint, FName(*VarName));
+			bTouchedBlueprint = true;
+			++Result.Applied;
+			continue;
+		}
+
+		// `variavel Nome : Tipo [editavel] [= valor]`.
+		//
+		// Cria quando nao existe, e ai' o tipo e' obrigatorio. Quando ja' existe,
+		// o tipo e' ignorado -- trocar tipo de variavel usada quebra os nodes que
+		// a consomem, e isso pede uma decisao, nao um efeito colateral.
 		if (Line.StartsWith(TEXT("variavel "), ESearchCase::IgnoreCase))
 		{
 			Line = Line.RightChop(9).TrimStart();
-			int32 Colon = INDEX_NONE;
-			int32 Equals = INDEX_NONE;
-			Line.FindChar(TEXT(':'), Colon);
-			Line.FindChar(TEXT('='), Equals);
 
-			if (Equals == INDEX_NONE)
+			int32 Equals = INDEX_NONE;
+			const bool bHasValue = Line.FindChar(TEXT('='), Equals);
+
+			FString Declaration = bHasValue ? Line.Left(Equals).TrimEnd() : Line;
+			const FString Value = bHasValue ? Line.RightChop(Equals + 1).TrimStart() : FString();
+
+			// `editavel` fecha a declaracao, como `sincronizada` no blackboard.
+			bool bInstanceEditable = false;
+			for (const TCHAR* Word : { TEXT(" editavel"), TEXT(" editável"), TEXT(" instance editable") })
 			{
-				// So' declaracao, sem valor: nada a fazer, e nao e' erro.
+				if (Declaration.EndsWith(Word, ESearchCase::IgnoreCase))
+				{
+					Declaration = Declaration.LeftChop(FCString::Strlen(Word)).TrimEnd();
+					bInstanceEditable = true;
+					break;
+				}
+			}
+
+			int32 Colon = INDEX_NONE;
+			const bool bHasType = Declaration.FindChar(TEXT(':'), Colon);
+
+			const FString VarName = (bHasType ? Declaration.Left(Colon) : Declaration).TrimEnd();
+			const FString TypeName = bHasType ? Declaration.RightChop(Colon + 1).TrimStart() : FString();
+
+			const bool bExists = Blueprint && Blueprint->NewVariables.ContainsByPredicate(
+				[&VarName](const FBPVariableDescription& Variable)
+				{
+					return Variable.VarName.ToString().Equals(VarName, ESearchCase::IgnoreCase);
+				});
+
+			if (!bExists)
+			{
+				if (!Blueprint)
+				{
+					Result.Diagnostics.Add(FString::Printf(
+						TEXT("linha %d [erro]: `%s` nao existe, e `%s` nao e' um Blueprint onde criar."),
+						LineNumber, *VarName, *Object->GetName()));
+					continue;
+				}
+
+				if (!bHasType)
+				{
+					Result.Diagnostics.Add(FString::Printf(
+						TEXT("linha %d [erro]: `%s` nao existe. Para criar, diga o tipo: `variavel %s : Float`."),
+						LineNumber, *VarName, *VarName));
+					continue;
+				}
+
+				FEdGraphPinType PinType;
+				if (!NodeScribeTypeNames::ResolvePinTypeFromName(TypeName, PinType))
+				{
+					Result.Diagnostics.Add(FString::Printf(
+						TEXT("linha %d [erro]: nao reconheci o tipo `%s`. Use o nome que aparece na ")
+						TEXT("interface, como Float, Name, Timer Handle, ou `Array de X`."),
+						LineNumber, *TypeName));
+					continue;
+				}
+
+				Blueprint->Modify();
+				if (!FBlueprintEditorUtils::AddMemberVariable(Blueprint, FName(*VarName), PinType, Value))
+				{
+					Result.Diagnostics.Add(FString::Printf(
+						TEXT("linha %d [erro]: nao consegui criar `%s`."), LineNumber, *VarName));
+					continue;
+				}
+
+				bTouchedBlueprint = true;
+				++Result.Applied;
+
+				// Criada com o valor junto: nao ha' o que aplicar depois. E o CDO
+				// so' passa a ter a propriedade na proxima compilacao, entao
+				// tentar escrever nele agora nao acharia nada.
+				if (bInstanceEditable)
+				{
+					FBlueprintEditorUtils::SetBlueprintOnlyEditableFlag(
+						Blueprint, FName(*VarName), /*bNewBlueprintOnly*/ false);
+				}
 				continue;
 			}
-			if (Colon != INDEX_NONE && Colon < Equals)
+
+			if (bInstanceEditable && Blueprint)
 			{
-				Line = Line.Left(Colon).TrimEnd() + TEXT(" = ") + Line.RightChop(Equals + 1).TrimStart();
+				Blueprint->Modify();
+				FBlueprintEditorUtils::SetBlueprintOnlyEditableFlag(
+					Blueprint, FName(*VarName), /*bNewBlueprintOnly*/ false);
+				bTouchedBlueprint = true;
 			}
+
+			if (!bHasValue)
+			{
+				// So' declaracao de variavel que ja' existe: nada a fazer.
+				continue;
+			}
+
+			// Existe: cai no caminho comum de escrever valor de propriedade.
+			Line = VarName + TEXT(" = ") + Value;
 		}
 
 		int32 Equals = INDEX_NONE;
@@ -390,9 +517,26 @@ FNodeScribeObjectWriter::FResult FNodeScribeObjectWriter::WriteObject(
 
 	if (Result.Applied > 0 && Blueprint)
 	{
-		// Sem isto o asset fica com a mudanca em memoria e limpo em disco: fecha
-		// o editor e o trabalho some sem ninguem avisar.
-		FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+		// Mexer na lista de variaveis muda a classe, nao so' um valor: sem
+		// recompilar, o CDO continua com a forma antiga e o painel de detalhes
+		// mostra o que nao existe mais.
+		if (bTouchedBlueprint)
+		{
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+			// E compila. `AddMemberVariable` mexe na lista do Blueprint, mas a
+			// propriedade so' passa a existir na classe depois disto -- antes,
+			// a variavel recem-criada nao aparece nem na ficha nem no painel de
+			// detalhes, e quem chamou teria que pedir um clique em Compile.
+			// Criar algo que nao da' para ver e' pior que nao criar.
+			FKismetEditorUtilities::CompileBlueprint(Blueprint);
+		}
+		else
+		{
+			// Sem isto o asset fica com a mudanca em memoria e limpo em disco:
+			// fecha o editor e o trabalho some sem ninguem avisar.
+			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+		}
 	}
 
 	return Result;

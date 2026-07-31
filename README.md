@@ -732,16 +732,40 @@ Vale checar se a ficha já cobre, antes de propor ferramenta.
 Em ordem do que mais travou:
 
 **1. Variável de Blueprint — criar, apagar, marcar Instance Editable.**
-Travou duas vezes: apagar duplicatas de nome acentuado, e criar as duas
-variáveis da task nova. `FBlueprintEditorUtils::AddMemberVariable`,
-`RemoveMemberVariable` e `SetBlueprintVariableMetaData` com
-`FBlueprintMetadata::MD_ExposeOnSpawn`/`MD_InstanceEditable`. É o menor dos
-itens e o que mais aparece.
+**Pronto.**
 
-Cabe na ficha sem sintaxe nova: hoje `variavel X : Tipo = valor` é lido e
-ignorado na escrita. Passar a criar quando não existe fecha o buraco. Apagar
-precisa de palavra explícita — `write_object` não apaga nada por princípio, e
-isso não deve mudar por acidente.
+```
+variavel Alcance : Float editavel = 800
+variavel Classe da Habilidade : GameplayAbility Class editavel
+variavel Lista de Tags : Array de Name
+apagar variavel Contador Interno
+```
+
+Coube na sintaxe que já existia: `variavel X : Tipo` era lido e ignorado na
+escrita, agora cria quando não existe. `editavel` fecha a declaração, como
+`sincronizada` no blackboard, e **o leitor emite de volta** — sem isso uma ida
+e volta apagaria a marcação calada, e a variável sumia do painel de quem usa o
+Blueprint.
+
+**Apagar tem palavra própria.** Este escritor não apaga nada por princípio, e
+apagar variável derruba todo node que a usava. Não pode acontecer por descuido
+de formatação.
+
+**Tipo já existente não é trocado.** Trocar tipo de variável em uso quebra os
+nodes que a consomem; isso pede uma decisão, não um efeito colateral.
+
+Duas coisas que só o teste real mostrou:
+
+- **Criar variável exige recompilar o Blueprint.** `AddMemberVariable` mexe na
+  lista, mas a propriedade só existe na classe depois de
+  `FKismetEditorUtilities::CompileBlueprint`. Sem isso a variável recém-criada
+  não aparecia nem na ficha nem no painel, e quem chamou teria que pedir um
+  clique em Compile. Criar algo que não dá para ver é pior que não criar.
+- **`X Class` não era um tipo.** `ResolvePinTypeFromName` só produzia referência
+  a objeto, então `GameplayAbility Class` — exatamente o que uma BTTask precisa
+  para apontar habilidade — falhava. O sufixo agora vira `PC_Class`, e
+  `DescribePinType` o emite de volta. Era um furo no espelho que ninguém tinha
+  esbarrado porque nenhum grafo testado declarava variável de classe.
 
 **2. Criar asset.** Travou três vezes: o Gameplay Effect do cooldown, a
 BTTask, o BTService. `IAssetTools::CreateAsset` com a factory do tipo.

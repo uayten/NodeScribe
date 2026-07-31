@@ -150,6 +150,15 @@ FString DescribePinType(const FEdGraphPinType& PinType)
 	else if (SubCategory)
 	{
 		Base = SubCategory->GetName();
+
+		// Referencia a classe, nao a instancia. Sem o sufixo, o texto lido volta
+		// como referencia a objeto -- uma variavel `BP_Pedra Class` viraria
+		// `BP_Pedra`, e o node de Spawn Actor deixaria de aceitar.
+		if (Category == UEdGraphSchema_K2::PC_Class
+			|| Category == UEdGraphSchema_K2::PC_SoftClass)
+		{
+			Base += TEXT(" Class");
+		}
 	}
 	else
 	{

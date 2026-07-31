@@ -288,10 +288,25 @@ namespace
 	UEnum* FindEnumByFriendlyName(const FString& Name);
 	UClass* FindClassByFriendlyName(const FString& Name);
 
-	bool ResolvePinTypeFromName(const FString& InTypeName, FEdGraphPinType& OutType)
+	bool ResolvePinTypeFromNameInternal(const FString& InTypeName, FEdGraphPinType& OutType)
 	{
 		FString TypeName = InTypeName.TrimStartAndEnd();
 		bool bIsArray = false;
+
+		// `BP_Pedra Class` e' a *classe*, nao uma instancia dela -- e' o que a
+		// interface mostra e o que se usa para spawnar ator ou apontar
+		// habilidade. Sem isto, so' dava para declarar referencia a objeto vivo,
+		// e uma variavel de classe tinha que ser criada na mao.
+		bool bIsClassReference = false;
+		for (const TCHAR* Suffix : { TEXT(" Class"), TEXT(" Classe") })
+		{
+			if (TypeName.EndsWith(Suffix, ESearchCase::IgnoreCase))
+			{
+				TypeName = TypeName.LeftChop(FCString::Strlen(Suffix)).TrimEnd();
+				bIsClassReference = true;
+				break;
+			}
+		}
 
 		static const TCHAR* const ArrayPrefixes[] = {
 			TEXT("Array de "), TEXT("Array of "), TEXT("Lista de ")
@@ -351,10 +366,19 @@ namespace
 		}
 		else if (UClass* Class = FindClassByFriendlyName(TypeName))
 		{
-			OutType.PinCategory = UEdGraphSchema_K2::PC_Object;
+			OutType.PinCategory = bIsClassReference
+				? UEdGraphSchema_K2::PC_Class
+				: UEdGraphSchema_K2::PC_Object;
 			OutType.PinSubCategoryObject = Class;
 		}
 		else
+		{
+			return false;
+		}
+
+		// `Float Class` nao quer dizer nada: se o sufixo foi comido e o que
+		// sobrou nao e' classe, o nome inteiro estava errado.
+		if (bIsClassReference && OutType.PinCategory != UEdGraphSchema_K2::PC_Class)
 		{
 			return false;
 		}
@@ -1681,7 +1705,7 @@ void FNodeScribeBuildContext::CreateDeclaredVariable(const FNodeScribeStatement&
 	}
 
 	FEdGraphPinType PinType;
-	if (!ResolvePinTypeFromName(Statement.VariableType, PinType))
+	if (!ResolvePinTypeFromNameInternal(Statement.VariableType, PinType))
 	{
 		AddError(Statement.LineNumber, FString::Printf(
 			TEXT("Nao reconheci o tipo `%s`. Use o nome que aparece na interface, como Float, Name, Timer Handle."),
@@ -2773,4 +2797,9 @@ FNodeScribeBuilder::FResult FNodeScribeBuilder::Build(
 	FNodeScribeBuildContext Context(Graph, Blueprint, Origin);
 	Context.Run(Statements);
 	return MoveTemp(Context.Result);
+}
+
+bool NodeScribeTypeNames::ResolvePinTypeFromName(const FString& InTypeName, FEdGraphPinType& OutType)
+{
+	return ResolvePinTypeFromNameInternal(InTypeName, OutType);
 }

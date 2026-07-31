@@ -542,6 +542,16 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 
 		FEntry Entry;
 		Entry.Left = FString::Printf(TEXT("variavel %s : %s"), *Name, *DescribeType(Property));
+
+		// Instance Editable e' o que faz a variavel aparecer no painel de quem
+		// usa o Blueprint -- e' assim que uma BTTask ganha parametro por node.
+		// Sem sair aqui, uma ida e volta apagaria a marcacao calada.
+		if (Property->HasAnyPropertyFlags(CPF_Edit)
+			&& !Property->HasAnyPropertyFlags(CPF_DisableEditOnInstance))
+		{
+			Entry.Left += TEXT(" editavel");
+		}
+
 		if (bHasValue && Value != TEXT("None") && Value != TEXT("0") && Value != TEXT("false"))
 		{
 			Entry.Left += TEXT(" = ") + Value;

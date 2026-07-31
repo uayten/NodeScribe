@@ -6,6 +6,23 @@
 class UBlueprint;
 class UEdGraph;
 class UEdGraphNode;
+struct FEdGraphPinType;
+
+/**
+ * Nome de tipo escrito a mao -> tipo de pino da Unreal.
+ *
+ * Aceita o que aparece na interface (`Float`, `Timer Handle`,
+ * `EPlayerMappableKeySlot`, `Array de Name`), porque e' o que o usuario ve'.
+ *
+ * E' o espelho de `NodeScribePropertyText::DescribePinType`: o que sai de la'
+ * entra aqui. Mora no builder porque depende dos buscadores de struct, enum e
+ * classe por nome de tela, que sao dele -- mas a ficha tambem precisa, para
+ * criar variavel a partir de `variavel Nome : Tipo`.
+ */
+namespace NodeScribeTypeNames
+{
+	bool ResolvePinTypeFromName(const FString& InTypeName, FEdGraphPinType& OutType);
+}
 
 /**
  * Transforma statements em nodes reais dentro de um UEdGraph.
