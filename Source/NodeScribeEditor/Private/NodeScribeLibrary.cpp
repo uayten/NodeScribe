@@ -1,5 +1,6 @@
 #include "NodeScribeLibrary.h"
 
+#include "NodeScribeAssetMaker.h"
 #include "NodeScribeBuilder.h"
 #include "NodeScribeObjectReader.h"
 #include "NodeScribeObjectWriter.h"
@@ -141,6 +142,11 @@ FString UNodeScribeLibrary::WriteObject(UObject* Object, const FString& Text)
 		Result.Applied,
 		Report.IsEmpty() ? TEXT("") : TEXT("\n"),
 		*Report);
+}
+
+FString UNodeScribeLibrary::CreateAsset(const FString& Path, const FString& Parent)
+{
+	return FNodeScribeAssetMaker::CreateAsset(Path, Parent);
 }
 
 FString UNodeScribeLibrary::SaveAllAndQuit()

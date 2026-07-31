@@ -286,7 +286,7 @@ namespace
 	 */
 	UScriptStruct* FindStructByFriendlyName(const FString& Name);
 	UEnum* FindEnumByFriendlyName(const FString& Name);
-	UClass* FindClassByFriendlyName(const FString& Name);
+	UClass* FindClassByFriendlyNameInternal(const FString& Name);
 
 	bool ResolvePinTypeFromNameInternal(const FString& InTypeName, FEdGraphPinType& OutType)
 	{
@@ -364,7 +364,7 @@ namespace
 			OutType.PinCategory = UEdGraphSchema_K2::PC_Byte;
 			OutType.PinSubCategoryObject = Enum;
 		}
-		else if (UClass* Class = FindClassByFriendlyName(TypeName))
+		else if (UClass* Class = FindClassByFriendlyNameInternal(TypeName))
 		{
 			OutType.PinCategory = bIsClassReference
 				? UEdGraphSchema_K2::PC_Class
@@ -464,7 +464,7 @@ namespace
 	}
 
 	/** Busca de classe por nome curto, aceitando tanto `BP_Boss` quanto `BP_Boss_C`. */
-	UClass* FindClassByFriendlyName(const FString& Name)
+	UClass* FindClassByFriendlyNameInternal(const FString& Name)
 	{
 		const FString Normalized = FNodeScribeCatalog::Normalize(Name);
 		const FString NormalizedWithSuffix = Normalized + TEXT("c");
@@ -1308,7 +1308,7 @@ void FNodeScribeBuildContext::ApplyLiteral(UEdGraphPin* Pin, const FString& Valu
 		const FName Category = Pin->PinType.PinCategory;
 		if (Category == UEdGraphSchema_K2::PC_Class || Category == UEdGraphSchema_K2::PC_SoftClass)
 		{
-			if (UClass* Found = FindClassByFriendlyName(Value))
+			if (UClass* Found = FindClassByFriendlyNameInternal(Value))
 			{
 				Schema->TrySetDefaultObject(*Pin, Found);
 				return;
@@ -1845,7 +1845,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		if (!ClassName.IsEmpty())
 		{
 			ClassName.TrimStartAndEndInline();
-			UClass* TargetClass = FindClassByFriendlyName(ClassName);
+			UClass* TargetClass = FindClassByFriendlyNameInternal(ClassName);
 
 			if (!TargetClass)
 			{
@@ -2297,7 +2297,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 
 		UClass* SpawnClass = ClassValue.StartsWith(TEXT("/"))
 			? LoadObject<UClass>(nullptr, *ClassValue)
-			: FindClassByFriendlyName(ClassValue);
+			: FindClassByFriendlyNameInternal(ClassValue);
 
 		if (!SpawnClass)
 		{
@@ -2427,7 +2427,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		// Esses nodes nao sao chamada de funcao e nunca apareceriam no catalogo.
 		if (!bIsSetter && !VariableName.IsEmpty())
 		{
-			if (UClass* SubsystemClass = FindClassByFriendlyName(VariableName))
+			if (UClass* SubsystemClass = FindClassByFriendlyNameInternal(VariableName))
 			{
 				if (SubsystemClass->IsChildOf(USubsystem::StaticClass()))
 				{
@@ -2802,4 +2802,9 @@ FNodeScribeBuilder::FResult FNodeScribeBuilder::Build(
 bool NodeScribeTypeNames::ResolvePinTypeFromName(const FString& InTypeName, FEdGraphPinType& OutType)
 {
 	return ResolvePinTypeFromNameInternal(InTypeName, OutType);
+}
+
+UClass* NodeScribeTypeNames::FindClassByFriendlyName(const FString& Name)
+{
+	return FindClassByFriendlyNameInternal(Name);
 }

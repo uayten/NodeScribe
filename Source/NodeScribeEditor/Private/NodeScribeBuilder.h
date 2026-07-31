@@ -22,6 +22,12 @@ struct FEdGraphPinType;
 namespace NodeScribeTypeNames
 {
 	bool ResolvePinTypeFromName(const FString& InTypeName, FEdGraphPinType& OutType);
+
+	/**
+	 * Classe pelo nome que aparece na tela, aceitando o `_C` de Blueprint.
+	 * `BP_Pedra` e `BP_Pedra_C` dao na mesma.
+	 */
+	UClass* FindClassByFriendlyName(const FString& Name);
 }
 
 /**

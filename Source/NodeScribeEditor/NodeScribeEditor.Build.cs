@@ -26,7 +26,9 @@ public class NodeScribeEditor : ModuleRules
 			"BlueprintGraph",
 			"KismetCompiler",
 			"Kismet",
-			"MessageLog"
+			"MessageLog",
+			// Criar asset: o nativo nao tem criacao, so' duplicate.
+			"AssetTools"
 		});
 	}
 }

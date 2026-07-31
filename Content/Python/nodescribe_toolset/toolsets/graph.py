@@ -98,6 +98,26 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
     @toolset_registry.tool_call
     @staticmethod
+    def create_asset(path: str, parent: str) -> str:
+        """Cria um asset vazio.
+
+        Existe porque o toolset nativo tem duplicate, move e delete, e nao tem
+        criacao -- sem isto, todo asset novo depende de alguem clicar.
+
+        Nunca sobrescreve, e so' cria dentro de /Game/. O asset fica sujo, sem
+        salvar, como qualquer um recem-criado no editor.
+
+        Args:
+            path: Onde criar, com nome: '/Game/BossRush/Testes/BTTask_Foo'.
+            parent: O tipo, pelo nome de tela: 'BTTask_BlueprintBase',
+                    'GameplayEffect', 'BlackboardData', 'BehaviorTree'.
+        Returns:
+            O caminho do que foi criado, ou o motivo de nao ter dado.
+        """
+        return unreal.NodeScribeLibrary.create_asset(path, parent)
+
+    @toolset_registry.tool_call
+    @staticmethod
     def save_all_and_quit() -> str:
         """Salva tudo e fecha o editor.
 

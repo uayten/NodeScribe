@@ -66,6 +66,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString WriteObject(UObject* Object, const FString& Text);
 
+	/**
+	 * Cria um asset vazio.
+	 *
+	 * Existe por capacidade, nao por economia: o toolset nativo da Engine tem
+	 * duplicate, move e delete, e nao tem criacao. Sem isto, todo asset novo e'
+	 * um pedido de clique para uma pessoa, e o resto do trabalho para'.
+	 *
+	 * @param Path    onde criar, com nome: `/Game/BossRush/Testes/BTTask_Foo`.
+	 * @param Parent  o tipo, pelo nome de tela: `BTTask_BlueprintBase`,
+	 *                `GameplayEffect`, `BlackboardData`, `BehaviorTree`.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
+	static FString CreateAsset(const FString& Path, const FString& Parent);
+
 	/** A especificacao do formato, para quem nunca a viu. */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString GetFormatDocs();

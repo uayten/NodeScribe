@@ -718,6 +718,21 @@ que. O `GA_GolemSalto` usa `Gameplay Ability Graph`, com espaços, e o
 `GA_ChuvaDePedras` usa `EventGraph` — dois assets do mesmo tipo, criados por
 caminhos diferentes. Sem a listagem, restava tentar nomes até acertar.
 
+### Onde estamos nessa lista
+
+| item | estado | o que trava enquanto falta |
+|---|---|---|
+| 1 — Variável de Blueprint | **pronto** | — |
+| 2 — Criar asset | **pronto** | — |
+| 3 — Escrever Behavior Tree | falta | toda mudança na árvore |
+| 4 — Componentes de Gameplay Effect | falta | todo cooldown novo |
+| 5 — Criar Gameplay Tag | falta | a tag que o cooldown concede |
+| 6 — Consertos de leitura | falta | `Default Starting Data`; Cast que não volta igual |
+
+Com 1 e 2 prontos, o que resta para a IA do Golem fechar sem clique é 3, 4 e 5.
+O 3 é o maior e o único onde errar grava um asset que parece certo e está
+vazio — por isso vai por último.
+
 ### O que falta para não precisar pedir cliques
 
 Levantado revisando uma sessão inteira de trabalho real, onde montar uma
@@ -767,12 +782,35 @@ Duas coisas que só o teste real mostrou:
   `DescribePinType` o emite de volta. Era um furo no espelho que ninguém tinha
   esbarrado porque nenhum grafo testado declarava variável de classe.
 
-**2. Criar asset.** Travou três vezes: o Gameplay Effect do cooldown, a
-BTTask, o BTService. `IAssetTools::CreateAsset` com a factory do tipo.
+**2. Criar asset.** **Pronto.**
 
-**Isto é capacidade, não economia** — o toolset nativo também não tem
-`create_asset`, só `duplicate`. Construir aqui é para poder fazer algo que hoje
-ninguém faz, e o README não deve fingir que economiza token.
+```
+create_asset("/Game/BossRush/IA/Golem/Behavior/BTTask_UsarHabilidade",
+             "BTTask_BlueprintBase")
+```
+
+**É capacidade, não economia** — o toolset nativo também não tem
+`create_asset`, só `duplicate`. Foi construído para poder fazer algo que
+ninguém fazia, e este README não finge que economiza token.
+
+Dois caminhos, decididos por `FKismetEditorUtilities::CanCreateBlueprintOfClass`:
+o que é Blueprintable — `GameplayEffect`, `BTTask_BlueprintBase`,
+`BTService_BlueprintBase` — vira Blueprint com aquele pai; o resto —
+`BlackboardData`, `BehaviorTree` — vai pela factory do tipo. A factory sai por
+varredura, não por tabela, pelo mesmo motivo dos tipos de chave de blackboard:
+plugin e projeto podem trazer a sua.
+
+Duas guardas, e a segunda quase não existiu:
+
+- **Só dentro de `/Game/`.** Escrever em `/Engine` a partir de uma linha de
+  texto é o tipo de acidente que não se desfaz.
+- **Nunca sobrescreve** — e a primeira versão sobrescrevia. `DoesPackageExist`
+  só olha o disco, e asset recém-criado e ainda não salvo mora só na memória,
+  que é exatamente o estado em que ele fica. Chamar duas vezes seguidas passava
+  direto pela guarda e recriava por cima. Agora checa também `FindPackage`.
+
+O asset fica sujo, sem salvar, como qualquer recém-criado no editor — quem
+criou por engano fecha sem salvar.
 
 **3. Escrever Behavior Tree.** É a etapa 5 do roteiro, e a que mais pesa: sem
 ela, toda mudança na árvore é clique. O asset guarda a hierarquia de execução
