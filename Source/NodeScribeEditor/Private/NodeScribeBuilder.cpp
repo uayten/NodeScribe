@@ -614,6 +614,15 @@ private:
 	TArray<FUnnamedLine> UnnamedLines;
 
 	/**
+	 * Gets que o plugin criou sozinho por causa de um `$Variavel`.
+	 *
+	 * Se a ligacao que os justificava nao aconteceu -- tipo errado, pino que
+	 * nao existe --, eles ficam no grafo sem servir para nada. Como nao foram
+	 * pedidos por uma linha do texto, somem no fim em vez de virar entulho.
+	 */
+	TArray<UEdGraphNode*> AutoCreatedGets;
+
+	/**
 	 * Nodes de varias saidas de execucao ainda sem rotulo.
 	 *
 	 * O aviso so' pode sair no fim: na hora em que o node nasce, o rotulo que
@@ -1063,9 +1072,15 @@ void FNodeScribeBuildContext::Connect(UEdGraphPin* From, UEdGraphPin* To, int32 
 	// quando os tipos sao compativeis por cast implicito (int -> float, etc).
 	if (!Schema->TryCreateConnection(From, To))
 	{
+		// Dizer os dois tipos e' o que resolve o caso mais confuso: um nome que
+		// existe, mas nao e' o que voce quis dizer. `$Slot` acha o `Slot` que
+		// todo UWidget herda, e nao a variavel que voce ia criar.
 		AddWarning(Line, FString::Printf(
-			TEXT("Nao consegui ligar `%s` em `%s` (tipos incompativeis). Ligue na mao."),
-			*From->PinName.ToString(), *To->PinName.ToString()));
+			TEXT("`%s` e' %s, e o pino `%s` espera %s. A ligacao nao foi feita."),
+			*From->PinName.ToString(),
+			*UEdGraphSchema_K2::TypeToText(From->PinType).ToString(),
+			*To->PinName.ToString(),
+			*UEdGraphSchema_K2::TypeToText(To->PinType).ToString()));
 	}
 }
 
@@ -1195,6 +1210,7 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 		// A posicao fica para LayoutDataNodes(): aqui o node que consome este
 		// Get pode ainda nem ter sido posicionado.
 		Result.CreatedNodes.Add(GetNode);
+		AutoCreatedGets.Add(GetNode);
 
 		UEdGraphPin* OutputPin = FindPrimaryOutput(GetNode);
 		if (OutputPin)
@@ -1265,6 +1281,7 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 		}
 
 		Result.CreatedNodes.Add(GetNode);
+		AutoCreatedGets.Add(GetNode);
 
 		AddWarning(Line, FString::Printf(
 			TEXT("`%s` nao existe neste Blueprint. Criei o Get assim mesmo: o grafo vai acusar o erro, ")
@@ -2368,6 +2385,28 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		AddInfo(Entry.Line, FString::Printf(
 			TEXT("Este node tem varias saidas (%s) e nenhum rotulo indentado. A cadeia parou aqui."),
 			*Entry.Outputs));
+	}
+
+	// Get que o plugin criou por conta propria e que nao ligou em nada nao
+	// representa nenhuma linha do texto: e' resto de uma ligacao que falhou.
+	// O aviso da falha ja' saiu; deixar o node so' encheria o grafo.
+	for (UEdGraphNode* GetNode : AutoCreatedGets)
+	{
+		bool bConnected = false;
+		for (const UEdGraphPin* Pin : GetNode->Pins)
+		{
+			if (Pin->LinkedTo.Num() > 0)
+			{
+				bConnected = true;
+				break;
+			}
+		}
+
+		if (!bConnected)
+		{
+			Result.CreatedNodes.Remove(GetNode);
+			Graph->RemoveNode(GetNode);
+		}
 	}
 
 	LayoutDataNodes();
