@@ -377,6 +377,11 @@ tela ao mesmo tempo.
 Trocar o tipo troca o subobjeto inteiro. Reaproveitar o antigo deixaria as
 propriedades da chave anterior penduradas na nova.
 
+Exercitado em `Testes/BB_Teste`: quatro chaves novas criadas, uma que já existia
+não duplicou, `sincronizada` voltou pela leitura, `Object (Pawn)` resolveu a
+classe pelo nome curto, e tipo inexistente foi recusado listando os doze que
+existem.
+
 **Falta escrever BT**, e é a cara: o asset guarda a hierarquia de execução *e*
 um grafo de editor (`UBehaviorTreeGraph`) que precisa ficar em sincronia.
 Escrever só o lado de runtime dá um asset que roda e aparece vazio na tela.
@@ -662,7 +667,33 @@ outros ~107 dispensáveis.
 Os números de token acima são estimativa a partir da contagem de propriedades
 e do formato que o `StructToJsonSchema` produz, não medição.
 
-### Enviar só o que mudou
+### Criar asset: medido, e **não vale** por token
+
+Ficou a dúvida se criar asset deveria entrar aqui para economizar. Medimos.
+
+| | custo |
+|---|---|
+| `describe_toolset` do `AssetTools` (21 ferramentas) | ~4.000 tokens, **uma vez por sessão** |
+| a chamada em si (`duplicate`, `move`, `save_assets`…) | ~50 tokens |
+
+O gasto é **descoberta**, não uso — e trazer a operação para cá só evitaria
+aquela descoberta se nunca precisássemos de mais nada daquele toolset. Mas
+`find_assets`, `get_referencers`, `get_dependencies`, `move` e `delete` moram
+todos lá.
+
+E o principal: **esse toolset não tem payload gordo para comprimir.**
+`find_assets` devolve uma lista de caminhos, `get_dependencies` idem,
+`duplicate` devolve um booleano. É o caso bem resolvido — não há dump, não há
+fluxo de dois turnos, não há N chamadas por objeto. Pela pergunta que este
+README manda fazer antes de construir ferramenta nova — *o que ela deixa
+desligar?* —, a resposta é "nada".
+
+**Há um buraco, mas é de capacidade, não de token:** o toolset nativo tem
+`duplicate`, `move` e `delete`, e **não tem `create_asset`**. Criar um
+BlackboardData ou uma BehaviorTree do zero não dá; só duplicando um existente.
+Se isso incomodar, vale construir — com `IAssetTools::CreateAsset` e a factory
+do tipo, é pequeno. Mas então é para poder fazer algo novo, e o README não deve
+fingir que é economia.
 
 Hoje, editar um node num grafo de 40 custa o grafo inteiro em cada direção:
 ler tudo, devolver tudo, reescrever tudo.
