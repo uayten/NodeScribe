@@ -39,3 +39,15 @@ errado. Ao mexer aqui, preserve isso — em caso de dúvida, falhe em voz alta.
 | `NodeScribeGraphActions` | os três botões na barra do editor. |
 
 Leitor e builder são espelhos: ao ensinar um tipo de node novo, os dois mudam.
+
+## Antes de mexer no código
+
+Leia **Desenvolvimento** e **Estado** no [`README.md`](README.md). Estão lá: em
+que ponto o plugin está e qual é a frente atual, o ciclo de fechar o editor →
+compilar → reabrir → testar (com os comandos prontos), como testar por ida e
+volta, os quatro invariantes que não podem quebrar, e o que uma proposta de
+ferramenta nova precisa responder antes de virar código.
+
+Frente atual: **ficha de propriedades** (`read_object` primeiro, sozinho). A
+especificação está em *Possíveis recursos futuros*, no README. Ideia de
+ferramenta nova que aparecer no meio vai para lá, não para o código.
