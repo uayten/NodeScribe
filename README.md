@@ -59,6 +59,21 @@ conversa. São ~150 linhas, uma vez por conversa.
 O ciclo então fica: **Copiar grafo inteiro** → cola no chat → o assistente
 devolve o texto alterado → **Colar**.
 
+## Pelo MCP
+
+Com os plugins **ToolsetRegistry** e **Python Script Plugin** ligados, o
+NodeScribe se expõe como toolset MCP: `write_graph`, `read_graph` e
+`get_format_docs`.
+
+O motivo é custo, não capacidade. Montar um grafo pelas ferramentas
+convencionais gasta a maior parte dos tokens *descobrindo* identificadores de
+node — uma chamada por tipo, cada uma devolvendo dezenas de resultados. O
+catálogo do NodeScribe resolve os nomes localmente, então um grafo inteiro cabe
+numa chamada e algumas centenas de tokens.
+
+As três ferramentas juntas ocupam ~300 tokens de descrição, contra ~18.000 do
+toolset de Blueprint da Engine.
+
 Um grafo de 15 nodes custa ~200 tokens nesse formato, contra ~15.000 no
 formato de clipboard da Unreal.
 
