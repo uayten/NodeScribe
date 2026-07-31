@@ -1204,7 +1204,35 @@ void FNodeScribeReadContext::Run()
 				}
 				else
 				{
-					Declarations.Add(FString::Printf(TEXT("variavel %s : %s"), *Property->GetName(), *TypeName));
+					// O valor padrao vive na descricao da variavel, nao na
+					// propriedade. Sem ele, colar num Blueprint vazio cria a
+					// variavel zerada e o grafo se comporta diferente.
+					FString DefaultValue;
+					for (const FBPVariableDescription& Description : Blueprint->NewVariables)
+					{
+						if (Description.VarName == Property->GetFName())
+						{
+							DefaultValue = Description.DefaultValue;
+							break;
+						}
+					}
+
+					FString Line = FString::Printf(TEXT("variavel %s : %s"), *Property->GetName(), *TypeName);
+
+					if (!DefaultValue.IsEmpty())
+					{
+						FString Quoted;
+						if (!NeedsQuotes(DefaultValue))
+						{
+							Line += TEXT(" = ") + DefaultValue;
+						}
+						else if (TryQuote(DefaultValue, Quoted))
+						{
+							Line += TEXT(" = ") + Quoted;
+						}
+					}
+
+					Declarations.Add(Line);
 				}
 			}
 
@@ -1282,6 +1310,27 @@ void FNodeScribeReadContext::Run()
 			Roots.Add(Node);
 		}
 	}
+
+	// Evento sem nada ligado nao diz nada, e colar o texto de volta esbarraria
+	// no guard de evento duplicado. Os stubs desabilitados que todo Blueprint
+	// novo traz -- BeginPlay, Tick, ActorBeginOverlap -- caem exatamente aqui.
+	Roots.RemoveAll([this](UEdGraphNode* Node)
+	{
+		if (!Node->IsA<UK2Node_Event>() || NeedsName.Contains(Node))
+		{
+			return false;
+		}
+
+		for (UEdGraphPin* Pin : GetExecOutputs(Node))
+		{
+			if (Pin->LinkedTo.Num() > 0)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	});
 
 	// Quem e' referenciado por outra cadeia sai primeiro: `$aterrissar` so'
 	// existe depois da linha que nomeia aquele evento, entao a ordem no texto
