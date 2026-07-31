@@ -662,6 +662,18 @@ private:
 	void CreateDeclaredVariable(const FNodeScribeStatement& Statement);
 
 	/**
+	 * Cria todos os Custom Events antes de processar qualquer linha.
+	 *
+	 * Sem isto, chamar um evento definido mais abaixo no texto falha: a classe
+	 * so' conhece a funcao depois que o node existe e o esqueleto e' regerado.
+	 * No grafo a ordem nao importa, e no texto tambem nao deveria importar.
+	 */
+	void PreCreateCustomEvents(const TArray<FNodeScribeStatement>& Statements);
+
+	/** Eventos ja' criados pela pre-passagem, por nome. */
+	TMap<FString, UEdGraphNode*> PreCreatedEvents;
+
+	/**
 	 * Um evento com a mesma identidade ja' no grafo.
 	 *
 	 * A Unreal permite um node por evento: dois `BeginPlay`, ou dois eventos do
@@ -1146,6 +1158,24 @@ UEdGraphPin* FNodeScribeBuildContext::FindPinByFuzzyName(UEdGraphNode* Node, con
 		}
 	}
 
+	// Convencao de codigo da Unreal: bool se chama `bXYOverride`, e a interface
+	// mostra "XY Override". Ninguem digita o `b`, e o pino nem sempre tem nome
+	// amigavel para cobrir isso.
+	for (UEdGraphPin* Pin : Node->Pins)
+	{
+		if (Pin->Direction != Direction || Pin->bHidden)
+		{
+			continue;
+		}
+
+		const FString PinName = Pin->PinName.ToString();
+		if (PinName.Len() > 1 && PinName[0] == TEXT('b') && FChar::IsUpper(PinName[1])
+			&& FNodeScribeCatalog::Normalize(PinName.RightChop(1)) == Wanted)
+		{
+			return Pin;
+		}
+	}
+
 	return nullptr;
 }
 
@@ -1535,6 +1565,105 @@ UEdGraphNode* FNodeScribeBuildContext::CreateErrorComment(const FNodeScribeState
 	return Comment;
 }
 
+void FNodeScribeBuildContext::PreCreateCustomEvents(const TArray<FNodeScribeStatement>& Statements)
+{
+	if (!Blueprint)
+	{
+		return;
+	}
+
+	bool bCreatedAny = false;
+
+	for (const FNodeScribeStatement& Statement : Statements)
+	{
+		if (Statement.bIsLabel || Statement.bIsVariable)
+		{
+			continue;
+		}
+
+		const FString Expression = Statement.NodeExpression.TrimStartAndEnd();
+
+		FString EventName;
+		if (Expression.StartsWith(TEXT("Event "), ESearchCase::IgnoreCase))
+		{
+			EventName = Expression.RightChop(6);
+		}
+		else if (Expression.StartsWith(TEXT("Evento "), ESearchCase::IgnoreCase))
+		{
+			EventName = Expression.RightChop(7);
+		}
+		else
+		{
+			continue;
+		}
+
+		EventName.TrimStartAndEndInline();
+
+		// `X de Y` e' evento de dispatcher, e `__DelegateSignature` e' recusado:
+		// nenhum dos dois vira Custom Event, entao nao entram aqui.
+		if (EventName.IsEmpty()
+			|| EventName.EndsWith(TEXT("__DelegateSignature"), ESearchCase::CaseSensitive)
+			|| EventName.Contains(TEXT(" de "), ESearchCase::IgnoreCase)
+			|| EventName.Contains(TEXT(" of "), ESearchCase::IgnoreCase)
+			|| PreCreatedEvents.Contains(EventName))
+		{
+			continue;
+		}
+
+		// Evento que a classe pai oferece vira override, nao Custom Event.
+		bool bIsParentEvent = false;
+		if (UClass* ParentClass = Blueprint->ParentClass.Get())
+		{
+			const TArray<FString> Attempts = {
+				EventName,
+				FString(TEXT("Receive")) + EventName,
+				FString(TEXT("K2_")) + EventName
+			};
+
+			for (const FString& Attempt : Attempts)
+			{
+				if (UFunction* Found = ParentClass->FindFunctionByName(FName(*Attempt)))
+				{
+					if (Found->HasAnyFunctionFlags(FUNC_BlueprintEvent))
+					{
+						bIsParentEvent = true;
+						break;
+					}
+				}
+			}
+		}
+
+		if (bIsParentEvent)
+		{
+			continue;
+		}
+
+		const FName WantedName(*EventName);
+		if (FindExistingEvent([&](UEdGraphNode* Existing)
+			{
+				const UK2Node_CustomEvent* CustomEvent = Cast<UK2Node_CustomEvent>(Existing);
+				return CustomEvent && CustomEvent->CustomFunctionName == WantedName;
+			}))
+		{
+			continue;
+		}
+
+		UK2Node_CustomEvent* Node = AllocateNode<UK2Node_CustomEvent>();
+		Node->CustomFunctionName = WantedName;
+		FinalizeNode(Node);
+
+		PreCreatedEvents.Add(EventName, Node);
+		bCreatedAny = true;
+	}
+
+	// Uma regeracao para todos, em vez de uma por evento.
+	if (bCreatedAny)
+	{
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+		FKismetEditorUtilities::GenerateBlueprintSkeleton(Blueprint, true);
+	}
+}
+
 void FNodeScribeBuildContext::CreateDeclaredVariable(const FNodeScribeStatement& Statement)
 {
 	if (!Blueprint || Statement.VariableName.IsEmpty())
@@ -1863,6 +1992,13 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 					TEXT("Um Custom Event com esse nome compilaria e nunca dispararia, entao nao criei nenhum.\n\n")
 					TEXT("Para fazer a mao: botao direito no grafo, procure `%s`, e escolha a opcao de evento."),
 					*DispatcherName, *DispatcherName));
+			}
+
+			// A pre-passagem ja' criou este evento para que linhas acima
+			// pudessem chama-lo. Aqui so' entregamos o mesmo node.
+			if (UEdGraphNode** PreCreated = PreCreatedEvents.Find(EventName))
+			{
+				return *PreCreated;
 			}
 
 			const FName WantedCustomEvent(*EventName);
@@ -2405,6 +2541,8 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 	Root.BaseX = FMath::RoundToInt(Origin.X);
 	Root.BaseY = FMath::RoundToInt(Origin.Y);
 	Frames.Add(Root);
+
+	PreCreateCustomEvents(Statements);
 
 	for (const FNodeScribeStatement& Statement : Statements)
 	{
