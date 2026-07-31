@@ -9,6 +9,7 @@
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Kismet2/BlueprintEditorUtils.h"
 #include "K2Node_BreakStruct.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_ComponentBoundEvent.h"
@@ -275,6 +276,96 @@ namespace
 		return nullptr;
 	}
 
+	/**
+	 * Nome de tipo escrito a mao -> tipo de pino da Unreal.
+	 *
+	 * Aceita o que aparece na interface (`Float`, `Timer Handle`,
+	 * `EPlayerMappableKeySlot`), porque e' o que o usuario ve' -- e e' tambem o
+	 * que o leitor escreve na volta.
+	 */
+	UScriptStruct* FindStructByFriendlyName(const FString& Name);
+	UEnum* FindEnumByFriendlyName(const FString& Name);
+	UClass* FindClassByFriendlyName(const FString& Name);
+
+	bool ResolvePinTypeFromName(const FString& InTypeName, FEdGraphPinType& OutType)
+	{
+		FString TypeName = InTypeName.TrimStartAndEnd();
+		bool bIsArray = false;
+
+		static const TCHAR* const ArrayPrefixes[] = {
+			TEXT("Array de "), TEXT("Array of "), TEXT("Lista de ")
+		};
+
+		for (const TCHAR* Prefix : ArrayPrefixes)
+		{
+			if (TypeName.StartsWith(Prefix, ESearchCase::IgnoreCase))
+			{
+				TypeName = TypeName.RightChop(FCString::Strlen(Prefix)).TrimStartAndEnd();
+				bIsArray = true;
+				break;
+			}
+		}
+
+		static const TMap<FString, FName> Primitives = {
+			{ TEXT("bool"),     UEdGraphSchema_K2::PC_Boolean },
+			{ TEXT("boolean"),  UEdGraphSchema_K2::PC_Boolean },
+			{ TEXT("booleano"), UEdGraphSchema_K2::PC_Boolean },
+			{ TEXT("int"),      UEdGraphSchema_K2::PC_Int },
+			{ TEXT("integer"),  UEdGraphSchema_K2::PC_Int },
+			{ TEXT("inteiro"),  UEdGraphSchema_K2::PC_Int },
+			{ TEXT("int64"),    UEdGraphSchema_K2::PC_Int64 },
+			{ TEXT("byte"),     UEdGraphSchema_K2::PC_Byte },
+			{ TEXT("float"),    UEdGraphSchema_K2::PC_Real },
+			{ TEXT("double"),   UEdGraphSchema_K2::PC_Real },
+			{ TEXT("real"),     UEdGraphSchema_K2::PC_Real },
+			{ TEXT("string"),   UEdGraphSchema_K2::PC_String },
+			{ TEXT("name"),     UEdGraphSchema_K2::PC_Name },
+			{ TEXT("nome"),     UEdGraphSchema_K2::PC_Name },
+			{ TEXT("text"),     UEdGraphSchema_K2::PC_Text },
+			{ TEXT("texto"),    UEdGraphSchema_K2::PC_Text }
+		};
+
+		OutType = FEdGraphPinType();
+
+		const FString Normalized = FNodeScribeCatalog::Normalize(TypeName);
+
+		if (const FName* Category = Primitives.Find(Normalized))
+		{
+			OutType.PinCategory = *Category;
+
+			if (*Category == UEdGraphSchema_K2::PC_Real)
+			{
+				OutType.PinSubCategory = UEdGraphSchema_K2::PC_Double;
+			}
+		}
+		else if (UScriptStruct* Struct = FindStructByFriendlyName(TypeName))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+			OutType.PinSubCategoryObject = Struct;
+		}
+		else if (UEnum* Enum = FindEnumByFriendlyName(TypeName))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Byte;
+			OutType.PinSubCategoryObject = Enum;
+		}
+		else if (UClass* Class = FindClassByFriendlyName(TypeName))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Object;
+			OutType.PinSubCategoryObject = Class;
+		}
+		else
+		{
+			return false;
+		}
+
+		if (bIsArray)
+		{
+			OutType.ContainerType = EPinContainerType::Array;
+		}
+
+		return true;
+	}
+
 	/** Busca de struct por nome, aceitando `MapPlayerKeyArgs` e `Map Player Key Args`. */
 	UScriptStruct* FindStructByFriendlyName(const FString& Name)
 	{
@@ -326,6 +417,25 @@ namespace
 		}
 
 		return UK2Node_GetSubsystem::StaticClass();
+	}
+
+	UEnum* FindEnumByFriendlyName(const FString& Name)
+	{
+		const FString Normalized = FNodeScribeCatalog::Normalize(Name);
+		if (Normalized.IsEmpty())
+		{
+			return nullptr;
+		}
+
+		for (TObjectIterator<UEnum> EnumIt; EnumIt; ++EnumIt)
+		{
+			if (FNodeScribeCatalog::Normalize(EnumIt->GetName()) == Normalized)
+			{
+				return *EnumIt;
+			}
+		}
+
+		return nullptr;
 	}
 
 	/** Busca de classe por nome curto, aceitando tanto `BP_Boss` quanto `BP_Boss_C`. */
@@ -546,6 +656,9 @@ private:
 	UEdGraphNode* CreateNodeForStatement(const FNodeScribeStatement& Statement);
 	UEdGraphNode* TryCreateSpecialNode(const FNodeScribeStatement& Statement, bool& bOutHandled);
 	UEdGraphNode* CreateErrorComment(const FNodeScribeStatement& Statement, const FString& Reason);
+
+	/** Cria a variavel de uma linha `variavel Nome : Tipo = valor`. */
+	void CreateDeclaredVariable(const FNodeScribeStatement& Statement);
 
 	/**
 	 * Um evento com a mesma identidade ja' no grafo.
@@ -1421,6 +1534,68 @@ UEdGraphNode* FNodeScribeBuildContext::CreateErrorComment(const FNodeScribeState
 	return Comment;
 }
 
+void FNodeScribeBuildContext::CreateDeclaredVariable(const FNodeScribeStatement& Statement)
+{
+	if (!Blueprint || Statement.VariableName.IsEmpty())
+	{
+		return;
+	}
+
+	// Declarar de novo nao e' erro: colar o mesmo texto duas vezes tem que ser
+	// inofensivo, e o texto que o leitor produz sempre traz as declaracoes.
+	if (FindPropertyByFriendlyName(GetSelfClass(), Statement.VariableName))
+	{
+		AddInfo(Statement.LineNumber, FString::Printf(
+			TEXT("`%s` ja' existe; nao mexi nela."), *Statement.VariableName));
+		return;
+	}
+
+	FEdGraphPinType PinType;
+	if (!ResolvePinTypeFromName(Statement.VariableType, PinType))
+	{
+		AddError(Statement.LineNumber, FString::Printf(
+			TEXT("Nao reconheci o tipo `%s`. Use o nome que aparece na interface, como Float, Name, Timer Handle."),
+			*Statement.VariableType));
+		return;
+	}
+
+	// Widget do Designer nao se cria por declaracao: a variavel nasce ao
+	// colocar o widget na tela e marcar Is Variable. Uma variavel com o mesmo
+	// nome compilaria e nunca apontaria para o widget -- e ainda atrapalharia
+	// quando o widget de verdade fosse criado.
+	if (PinType.PinCategory == UEdGraphSchema_K2::PC_Object)
+	{
+		const UClass* WidgetClass = FindObject<UClass>(nullptr, TEXT("/Script/UMG.Widget"));
+		const UClass* UserWidgetClass = FindObject<UClass>(nullptr, TEXT("/Script/UMG.UserWidget"));
+		const UClass* VariableClass = Cast<UClass>(PinType.PinSubCategoryObject.Get());
+
+		const bool bIsWidgetBlueprint = UserWidgetClass
+			&& Blueprint->ParentClass
+			&& Blueprint->ParentClass->IsChildOf(UserWidgetClass);
+
+		if (bIsWidgetBlueprint && WidgetClass && VariableClass && VariableClass->IsChildOf(WidgetClass))
+		{
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("`%s` e' um widget: crie no Designer e marque `Is Variable`, nao aqui."),
+				*Statement.VariableName));
+			return;
+		}
+	}
+
+	if (FBlueprintEditorUtils::AddMemberVariable(
+		Blueprint, FName(*Statement.VariableName), PinType, Statement.VariableDefault))
+	{
+		AddInfo(Statement.LineNumber, FString::Printf(
+			TEXT("Criei a variavel `%s`."), *Statement.VariableName));
+	}
+	else
+	{
+		AddError(Statement.LineNumber, FString::Printf(
+			TEXT("Nao consegui criar `%s`. O nome pode estar em uso por algo herdado."),
+			*Statement.VariableName));
+	}
+}
+
 UEdGraphNode* FNodeScribeBuildContext::FindExistingEvent(const TFunctionRef<bool(UEdGraphNode*)>& Matches) const
 {
 	for (UEdGraphNode* Existing : Graph->Nodes)
@@ -2224,6 +2399,14 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 	for (const FNodeScribeStatement& Statement : Statements)
 	{
+		// Declaracao nao cria node nem participa da cadeia: e' so' uma variavel
+		// passando a existir antes das linhas que a usam.
+		if (Statement.bIsVariable)
+		{
+			CreateDeclaredVariable(Statement);
+			continue;
+		}
+
 		if (Statement.bIsLabel)
 		{
 			// Um rotulo fecha qualquer bloco no mesmo nivel ou mais fundo,

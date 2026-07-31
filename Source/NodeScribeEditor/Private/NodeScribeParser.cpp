@@ -315,6 +315,52 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 		Statement.Indent = Indent;
 		Statement.RawLine = Original.TrimStartAndEnd();
 
+		// Declaracao de variavel: `variavel Vida : Float = 100`.
+		//
+		// Vem antes do rotulo porque `:` aparece nas duas formas -- aqui no meio
+		// da linha, la' no fim. O prefixo desambigua sem depender disso.
+		{
+			static const TCHAR* const VariableKeywords[] = {
+				TEXT("variavel "), TEXT("variável "), TEXT("variable "), TEXT("var ")
+			};
+
+			for (const TCHAR* Keyword : VariableKeywords)
+			{
+				if (!Line.StartsWith(Keyword, ESearchCase::IgnoreCase))
+				{
+					continue;
+				}
+
+				FString Rest = Line.RightChop(FCString::Strlen(Keyword));
+				Rest.TrimStartAndEndInline();
+
+				Statement.bIsVariable = true;
+
+				FString NameAndType = Rest;
+				if (Rest.Split(TEXT("="), &NameAndType, &Statement.VariableDefault))
+				{
+					Statement.VariableDefault = Unquote(Statement.VariableDefault.TrimStartAndEnd());
+				}
+
+				if (!NameAndType.Split(TEXT(":"), &Statement.VariableName, &Statement.VariableType))
+				{
+					OutDiagnostics.Emplace(ENodeScribeSeverity::Error, LineNumber,
+						TEXT("Declaracao sem tipo. Escreva `variavel Nome : Tipo`."));
+					Statement.bIsVariable = false;
+				}
+
+				Statement.VariableName.TrimStartAndEndInline();
+				Statement.VariableType.TrimStartAndEndInline();
+				break;
+			}
+
+			if (Statement.bIsVariable)
+			{
+				Statements.Add(MoveTemp(Statement));
+				continue;
+			}
+		}
+
 		const int32 ParenIndex = FindArgsOpenParen(Line);
 
 		// Rotulo de saida de execucao: termina em `:` e nao tem argumentos.

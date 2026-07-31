@@ -1060,7 +1060,17 @@ void FNodeScribeReadContext::Run()
 
 		if (OwnClass)
 		{
-			TArray<FString> Declared;
+			// Widget do Designer nao se declara: sai como comentario, para quem
+			// le' saber que existe sem o texto tentar recria-la ao voltar.
+			const UClass* WidgetClass = FindObject<UClass>(nullptr, TEXT("/Script/UMG.Widget"));
+			const UClass* UserWidgetClass = FindObject<UClass>(nullptr, TEXT("/Script/UMG.UserWidget"));
+
+			const bool bIsWidgetBlueprint = UserWidgetClass
+				&& Blueprint->ParentClass
+				&& Blueprint->ParentClass->IsChildOf(UserWidgetClass);
+
+			TArray<FString> Declarations;
+			TArray<FString> DesignerWidgets;
 
 			// ExcludeSuper: so' o que este Blueprint declara. Com a heranca
 			// junto seriam centenas de linhas da Engine, e nenhuma util aqui.
@@ -1073,16 +1083,35 @@ void FNodeScribeReadContext::Run()
 					continue;
 				}
 
-				Declared.Add(FString::Printf(TEXT("#   %s : %s"),
-					*Property->GetName(),
-					*UEdGraphSchema_K2::TypeToText(Property).ToString()));
+				const FString TypeName = UEdGraphSchema_K2::TypeToText(Property).ToString();
+
+				bool bIsDesignerWidget = false;
+				if (bIsWidgetBlueprint && WidgetClass)
+				{
+					if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+					{
+						bIsDesignerWidget = ObjectProperty->PropertyClass
+							&& ObjectProperty->PropertyClass->IsChildOf(WidgetClass);
+					}
+				}
+
+				if (bIsDesignerWidget)
+				{
+					DesignerWidgets.Add(FString::Printf(TEXT("#   %s : %s"), *Property->GetName(), *TypeName));
+				}
+				else
+				{
+					Declarations.Add(FString::Printf(TEXT("variavel %s : %s"), *Property->GetName(), *TypeName));
+				}
 			}
 
-			if (Declared.Num() > 0)
+			if (DesignerWidgets.Num() > 0)
 			{
-				Lines.Add(TEXT("# variaveis:"));
-				Lines.Append(Declared);
+				Lines.Add(TEXT("# do Designer (crie na tela, marcando Is Variable):"));
+				Lines.Append(DesignerWidgets);
 			}
+
+			Lines.Append(Declarations);
 		}
 
 		Lines.Add(FString());

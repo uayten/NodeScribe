@@ -49,6 +49,28 @@ Isso também alcança **parte de uma struct**. Se você pedir `$tecla.Selected K
 Key` e o node só tiver o pino `Selected Key` inteiro, o plugin divide a struct
 (o mesmo que *Split Struct Pin*) para achar a parte pedida.
 
+## Declarar variáveis
+
+```
+variavel Pulos Totais : Integer = 3
+variavel Duração do Pulo : Float = 1.0
+variavel Timer Salto : Timer Handle
+variavel Inputs : Array de Name
+```
+
+A variável é criada antes dos nodes que a usam. Se já existir, a linha é
+ignorada — colar o mesmo texto duas vezes não faz mal.
+
+O tipo é o nome que aparece na interface: `Float`, `Integer`, `Boolean`,
+`Name`, `Text`, `String`, qualquer struct (`Timer Handle`, `Vector`), qualquer
+enum (`EPlayerMappableKeySlot`) e qualquer classe (`BP_Golem`).
+`Array de X` para lista.
+
+**Widget do Designer não se declara.** Um `ScrollBox` da tela vira variável ao
+ser colocado no Designer com *Is Variable* marcado — declarar uma com o mesmo
+nome daria uma variável que compila e nunca aponta para o widget. O plugin
+recusa e diz isso.
+
 ## Argumentos
 
 Entre parênteses, separados por vírgula. Aceita nome do pino ou posição:
@@ -301,18 +323,21 @@ marcadores `-` e `*`, e numeração de passo em qualquer forma comum —
 **Copiar selecionado** e **Copiar grafo inteiro** produzem texto neste mesmo
 formato, pronto para colar num chat e editar.
 
-O cabeçalho diz de onde o texto veio e o que o Blueprint declara:
+O cabeçalho diz de onde o texto veio e declara as variáveis:
 
 ```
 # WBP_LinhaRemapear -> EventGraph (selecao parcial)
-# variaveis:
-#   Nome do Input : Name
-#   Slot : EPlayerMappableKeySlot
-#   NomedaHabilidadeText : Text Block Object Reference
+# do Designer (crie na tela, marcando Is Variable):
+#   NomedaHabilidadeText : Text Object Reference
+variavel Nome do Input : Name
+variavel KeySlot : EPlayerMappableKeySlot
 ```
 
-Tudo comentário, então some sozinho na volta. Só as variáveis que o próprio
-Blueprint declara — as herdadas seriam centenas de linhas da Engine.
+Colar num Blueprint vazio recria as variáveis junto com os nodes. As do
+Designer saem como comentário, porque não é o texto que as cria.
+
+Só o que o próprio Blueprint declara — as herdadas seriam centenas de linhas
+da Engine.
 
 A tradução não é perfeita, e onde ela não é o plugin fala:
 

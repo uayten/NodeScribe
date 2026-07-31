@@ -70,6 +70,15 @@ struct FNodeScribeStatement
 	/** Texto do rotulo, sem os dois pontos. */
 	FString Label;
 
+	/** true quando a linha declara uma variavel: `variavel Vida : Float = 100`. */
+	bool bIsVariable = false;
+
+	FString VariableName;
+	FString VariableType;
+
+	/** Valor depois do `=`, se houver. Vazio = padrao do tipo. */
+	FString VariableDefault;
+
 	/** Nome dado a saida principal, de `pc = Get Player Controller`. */
 	FString OutputName;
 
