@@ -152,6 +152,19 @@ estraga asset nenhum, então dá para testar à vontade enquanto o formato ainda
 está mudando de ideia — e é onde está quase toda a economia de token. Escrever
 num formato que ainda vai mudar é como se arrepender caro.
 
+**Onde `read_object` está:** anda em objeto único — propriedades da própria
+classe, modo padrão e modo filtrado, com o alinhamento e a contagem. Falta o
+que está listado abaixo, em ordem:
+
+1. **Componentes.** É a falta que mais se sente: `Max Walk Speed` vive no
+   `CharacterMovement`, então hoje `read_object(BP_Golem, "walk")` responde
+   `0 de 78` — certo para o que existe, e inútil para a pergunta que se quis
+   fazer.
+2. **Variáveis do Blueprint com a linha `variavel`.** Hoje elas caem na lista
+   comum e saem como `Ability System = None`, sem tipo e sem o prefixo.
+3. **O modo filtrado alcançar componente**, uma vez que (1) exista.
+4. Só então `write_object`.
+
 ## Desenvolvimento
 
 Esta seção existe para quem — pessoa ou agente de IA — for mexer no plugin sem

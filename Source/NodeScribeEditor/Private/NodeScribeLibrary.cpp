@@ -1,6 +1,7 @@
 #include "NodeScribeLibrary.h"
 
 #include "NodeScribeBuilder.h"
+#include "NodeScribeObjectReader.h"
 #include "NodeScribeParser.h"
 #include "NodeScribeReader.h"
 #include "NodeScribeTarget.h"
@@ -119,6 +120,11 @@ FString UNodeScribeLibrary::ReadGraph(UEdGraph* Graph)
 	}
 
 	return Result.Text + TEXT("\n\n") + FString::Join(Commented, TEXT("\n"));
+}
+
+FString UNodeScribeLibrary::ReadObject(UObject* Object, const FString& Filter)
+{
+	return FNodeScribeObjectReader::ReadObject(Object, Filter);
 }
 
 FString UNodeScribeLibrary::SaveAllAndQuit()

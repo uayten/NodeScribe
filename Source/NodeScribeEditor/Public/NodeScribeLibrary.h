@@ -35,6 +35,24 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString ReadGraph(UEdGraph* Graph);
 
+	/**
+	 * Um objeto como ficha: uma linha por propriedade, so' o que difere do
+	 * padrao.
+	 *
+	 * Existe pelo mesmo motivo do resto. Listar as propriedades de um Character
+	 * pelo caminho convencional devolve o esquema JSON inteiro da classe --
+	 * ordem de 10.000 tokens, e so' o formato, sem nenhum valor; os valores
+	 * pedem uma segunda chamada. A ficha responde as duas coisas de uma vez,
+	 * porque 95% das propriedades estao no valor de fabrica e o valor de
+	 * fabrica se resolve deste lado.
+	 *
+	 * @param Filter  vazio devolve o que mudou. Com texto, devolve as
+	 *                propriedades cujo nome casa, com tipo e valor -- e' o que
+	 *                dispensa o passo separado de listar o esquema.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
+	static FString ReadObject(UObject* Object, const FString& Filter);
+
 	/** A especificacao do formato, para quem nunca a viu. */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString GetFormatDocs();

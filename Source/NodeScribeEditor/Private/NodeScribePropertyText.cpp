@@ -467,6 +467,30 @@ bool DiffersFromDefault(const FProperty* Property, const void* ValuePtr, const v
 		return true;
 	}
 
+	// Componente proprio nao conta como mudanca.
+	//
+	// `Mesh` do BP_Golem e `Mesh` do Character apontam para objetos diferentes
+	// -- cada classe tem a sua instancia -- entao o ponteiro sempre difere e a
+	// comparacao crua marcaria todo componente como alterado. Numa ficha isso
+	// e' ruido puro, e ruido nas linhas mais longas: o caminho de um subobjeto
+	// e' enorme e nao diz nada. O painel de detalhes tambem nao mostra esses
+	// como sobrescritos.
+	//
+	// Mesmo nome de subobjeto dos dois lados = e' o mesmo componente, visto de
+	// duas classes. Trocar o componente por outro muda o nome, e ai' aparece.
+	if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+	{
+		const UObject* Value = ObjectProperty->LoadObjectPropertyValue(ValuePtr);
+		const UObject* Default = ObjectProperty->LoadObjectPropertyValue(DefaultPtr);
+
+		if (Value && Default
+			&& Value->IsDefaultSubobject() && Default->IsDefaultSubobject()
+			&& Value->GetFName() == Default->GetFName())
+		{
+			return false;
+		}
+	}
+
 	return !Property->Identical(ValuePtr, DefaultPtr, PPF_DeepComparison);
 }
 

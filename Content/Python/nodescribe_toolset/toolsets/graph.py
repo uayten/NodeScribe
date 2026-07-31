@@ -14,7 +14,7 @@ import toolset_registry
 
 @unreal.uclass()
 class NodeScribeTools(unreal.ToolsetDefinition):
-    """Le' e escreve grafos de Blueprint inteiros como texto, em uma chamada."""
+    """Grafos de Blueprint e propriedades de objeto como texto, em uma chamada."""
 
     @toolset_registry.tool_call
     @staticmethod
@@ -49,6 +49,29 @@ class NodeScribeTools(unreal.ToolsetDefinition):
             O script equivalente ao grafo.
         """
         return unreal.NodeScribeLibrary.read_graph(graph)
+
+    @toolset_registry.tool_call
+    @staticmethod
+    def read_object(target: unreal.Object, filter: str = '') -> str:
+        """Le' um objeto, classe, CDO, ator ou asset como ficha de propriedades.
+
+        Uma linha por propriedade, e so' o que difere do valor de fabrica --
+        num CDO tipico isso e' ~5% delas. A contagem no fim confirma que o
+        resto esta' no padrao.
+
+        Nao existe passo separado de listar o esquema. Procurando uma
+        propriedade especifica, passe o filtro nesta mesma chamada e a
+        resposta ja' vem com tipo e valor. Nunca leia tudo para depois
+        procurar.
+
+        Args:
+            target: O objeto a ler. Blueprint e classe viram o CDO delas.
+            filter: Vazio devolve o que mudou. Com texto, devolve as
+                    propriedades cujo nome contem esse texto.
+        Returns:
+            A ficha.
+        """
+        return unreal.NodeScribeLibrary.read_object(target, filter)
 
     @toolset_registry.tool_call
     @staticmethod
