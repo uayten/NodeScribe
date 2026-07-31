@@ -718,6 +718,81 @@ que. O `GA_GolemSalto` usa `Gameplay Ability Graph`, com espaços, e o
 `GA_ChuvaDePedras` usa `EventGraph` — dois assets do mesmo tipo, criados por
 caminhos diferentes. Sem a listagem, restava tentar nomes até acertar.
 
+### O que falta para não precisar pedir cliques
+
+Levantado revisando uma sessão inteira de trabalho real, onde montar uma
+mecânica de GAS exigiu doze pedidos de "clique aqui". A lista é o que faltou.
+
+**Antes: nem tudo que foi pedido precisava ser pedido.** `Cooldown Gameplay
+Effect Class` e `Activation Owned Tags` são propriedade — `write_object` já
+resolve, inclusive `GameplayTagContainer`, que aceita a forma canônica
+`(GameplayTags=((TagName="X")))`. Foram cliques pedidos por não ter testado.
+Vale checar se a ficha já cobre, antes de propor ferramenta.
+
+Em ordem do que mais travou:
+
+**1. Variável de Blueprint — criar, apagar, marcar Instance Editable.**
+Travou duas vezes: apagar duplicatas de nome acentuado, e criar as duas
+variáveis da task nova. `FBlueprintEditorUtils::AddMemberVariable`,
+`RemoveMemberVariable` e `SetBlueprintVariableMetaData` com
+`FBlueprintMetadata::MD_ExposeOnSpawn`/`MD_InstanceEditable`. É o menor dos
+itens e o que mais aparece.
+
+Cabe na ficha sem sintaxe nova: hoje `variavel X : Tipo = valor` é lido e
+ignorado na escrita. Passar a criar quando não existe fecha o buraco. Apagar
+precisa de palavra explícita — `write_object` não apaga nada por princípio, e
+isso não deve mudar por acidente.
+
+**2. Criar asset.** Travou três vezes: o Gameplay Effect do cooldown, a
+BTTask, o BTService. `IAssetTools::CreateAsset` com a factory do tipo.
+
+**Isto é capacidade, não economia** — o toolset nativo também não tem
+`create_asset`, só `duplicate`. Construir aqui é para poder fazer algo que hoje
+ninguém faz, e o README não deve fingir que economiza token.
+
+**3. Escrever Behavior Tree.** É a etapa 5 do roteiro, e a que mais pesa: sem
+ela, toda mudança na árvore é clique. O asset guarda a hierarquia de execução
+*e* um `UBehaviorTreeGraph` que precisa ficar em sincronia — escrever só o lado
+de runtime dá um asset que roda e aparece vazio na tela.
+
+**4. Componentes de Gameplay Effect.** O `Grant Tags to Target Actor` é um
+subobjeto instanciado dentro de `UGameplayEffect::GEComponents`, e
+`write_object` não cria subobjeto dentro de array. Sem isso, todo cooldown novo
+é clique. Vale como caso geral: **array de subobjeto instanciado** aparece em
+muito lugar da Engine.
+
+**5. Criar Gameplay Tag.** `Cooldown.Golem.Salto` precisou existir antes de ser
+usada. Vive em `Config/DefaultGameplayTags.ini`, e a Engine expõe
+`UGameplayTagsManager::AddNewGameplayTagToINI`.
+
+**6. Dois defeitos de leitura**, que não são recurso e sim conserto:
+`Default Starting Data` do AbilitySystemComponent não é legível pela ficha — e
+é justamente onde se descobre quais habilidades um personagem tem —, e o Cast
+com continuação não volta igual (seção acima).
+
+### O que não vale trazer para cá
+
+O toolset nativo já resolve bem, e duplicar só adiciona superfície:
+
+| | por que já está bom |
+|---|---|
+| mover, duplicar, apagar, achar asset | payload é lista de caminhos; medido em *Criar asset* |
+| salvar, estado de source control, dirty | booleano por chamada |
+| console variables, controle de PIE, câmera do viewport | thin, uma chamada e pronto |
+| ler o output log | texto que se filtra na origem; nada a comprimir |
+| colocar ator no nível | devolve uma referência, sem dump |
+| propriedade de material, mesh, textura, data asset | **a ficha já cobre** — são propriedades, e `read_object`/`write_object` são genéricos |
+
+Essa última linha é a que mais rendeu: as ~107 ferramentas de edição por tipo
+de asset do `EditorToolset` são, na maioria, propriedade — e a ficha as alcança
+sem uma linha de código por tipo, porque `TFieldIterator` não sabe o que é um
+material.
+
+**Ainda em aberto, e vale:** consulta de mundo com projeção de campos —
+`find_actors` devolve referências e cada atributo é outra chamada, então quinze
+atores viram cinquenta chamadas. É o único item do mapa original que continua
+valendo e nunca foi feito.
+
 ### Enviar só o que mudou
 
 Hoje, editar um node num grafo de 40 custa o grafo inteiro em cada direção:
