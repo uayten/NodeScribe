@@ -695,6 +695,25 @@ Se isso incomodar, vale construir — com `IAssetTools::CreateAsset` e a factory
 do tipo, é pequeno. Mas então é para poder fazer algo novo, e o README não deve
 fingir que é economia.
 
+### `Target` sai do leitor e não entra no builder
+
+Pior que o Cast, porque quebra a ida e volta em node comum. `Get Blackboard`
+é lido como `Get Blackboard (Target = $controller)` — e escrever exatamente
+isso falha, com um diagnóstico que se contradiz:
+
+```
+O node nao tem pino `Target`. Pinos de entrada: Target
+```
+
+O pino existe e a lista o mostra. O casamento de nome do pino *self* rejeita
+`Target` para esse node, enquanto o leitor o emite. Passar por posição —
+`Get Blackboard ($controller)` — funciona.
+
+Achado escrevendo o `BTService_Distancia` do BossRush. Significa que
+`read_graph` → `write_graph` não fecha para qualquer grafo que use esse node,
+e provavelmente para outros com a mesma forma de pino. **É o primeiro defeito
+que quebra a promessa central do formato**, e deve vir antes de recurso novo.
+
 ### Cast com continuação não volta igual
 
 Achado usando o plugin de verdade. No `Gameplay Ability Graph` do
