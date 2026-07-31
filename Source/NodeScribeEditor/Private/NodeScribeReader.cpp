@@ -1,6 +1,7 @@
 #include "NodeScribeReader.h"
 
 #include "NodeScribeCatalog.h"
+#include "NodeScribePropertyText.h"
 
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
@@ -167,39 +168,12 @@ namespace
 	 * de detalhes -- `IntProperty`, `Timer Handle Structure` --, e nenhum desses
 	 * volta: o builder espera `Integer` e `TimerHandle`. Esta funcao e' o espelho
 	 * exato de `ResolvePinTypeFromName`, entao o que sai daqui entra la'.
+	 *
+	 * Mora em NodeScribePropertyText porque a ficha de propriedades precisa
+	 * escrever tipo com o mesmo vocabulario -- dois nomes para o mesmo tipo
+	 * seriam duas linguagens para o usuario aprender.
 	 */
-	FString DescribePinType(const FEdGraphPinType& PinType)
-	{
-		FString Base;
-
-		const FName Category = PinType.PinCategory;
-		UObject* SubCategory = PinType.PinSubCategoryObject.Get();
-
-		if (Category == UEdGraphSchema_K2::PC_Boolean)      { Base = TEXT("Boolean"); }
-		else if (Category == UEdGraphSchema_K2::PC_Int)     { Base = TEXT("Integer"); }
-		else if (Category == UEdGraphSchema_K2::PC_Int64)   { Base = TEXT("Int64"); }
-		else if (Category == UEdGraphSchema_K2::PC_Real)    { Base = TEXT("Float"); }
-		else if (Category == UEdGraphSchema_K2::PC_String)  { Base = TEXT("String"); }
-		else if (Category == UEdGraphSchema_K2::PC_Name)    { Base = TEXT("Name"); }
-		else if (Category == UEdGraphSchema_K2::PC_Text)    { Base = TEXT("Text"); }
-		else if (Category == UEdGraphSchema_K2::PC_Byte)
-		{
-			// Enum e byte compartilham categoria; o objeto e' quem distingue.
-			Base = SubCategory ? SubCategory->GetName() : TEXT("Byte");
-		}
-		else if (SubCategory)
-		{
-			Base = SubCategory->GetName();
-		}
-		else
-		{
-			return FString();
-		}
-
-		return PinType.ContainerType == EPinContainerType::Array
-			? TEXT("Array de ") + Base
-			: Base;
-	}
+	using NodeScribePropertyText::DescribePinType;
 
 	/** O nome que o usuario ve' e digita, que raramente e' o nome interno. */
 	FString GetWrittenPinName(const UEdGraphPin* Pin)
@@ -221,56 +195,9 @@ namespace
 			|| Category == UEdGraphSchema_K2::PC_Interface;
 	}
 
-	/**
-	 * O parser nao tem sequencia de escape: uma aspa dentro do valor quebraria a
-	 * linha. Escolhemos a aspa que nao aparece no texto; se as duas aparecerem,
-	 * quem chama avisa em vez de emitir algo que nao volta.
-	 */
-	bool TryQuote(const FString& Value, FString& OutQuoted)
-	{
-		const bool bHasDouble = Value.Contains(TEXT("\""));
-		const bool bHasSingle = Value.Contains(TEXT("'"));
-
-		if (bHasDouble && bHasSingle)
-		{
-			return false;
-		}
-
-		const TCHAR* Quote = bHasDouble ? TEXT("'") : TEXT("\"");
-		OutQuoted = Quote + Value + Quote;
-		return true;
-	}
-
-	/** Caracteres que mudariam o sentido da linha se ficassem soltos. */
-	bool NeedsQuotes(const FString& Value)
-	{
-		if (Value.IsEmpty())
-		{
-			return true;
-		}
-
-		// Caminho de asset e' lido cru pelo builder e nao tem separador dentro.
-		if (Value.StartsWith(TEXT("/")) && !Value.Contains(TEXT(" ")))
-		{
-			return false;
-		}
-
-		if (Value.StartsWith(TEXT("$")))
-		{
-			return true;
-		}
-
-		for (const TCHAR C : Value)
-		{
-			if (C == TEXT(' ') || C == TEXT(',') || C == TEXT('(') || C == TEXT(')')
-				|| C == TEXT('#') || C == TEXT('=') || C == TEXT('"') || C == TEXT('\''))
-			{
-				return true;
-			}
-		}
-
-		return Value.Contains(TEXT("//"));
-	}
+	/** Aspas: mesma regra para grafo e para ficha, definida uma vez so'. */
+	using NodeScribePropertyText::NeedsQuotes;
+	using NodeScribePropertyText::TryQuote;
 
 	/**
 	 * true quando o builder resolveria esse nome como struct, nao como funcao.

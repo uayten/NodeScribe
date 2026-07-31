@@ -79,7 +79,10 @@ catálogo do NodeScribe resolve os nomes localmente, então um grafo inteiro cab
 numa chamada e algumas centenas de tokens.
 
 As três ferramentas juntas ocupam ~300 tokens de descrição, contra ~18.000 do
-toolset de Blueprint da Engine.
+toolset de Blueprint da Engine — cobrados quando o assistente pede a descrição
+daquele toolset, não a cada mensagem. O servidor MCP da Engine usa descoberta
+preguiçosa; quem contar isso como custo fixo por mensagem vai superestimar
+bastante a economia.
 
 Um grafo de 15 nodes custa ~200 tokens nesse formato, contra ~15.000 no
 formato de clipboard da Unreal.
@@ -188,10 +191,13 @@ Três coisas que custam tempo quando esquecidas:
   Confira antes de rodar em outra.
 - **Confira a saída do build, não só o código de saída.** `Build.bat` sai com 0
   em situações em que não compilou nada. Procure `Result: Succeeded`.
-- **Live Coding não serve aqui.** Ele recompila o corpo de uma função que já
-  existe, sem fechar o editor. `UFUNCTION` ou `UCLASS` nova é reflection nova,
-  e reflection nova exige restart. Como quase toda mudança neste plugin mexe em
-  superfície exposta, o caminho normal é o ciclo completo acima.
+- **Live Coding não serve aqui, e ainda atrapalha.** Ele recompila o corpo de
+  uma função que já existe, sem fechar o editor; `UFUNCTION` ou `UCLASS` nova é
+  reflection nova, e reflection nova exige restart. Pior: com o editor aberto,
+  o `Build.bat` **nem tenta compilar** — para com `Unable to build while Live
+  Coding is active` e não mostra erro de compilação nenhum. Não dá para
+  adiantar a correção de sintaxe com o editor aberto. Fechar vem primeiro,
+  sempre.
 
 ### Testar
 
@@ -211,6 +217,18 @@ na Engine (`BEGIN_DEFINE_SPEC`), e eles rodam sem abrir a interface:
 Vale o investimento na hora em que a ficha começar a mexer em propriedade de
 verdade: ali um erro escreve no asset, e ida e volta manual não cobre isso.
 
+### Armadilhas que já morderam
+
+Compilam sem reclamar e falham em tempo de execução. A build passar não diz
+nada sobre elas.
+
+- **`UEdGraphSchema_K2()` na pilha derruba o editor.** Classe UObject não pode
+  ser instanciada assim: o construtor chama `FObjectInitializer::Get()`, que só
+  vale dentro de um construtor de UObject, e o erro é fatal na hora. Use
+  `GetDefault<UEdGraphSchema_K2>()`. Já aconteceu duas vezes — no `cac90d8`, e
+  de novo ao escrever o `NodeScribePropertyText`. Vale conferir toda vez que
+  aparecer `ConvertPropertyToPinType`.
+
 ### O que não pode quebrar
 
 Estes quatro pontos são o projeto. Mudança que os contrarie está errada mesmo
@@ -223,9 +241,11 @@ que funcione:
    no mesmo commit.
 3. **Legibilidade não se troca por bytes.** O texto é ~2% do custo; encurtá-lo
    economiza ~1% e destrói a única defesa contra a IA ter escrito outra coisa.
-4. **Ferramenta nova é imposto fixo.** A descrição de cada ferramenta MCP fica
-   no prompt a cada mensagem, sendo ela chamada ou não. Prefira um parâmetro
-   novo numa ferramenta existente a uma ferramenta nova.
+4. **Ferramenta nova custa escolha.** Não é o prompt — a descoberta é
+   preguiçosa e a descrição só é lida quando pedida. É que seis portas
+   parecidas fazem o assistente escolher errado e gastar um turno descobrindo
+   isso. Prefira um parâmetro novo numa ferramenta existente a uma ferramenta
+   nova.
 
 ### Propondo uma ferramenta nova
 
@@ -262,12 +282,21 @@ ficha BP_Golem (Character)
 # herda: BP_BossBase < Character < Pawn < Actor
 variavel Vida Maxima : Float = 500
 Mesh : SkeletalMeshComponent
-  Skeletal Mesh = SKM_Golem
-  Relative Location = (0, 0, -90)          # padrao (0, 0, 0)
+  Skeletal Mesh = /Game/BossRush/Bosses/SKM_Golem.SKM_Golem
+  Relative Location = (X=0.0,Y=0.0,Z=-90.0)   # padrao (X=0.0,Y=0.0,Z=0.0)
 CharacterMovement : CharacterMovementComponent
-  Max Walk Speed = 250                     # padrao 600
+  Max Walk Speed = 250                        # padrao 600
 ~ 431 propriedades no padrao
 ```
+
+Duas coisas parecem longas de propósito. **Asset sai por caminho completo**,
+igual ao grafo — `SKM_Golem` seria mais curto e ambíguo, e duas pastas podem
+ter um asset com esse nome. **Struct sai na forma canônica da Engine**,
+com `X=`, `Y=`, `Z=`: encurtar para `(0, 0, -90)` economizaria uns cinco
+tokens numa minoria das linhas e abriria uma classe de erro de ida e volta
+que hoje não existe. É exatamente a troca que o resto deste documento
+recomenda não fazer. O que **é** limpo na saída são os zeros à direita
+(`-90.0`, não `-90.000000`), que escondiam o número no meio do ruído.
 
 É a mesma jogada do catálogo, aplicada a propriedade: **não mandar o que dá
 para resolver do lado da engine**. `Gravity Scale = 1.0` não carrega
@@ -313,23 +342,93 @@ painel Details (`CPF_Edit`) **ou** que tem node de Get no Blueprint
 em disco.
 
 A maioria tem os dois carimbos, mas não todas, e as exceções são justamente as
-que importam: `Velocity` não aparece no painel — não faz sentido digitar a
-velocidade atual de um personagem — mas é lida no grafo o tempo todo. Um
-filtro só de Details responderia "não achei" para ela. Os dois carimbos juntos
-cobrem as duas metades das perguntas que se faz sobre um Blueprint.
+que importam. `ACharacter::bIsCrouched` é `BlueprintReadOnly` sem `Edit`: não
+aparece no painel — não faz sentido *digitar* se o personagem está agachado —
+e é lida no grafo o tempo todo. Um filtro só de Details responderia "não achei"
+para ela.
+
+O transiente sai pelo motivo oposto: `APawn::LastHitBy` é `BlueprintReadOnly,
+transient`, estado de execução que nem chega a ser salvo no arquivo. Numa ficha
+seria ruído que muda sozinho entre duas leituras.
 
 **Superfície:** duas ferramentas, não seis. `read_object` e `write_object`;
 `tipos <` entra como sintaxe de filtro, e a doc nova vira um parâmetro de
-`get_format_docs`, não uma ferramenta a mais. Descrição de ferramenta é
-imposto cobrado em toda mensagem.
+`get_format_docs`, não uma ferramenta a mais. Não é pelo custo no prompt — com
+descoberta preguiçosa esse custo quase não existe (veja *O resto do mapa*) —
+é para o modelo não ter que escolher entre seis portas parecidas, que é onde
+ele erra e gasta um turno descobrindo que escolheu errado.
+
+### Behavior Tree e Blackboard
+
+Candidato forte, e por uma razão estrutural: **uma Behavior Tree é literalmente
+uma árvore, e o formato já é uma árvore.** A limitação que o `FORMATO.md`
+declara para grafo — "cadeia de execução que reconverge: o formato é uma
+árvore, essa volta se perde" — **não existe aqui**, porque BT não reconverge.
+É o único caso até agora em que o formato não perde nada por construção.
+
+O nativo (`AIModuleToolset`, 7 ferramentas) é só leitura — **não edita nada** —
+e a leitura é das piores que vi: `list_nodes` devolve referências de UObject e
+`get_node_depths` devolve um array paralelo de inteiros, que o modelo tem que
+casar de cabeça. Para saber o que cada node *é*, ainda são N chamadas de
+`get_properties`. Uma árvore de 20 nodes custa ~22 chamadas.
+
+```
+arvore BT_Golem  (blackboard BB_Golem)
+Selector
+  Blackboard (Alvo esta definido):
+    Sequence
+      Move To (Blackboard Key = Alvo, Acceptable Radius = 150)
+      Wait (Wait Time = 0.5)
+  Sequence
+    Patrulhar (Raio = 800)
+```
+
+Decorator e service viram rótulo indentado — o mesmo mecanismo do
+`verdadeiro:`. Nome de node (`Sequence`, `Move To`) é catalogável igual a
+UFunction. O blackboard é um bloco à parte, e é quase o que já existe:
+
+```
+blackboard BB_Golem
+chave Alvo : Object (BP_Player)
+chave PosicaoInicial : Vector
+chave Fase : Int
+```
+
+**Vem depois da ficha, não antes.** `Move To (Acceptable Radius = 150)` é o
+formatador de valor da ficha trabalhando dentro de uma árvore — construir BT
+primeiro significaria escrever esse formatador duas vezes.
+
+**Onde está a dificuldade, para não subestimar:** um asset de BT guarda a
+hierarquia de execução *e* um grafo de editor (`UBehaviorTreeGraph`) que
+precisa ficar em sincronia. Escrever só o lado de runtime dá um asset que roda
+e aparece vazio no editor — exatamente o "compila, roda e está errado" que este
+plugin recusa. O escritor tem que passar pelo grafo do editor, como o builder
+de Blueprint passa pelo `UEdGraph`. Chaves de blackboard são subobjetos
+`UBlackboardKeyType_*`, mais chatas de criar que variável. E `FlowAbortMode` é
+semântica que não se adivinha.
+
+Por isso, aqui também: **leitura primeiro, sozinha.**
 
 ### O resto do mapa
 
-A meta é desligar o `EditorToolset` do `.uproject`. Ele expõe **224
-ferramentas**; as descrições ficam no prompt a cada mensagem, sendo elas
-chamadas ou não — ~18.000 tokens fixos. Otimizar uma de 224 não economiza
-nada enquanto as outras 223 continuarem lá. A economia só é realizada quando
-o pacote sai inteiro.
+O `EditorToolset` expõe **224 ferramentas**, e a tentação é achar que elas
+custam um imposto fixo por mensagem. **Não custam.** O servidor MCP desta
+Engine usa descoberta preguiçosa: o que fica no prompt são três ferramentas
+(`list_toolsets`, `describe_toolset`, `call_tool`), e as 224 descrições só
+aparecem quando alguém pede a de um toolset específico.
+
+Isso muda a estratégia, para melhor:
+
+- **Desligar o `EditorToolset` economiza pouco por si só** — o `list_toolsets`
+  inteiro são ~600 tokens, e só quando chamado. Não é meta que valha
+  perseguir sozinha.
+- **Cada ferramenta substituída já paga na hora.** Não é preciso cobrir 224
+  antes de ver benefício. Uma ficha que evita um dump de 10.000 tokens
+  economizou 10.000 tokens, com as outras 223 no lugar.
+
+O desperdício está no **uso**, não na presença: dumps grandes, fluxos de dois
+turnos, e padrões de N chamadas por objeto. É de lá que sai a economia, e é o
+que o mapa abaixo persegue.
 
 | bloco | ferramentas | destino |
 |---|---|---|
