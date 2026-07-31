@@ -1204,16 +1204,34 @@ void FNodeScribeReadContext::Run()
 				}
 				else
 				{
-					// O valor padrao vive na descricao da variavel, nao na
-					// propriedade. Sem ele, colar num Blueprint vazio cria a
-					// variavel zerada e o grafo se comporta diferente.
+					// O valor padrao vive no CDO da classe compilada -- e' de la'
+					// que o painel de detalhes le'. `NewVariables[].DefaultValue`
+					// so' serve de semente na criacao e fica vazio depois.
+					//
+					// Sem ele, colar num Blueprint vazio cria tudo zerado e o
+					// grafo se comporta diferente sem nenhum aviso.
 					FString DefaultValue;
-					for (const FBPVariableDescription& Description : Blueprint->NewVariables)
+					if (UClass* CompiledClass = Blueprint->GeneratedClass.Get())
 					{
-						if (Description.VarName == Property->GetFName())
+						if (const FProperty* Compiled = CompiledClass->FindPropertyByName(Property->GetFName()))
 						{
-							DefaultValue = Description.DefaultValue;
-							break;
+							if (UObject* DefaultObject = CompiledClass->GetDefaultObject())
+							{
+								const void* Value = Compiled->ContainerPtrToValuePtr<void>(DefaultObject);
+
+								// Zero do tipo nao acrescenta nada a' linha, e
+								// escreveria `= 0` em toda variavel intocada.
+								void* Zero = FMemory::Malloc(Compiled->GetSize(), Compiled->GetMinAlignment());
+								Compiled->InitializeValue(Zero);
+								const bool bIsZero = Compiled->Identical(Value, Zero);
+								Compiled->DestroyValue(Zero);
+								FMemory::Free(Zero);
+
+								if (!bIsZero)
+								{
+									Compiled->ExportTextItem_Direct(DefaultValue, Value, nullptr, nullptr, PPF_None);
+								}
+							}
 						}
 					}
 
