@@ -1172,8 +1172,12 @@ void FNodeScribeReadContext::Run()
 					continue;
 				}
 
+				// GetDefault, nao construcao na pilha: classe UObject nao pode
+				// ser instanciada assim -- o construtor chama
+				// FObjectInitializer::Get(), que so' vale dentro de um
+				// construtor de UObject, e derruba o editor na hora.
 				FEdGraphPinType PinType;
-				if (!UEdGraphSchema_K2().ConvertPropertyToPinType(Property, PinType))
+				if (!GetDefault<UEdGraphSchema_K2>()->ConvertPropertyToPinType(Property, PinType))
 				{
 					continue;
 				}
