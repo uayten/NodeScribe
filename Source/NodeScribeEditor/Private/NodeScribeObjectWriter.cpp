@@ -1,5 +1,6 @@
 #include "NodeScribeObjectWriter.h"
 
+#include "NodeScribeAIWriter.h"
 #include "NodeScribeCatalog.h"
 #include "NodeScribePropertyText.h"
 
@@ -178,6 +179,17 @@ FNodeScribeObjectWriter::FResult FNodeScribeObjectWriter::WriteObject(
 	if (!Object)
 	{
 		Result.Diagnostics.Add(TEXT("[erro]: nenhum objeto informado."));
+		return Result;
+	}
+
+	// Asset de IA tem forma propria na ida e na volta, igual ao leitor.
+	if (FNodeScribeAIWriter::Handles(Object))
+	{
+		const FNodeScribeAIWriter::FResult AIResult =
+			FNodeScribeAIWriter::WriteAsset(Object, Text);
+
+		Result.Applied = AIResult.Applied;
+		Result.Diagnostics = AIResult.Diagnostics;
 		return Result;
 	}
 

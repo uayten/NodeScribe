@@ -403,9 +403,13 @@ FString FNodeScribeAIReader::ReadBlackboard(UBlackboardData* Blackboard)
 
 		// Sincronizada entre instancias e' comportamento, nao tipo, e muda o que
 		// a IA faz -- some da linha padrao e aparece quando esta' ligada.
+		//
+		// Palavra, nao comentario: o escritor descarta comentario, e uma chave
+		// que volta dessincronizada seria um bug que so' aparece com dois
+		// inimigos na tela.
 		if (Entry.bInstanceSynced)
 		{
-			Line += TEXT("  # sincronizada entre instancias");
+			Line += TEXT(" sincronizada");
 		}
 
 		Lines.Add(Line);

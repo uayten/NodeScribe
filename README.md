@@ -352,10 +352,34 @@ Um efeito que vale saber: `Collision Profile Name = Corpo` também mexe em
 perfil, comportamento da própria Unreal — a ficha mostra o resultado real, não
 só o que a linha pediu.
 
-**Falta escrever blackboard e BT.** Chave de blackboard é fácil. **BT é o
-caro:** o asset guarda a hierarquia de execução *e* um grafo de editor
-(`UBehaviorTreeGraph`) que precisa ficar em sincronia. Escrever só o lado de
-runtime dá um asset que roda e aparece vazio na tela.
+#### Etapa 5 — Escrita — blackboard **pronto**
+
+Mesmo formato do leitor. Cria a chave que não existe, troca o tipo da que
+existe, e não apaga nenhuma:
+
+```
+blackboard BB_Golem
+chave Alvo : Object (Actor)
+chave Fase : Int
+chave Vida : Float sincronizada
+```
+
+A classe do tipo sai por varredura (`Object` → `UBlackboardKeyType_Object`),
+não por tabela fixa — pelo mesmo motivo do leitor: qualquer projeto pode
+escrever o seu tipo de chave, e uma tabela responderia "não conheço" para o que
+o próprio projeto criou. Tipo desconhecido lista os que existem.
+
+**`sincronizada` virou palavra, não comentário.** O leitor emitia isso como
+`# sincronizada entre instancias`, e o escritor descarta comentário — uma chave
+que voltasse dessincronizada seria um bug que só aparece com dois inimigos na
+tela ao mesmo tempo.
+
+Trocar o tipo troca o subobjeto inteiro. Reaproveitar o antigo deixaria as
+propriedades da chave anterior penduradas na nova.
+
+**Falta escrever BT**, e é a cara: o asset guarda a hierarquia de execução *e*
+um grafo de editor (`UBehaviorTreeGraph`) que precisa ficar em sincronia.
+Escrever só o lado de runtime dá um asset que roda e aparece vazio na tela.
 
 ## Desenvolvimento
 
@@ -389,6 +413,28 @@ Start-Process "E:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEd
 
 5. Esperar o editor subir. O MCP só responde depois disso.
 6. Testar pelo MCP, ler o Message Log no canal *NodeScribe*, repetir.
+
+**Se o MCP estiver fora do ar**, o passo 2 tem um caminho que não depende dele:
+
+```powershell
+New-Item -ItemType Directory -Force "C:\Unreal Projects\BossRush\Saved\NodeScribe" | Out-Null
+Set-Content "C:\Unreal Projects\BossRush\Saved\NodeScribe\comando.txt" "quit" -NoNewline
+```
+
+O plugin vigia esse arquivo meio a meio segundo, apaga ao ler e chama o mesmo
+`SaveAllAndQuit` — com as mesmas recusas, inclusive a de Play In Editor
+rodando. A saída vai para `resposta.txt` ao lado.
+
+Não é economia de token: escrever o arquivo custa o mesmo que a chamada MCP, ou
+um pouco mais. É para o ciclo não travar quando a peça do meio cai — o que já
+aconteceu, com o editor aberto e o MCP desconectado, e custou pedir para uma
+pessoa clicar no X. Matar o processo resolveria e é a pior saída: perde
+trabalho não salvo e pula a checagem de PIE.
+
+**Um servidor próprio dentro do plugin não vale.** Seria mais código para
+resolver menos: continuaria sendo um protocolo de rede que precisa estar de pé,
+só que mantido por nós em vez da Epic. A vantagem do arquivo é não ter nada que
+possa cair.
 
 Três coisas que custam tempo quando esquecidas:
 
@@ -615,26 +661,6 @@ outros ~107 dispensáveis.
 
 Os números de token acima são estimativa a partir da contagem de propriedades
 e do formato que o `StructToJsonSchema` produz, não medição.
-
-### Fechar o editor sem depender do MCP
-
-Hoje o ciclo de desenvolvimento fecha o editor pelo `save_all_and_quit`, que
-chega pelo MCP. Abrir já não depende dele — é `Start-Process` no terminal.
-
-O buraco apareceu na prática: **numa sessão o editor estava aberto e o MCP não
-estava conectado**, e não houve como fechar sem pedir para uma pessoa clicar no
-X. Matar o processo resolveria e é a pior saída — perde trabalho não salvo e
-pula a checagem de Play In Editor.
-
-A ideia é um **arquivo vigiado**: o plugin olha `Saved/NodeScribe/comando.txt`
-num ticker do módulo de editor, e `quit` ali dentro chama o mesmo
-`SaveAllAndQuit` que já existe, com as mesmas recusas. Sem rede, sem porta, sem
-protocolo — umas 60 linhas reaproveitando o que está escrito.
-
-**Não vale um servidor próprio dentro do plugin.** Seria mais código para
-resolver menos: continua sendo um protocolo de rede que precisa estar de pé e
-conectado, só que mantido por nós em vez da Epic. A vantagem do arquivo é
-justamente não ter nada que possa cair.
 
 ### Enviar só o que mudou
 

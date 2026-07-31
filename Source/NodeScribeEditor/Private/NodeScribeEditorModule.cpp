@@ -1,5 +1,6 @@
 #include "NodeScribeEditorModule.h"
 
+#include "NodeScribeCommandFile.h"
 #include "NodeScribeGraphActions.h"
 #include "NodeScribeTypes.h"
 
@@ -12,12 +13,14 @@ DEFINE_LOG_CATEGORY(LogNodeScribe);
 void FNodeScribeEditorModule::StartupModule()
 {
 	FNodeScribeGraphActions::RegisterStartupHook();
+	FNodeScribeCommandFile::Start();
 
 	UE_LOG(LogNodeScribe, Log, TEXT("NodeScribe pronto. Botoes na barra do editor de Blueprint."));
 }
 
 void FNodeScribeEditorModule::ShutdownModule()
 {
+	FNodeScribeCommandFile::Stop();
 	FNodeScribeGraphActions::Unregister();
 }
 
