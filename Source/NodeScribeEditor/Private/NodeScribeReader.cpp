@@ -27,6 +27,7 @@
 #include "K2Node_MacroInstance.h"
 #include "K2Node_RemoveDelegate.h"
 #include "K2Node_Select.h"
+#include "K2Node_Self.h"
 #include "K2Node_SwitchEnum.h"
 #include "K2Node_SwitchInteger.h"
 #include "K2Node_SwitchName.h"
@@ -467,6 +468,11 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 	if (Node->IsA<UK2Node_Select>())
 	{
 		return TEXT("Select");
+	}
+
+	if (Node->IsA<UK2Node_Self>())
+	{
+		return TEXT("Self");
 	}
 
 	if (const UK2Node_BaseMCDelegate* Delegate = Cast<UK2Node_BaseMCDelegate>(Node))
