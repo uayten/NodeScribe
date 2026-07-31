@@ -75,6 +75,29 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
     @toolset_registry.tool_call
     @staticmethod
+    def write_object(target: unreal.Object, text: str) -> str:
+        """Aplica uma ficha de propriedades num objeto, classe, CDO ou asset.
+
+        Mesmo formato de read_object. O texto e' uma **lista de mudancas**, nao
+        o estado final: nada e' apagado, e colar de volta uma ficha inteira nao
+        mexe em nada alem do que as linhas dizem. Mande so' as linhas que mudam.
+
+        `Nome = padrao` devolve a propriedade ao valor de fabrica.
+        Bloco indentado sob `Componente:` ou sob `Struct:` alcanca dentro deles.
+
+        Nao cria variavel nem componente. Linha que nao resolve vira
+        diagnostico com os nomes parecidos, e as outras sao aplicadas.
+
+        Args:
+            target: O objeto a alterar. Blueprint e classe viram o CDO delas.
+            text: As linhas no formato da ficha.
+        Returns:
+            Quantas propriedades mudaram, e uma linha por diagnostico.
+        """
+        return unreal.NodeScribeLibrary.write_object(target, text)
+
+    @toolset_registry.tool_call
+    @staticmethod
     def save_all_and_quit() -> str:
         """Salva tudo e fecha o editor.
 

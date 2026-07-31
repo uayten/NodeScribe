@@ -318,14 +318,44 @@ Saem em bloco próprio, com tipo, antes das propriedades herdadas. Variável
 declarada pelo próprio Blueprint aparece **sempre**, mesmo no valor de fábrica:
 ela não existe na classe pai, então a existência dela já é a informação.
 
-#### Etapa 5 — Escrita
+#### Etapa 5 — Escrita — `write_object` **pronto**
 
-Nesta ordem de dificuldade: chave de blackboard é fácil; propriedade de GA é
-o `write_object` já especificado; **BT é o caro** — o asset guarda a
-hierarquia de execução *e* um grafo de editor (`UBehaviorTreeGraph`) que
-precisa ficar em sincronia. Escrever só o lado de runtime dá um asset que roda
-e aparece vazio na tela, que é exatamente o "compila, roda e está errado" que
-este plugin recusa.
+```
+Forca Vertical = 900
+CollisionCylinder:
+  Capsule Radius = padrao
+  Body Instance = padrao
+CharMoveComp:
+  Max Walk Speed = 420
+```
+
+**O texto é uma lista de mudanças, não o estado final.** Nada é apagado, e
+colar de volta uma ficha inteira não mexe em nada além do que as linhas dizem.
+`= padrao` devolve ao valor de fábrica. Não cria variável nem componente — a
+linha não está pedindo isso.
+
+Bloco indentado alcança dentro de componente e dentro de struct. **Indentação
+zero fecha o bloco**, e isso foi o defeito do primeiro teste: sem fechar, uma
+linha do próprio ator escrita depois de um componente continuava sendo aplicada
+no componente. Se ele tivesse uma propriedade com aquele nome, gravava no lugar
+errado calado — o "compila, roda e está errado" de novo, agora gravado em
+asset.
+
+Nome que não resolve vira diagnóstico **com os nomes parecidos**, e as outras
+linhas continuam sendo aplicadas.
+
+Verificado por ida e volta num asset de rascunho: ler, escrever, ler,
+reverter com `padrao`, ler — a última leitura bate com a primeira.
+
+Um efeito que vale saber: `Collision Profile Name = Corpo` também mexe em
+`Object Type` e `Collision Responses`. É o `PostEditChangeProperty` aplicando o
+perfil, comportamento da própria Unreal — a ficha mostra o resultado real, não
+só o que a linha pediu.
+
+**Falta escrever blackboard e BT.** Chave de blackboard é fácil. **BT é o
+caro:** o asset guarda a hierarquia de execução *e* um grafo de editor
+(`UBehaviorTreeGraph`) que precisa ficar em sincronia. Escrever só o lado de
+runtime dá um asset que roda e aparece vazio na tela.
 
 ## Desenvolvimento
 
@@ -585,6 +615,26 @@ outros ~107 dispensáveis.
 
 Os números de token acima são estimativa a partir da contagem de propriedades
 e do formato que o `StructToJsonSchema` produz, não medição.
+
+### Fechar o editor sem depender do MCP
+
+Hoje o ciclo de desenvolvimento fecha o editor pelo `save_all_and_quit`, que
+chega pelo MCP. Abrir já não depende dele — é `Start-Process` no terminal.
+
+O buraco apareceu na prática: **numa sessão o editor estava aberto e o MCP não
+estava conectado**, e não houve como fechar sem pedir para uma pessoa clicar no
+X. Matar o processo resolveria e é a pior saída — perde trabalho não salvo e
+pula a checagem de Play In Editor.
+
+A ideia é um **arquivo vigiado**: o plugin olha `Saved/NodeScribe/comando.txt`
+num ticker do módulo de editor, e `quit` ali dentro chama o mesmo
+`SaveAllAndQuit` que já existe, com as mesmas recusas. Sem rede, sem porta, sem
+protocolo — umas 60 linhas reaproveitando o que está escrito.
+
+**Não vale um servidor próprio dentro do plugin.** Seria mais código para
+resolver menos: continua sendo um protocolo de rede que precisa estar de pé e
+conectado, só que mantido por nós em vez da Epic. A vantagem do arquivo é
+justamente não ter nada que possa cair.
 
 ### Enviar só o que mudou
 

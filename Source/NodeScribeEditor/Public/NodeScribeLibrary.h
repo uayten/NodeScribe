@@ -53,6 +53,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString ReadObject(UObject* Object, const FString& Filter);
 
+	/**
+	 * O espelho: aplica uma ficha.
+	 *
+	 * O texto e' uma lista de mudancas, nao o estado final -- colar de volta uma
+	 * ficha inteira nao mexe em nada alem do que as linhas dizem, e nada e'
+	 * apagado. `= padrao` devolve a propriedade ao valor de fabrica.
+	 *
+	 * Nao levanta excecao: linha que nao resolve vira diagnostico com os nomes
+	 * parecidos, e as outras continuam sendo aplicadas.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
+	static FString WriteObject(UObject* Object, const FString& Text);
+
 	/** A especificacao do formato, para quem nunca a viu. */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString GetFormatDocs();

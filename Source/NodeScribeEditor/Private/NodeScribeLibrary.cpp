@@ -2,6 +2,7 @@
 
 #include "NodeScribeBuilder.h"
 #include "NodeScribeObjectReader.h"
+#include "NodeScribeObjectWriter.h"
 #include "NodeScribeParser.h"
 #include "NodeScribeReader.h"
 #include "NodeScribeTarget.h"
@@ -125,6 +126,21 @@ FString UNodeScribeLibrary::ReadGraph(UEdGraph* Graph)
 FString UNodeScribeLibrary::ReadObject(UObject* Object, const FString& Filter)
 {
 	return FNodeScribeObjectReader::ReadObject(Object, Filter);
+}
+
+FString UNodeScribeLibrary::WriteObject(UObject* Object, const FString& Text)
+{
+	const FNodeScribeObjectWriter::FResult Result =
+		FNodeScribeObjectWriter::WriteObject(Object, Text);
+
+	const FString Report = FString::Join(Result.Diagnostics, TEXT("\n"));
+
+	// A contagem vai junto mesmo sem diagnostico: quem chamou nao esta' olhando
+	// o painel de detalhes e precisa saber que algo aconteceu.
+	return FString::Printf(TEXT("%d propriedade(s) alterada(s).%s%s"),
+		Result.Applied,
+		Report.IsEmpty() ? TEXT("") : TEXT("\n"),
+		*Report);
 }
 
 FString UNodeScribeLibrary::SaveAllAndQuit()
