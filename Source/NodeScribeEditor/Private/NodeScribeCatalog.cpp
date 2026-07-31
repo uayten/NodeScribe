@@ -161,6 +161,7 @@ void FNodeScribeCatalog::Build() const
 
 			const FString RawName = Function->GetName();
 			Entry.NormalizedName = Normalize(StripEnginePrefix(RawName));
+			Entry.NormalizedRawName = Normalize(RawName);
 
 			FString DisplayName = Function->HasMetaData(TEXT("DisplayName"))
 				? Function->GetMetaData(TEXT("DisplayName"))
@@ -191,7 +192,7 @@ int32 FNodeScribeCatalog::ScoreEntry(const FEntry& Entry, const FString& Normali
 	{
 		Score = 1000;
 	}
-	else if (Entry.NormalizedName == NormalizedQuery)
+	else if (Entry.NormalizedName == NormalizedQuery || Entry.NormalizedRawName == NormalizedQuery)
 	{
 		Score = 900;
 	}

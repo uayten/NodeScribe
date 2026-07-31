@@ -60,8 +60,17 @@ private:
 		TWeakObjectPtr<UFunction> Function;
 		TWeakObjectPtr<UClass> OwnerClass;
 
-		/** Nome cru normalizado, ex.: "k2_setactorlocation". */
+		/** Nome sem o prefixo da Engine, ex.: "setactorlocation". */
 		FString NormalizedName;
+
+		/**
+		 * Nome exatamente como esta' no codigo, com prefixo:
+		 * "k2_setactorlocation", "bp_applygameplayeffecttotarget".
+		 *
+		 * O leitor escreve o nome cru ao qualificar uma funcao, entao sem esta
+		 * forma o texto que ele produz nao voltava.
+		 */
+		FString NormalizedRawName;
 
 		/** Nome de exibicao normalizado, ex.: "setactorlocation". */
 		FString NormalizedDisplay;
