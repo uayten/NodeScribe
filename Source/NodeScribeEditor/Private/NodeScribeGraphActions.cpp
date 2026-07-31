@@ -35,15 +35,15 @@ namespace
 	const FName MenuOwner("NodeScribe");
 
 	/**
-	 * Cada editor de Blueprint tem a propria barra. O de Widget nao herda a do
-	 * Blueprint comum, entao registrar so' numa deixaria o botao invisivel
-	 * exatamente onde este plugin comecou a ser usado.
+	 * A barra que todo editor de asset herda.
+	 *
+	 * Listar os editores um a um nao escala: cada tipo de Blueprint tem a
+	 * propria barra -- Widget, Animation, Gameplay Ability, e os que ainda vao
+	 * existir. Registrando no pai, a secao chega em todos; a secao e' dinamica
+	 * e nao aparece onde o contexto nao tem um editor de Blueprint, entao um
+	 * editor de textura continua sem botao nenhum.
 	 */
-	const TCHAR* const ToolbarNames[] = {
-		TEXT("AssetEditor.BlueprintEditor.ToolBar"),
-		TEXT("AssetEditor.WidgetBlueprintEditor.ToolBar"),
-		TEXT("AssetEditor.AnimationBlueprintEditor.ToolBar")
-	};
+	const TCHAR* const SharedToolbarName = TEXT("AssetEditor.DefaultToolBar");
 
 	FBlueprintEditor* FindBlueprintEditor(const FToolMenuContext& Context)
 	{
@@ -331,15 +331,25 @@ void FNodeScribeGraphActions::RegisterToolbar()
 
 	FToolMenuOwnerScoped OwnerScoped(MenuOwner);
 
-	for (const TCHAR* ToolbarName : ToolbarNames)
+	UToolMenu* Toolbar = UToolMenus::Get()->ExtendMenu(FName(SharedToolbarName));
+	if (!Toolbar)
 	{
-		UToolMenu* Toolbar = UToolMenus::Get()->ExtendMenu(FName(ToolbarName));
-		if (!Toolbar)
+		return;
+	}
+
+	// Dinamica: monta na hora de desenhar, quando ja' da' para perguntar se o
+	// contexto e' um editor de Blueprint. Sem isso a secao apareceria vazia em
+	// editor de textura, de som, de tudo.
+	Toolbar->AddDynamicSection(
+		"NodeScribe",
+		FNewSectionConstructChoice(FNewToolMenuDelegate::CreateLambda([](UToolMenu* InMenu)
+	{
+		if (!FindBlueprintEditor(InMenu->Context))
 		{
-			continue;
+			return;
 		}
 
-		FToolMenuSection& Section = Toolbar->AddSection(
+		FToolMenuSection& Section = InMenu->AddSection(
 			"NodeScribe",
 			LOCTEXT("SectionLabel", "NodeScribe"),
 			FToolMenuInsert(NAME_None, EToolMenuInsertType::Last));
@@ -367,7 +377,7 @@ void FNodeScribeGraphActions::RegisterToolbar()
 			LOCTEXT("CopyGraphTooltip",
 				"Transcreve o grafo aberto inteiro para texto e poe no clipboard. Nao altera o grafo."),
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "GenericCommands.SelectAll")));
-	}
+	})));
 }
 
 void FNodeScribeGraphActions::Unregister()

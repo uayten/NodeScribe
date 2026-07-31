@@ -30,7 +30,8 @@ Três botões na barra do editor de Blueprint, ao lado de **Compile**:
 | **Copiar selecionado** | transcreve os nodes selecionados para texto. Não altera nada. |
 | **Copiar grafo inteiro** | idem, para o grafo todo. |
 
-Aparecem no editor de Blueprint comum, no de Widget e no de Animation.
+Aparecem em qualquer editor de Blueprint — comum, Widget, Animation, Gameplay
+Ability — e ficam invisíveis nos editores que não são de Blueprint.
 
 Avisos e erros vão para o **Message Log**, no canal *NodeScribe*. O aviso
 aparece como notificação; o link nela abre o log com os detalhes.
