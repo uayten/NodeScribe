@@ -10,6 +10,7 @@
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "K2Node_BreakStruct.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_ComponentBoundEvent.h"
@@ -1878,6 +1879,14 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			UK2Node_CustomEvent* Node = AllocateNode<UK2Node_CustomEvent>();
 			Node->CustomFunctionName = FName(*EventName);
 			FinalizeNode(Node);
+
+			// Sem isto, uma linha adiante que CHAME este evento nao o encontra:
+			// a classe esqueleto so' ganha a funcao quando e' regerada, e
+			// ninguem compila no meio de uma colagem. Custa pouco -- eventos
+			// sao poucos por texto -- e e' o que torna `Pular` chamavel na
+			// mesma colagem que o declarou.
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+			FKismetEditorUtilities::GenerateBlueprintSkeleton(Blueprint, true);
 
 			UClass* SelfParentClass = Blueprint ? Blueprint->ParentClass.Get() : nullptr;
 

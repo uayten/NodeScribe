@@ -3,6 +3,13 @@
 Cola uma lista de nodes escrita em texto e vira nodes de verdade no grafo do
 Blueprint — posicionados e ligados.
 
+## Para que ele existe
+
+Gastar o mínimo de tokens na conversa entre a IA e a Unreal.
+
+Não é sobre ser mais expressivo que as ferramentas do motor — não é. É sobre um
+grafo inteiro caber numa mensagem, em vez de custar dezenas de idas e voltas.
+
 ## O problema que ele resolve
 
 Pedir a um assistente de IA para *descrever* nodes é rápido e barato. Pedir para
@@ -92,6 +99,25 @@ Quando não dá para decidir com segurança, **não decide**.
 
 Um node plausível chutado é o pior resultado possível: compila, roda, e está
 errado. Falhar em voz alta é sempre preferível.
+
+## Por que o texto é legível
+
+O formato economiza tokens **eliminando descoberta**, não encurtando texto.
+
+O gasto de montar grafo por ferramenta convencional está em perguntar o nome
+exato de cada node — uma chamada por tipo, cada uma devolvendo dezenas de
+identificadores. O catálogo do NodeScribe resolve `Print String` localmente,
+com busca tolerante. É daí que vem a diferença de ordem de grandeza.
+
+O tamanho do texto em si é ~2% do custo. Trocar `Print String (In String =
+"olá")` por um identificador opaco economizaria uns poucos tokens por node — e
+custaria a única coisa que faz o formato ser confiável: **você conseguir ler o
+que a IA escreveu**.
+
+Os piores erros deste projeto foram achados assim: um ramo `Critical` que
+imprimia `"Full"`, um `New Key` que tinha se desligado, três cadeias idênticas
+onde bastava uma. Nenhum apareceria olhando o grafo, e nenhum apareceria num
+formato que só a máquina lê.
 
 ## Estado
 

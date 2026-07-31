@@ -231,6 +231,49 @@ namespace
 		return Value.Contains(TEXT("//"));
 	}
 
+	/**
+	 * true quando o builder resolveria esse nome como struct, nao como funcao.
+	 *
+	 * `Break Vector` e' o caso: existe a funcao `UKismetMathLibrary::BreakVector`
+	 * e existe o node de Break da struct FVector, com o mesmo nome de tela e
+	 * pinos diferentes. O builder testa a forma de struct antes do catalogo,
+	 * entao escrever o nome puro devolveria o outro node.
+	 */
+	bool IsShadowedByStructForm(const FString& DisplayName)
+	{
+		FString StructName;
+
+		if (DisplayName.StartsWith(TEXT("Make "), ESearchCase::IgnoreCase))
+		{
+			StructName = DisplayName.RightChop(5);
+		}
+		else if (DisplayName.StartsWith(TEXT("Break "), ESearchCase::IgnoreCase))
+		{
+			StructName = DisplayName.RightChop(6);
+		}
+		else
+		{
+			return false;
+		}
+
+		const FString Normalized = FNodeScribeCatalog::Normalize(StructName);
+		if (Normalized.IsEmpty())
+		{
+			return false;
+		}
+
+		for (TObjectIterator<UScriptStruct> StructIt; StructIt; ++StructIt)
+		{
+			if (FNodeScribeCatalog::Normalize(StructIt->GetName()) == Normalized
+				|| FNodeScribeCatalog::Normalize(StructIt->GetDisplayNameText().ToString()) == Normalized)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	/** Tira o verbo da expressao antes de virar nome: `Get Vida` -> `Vida`. */
 	FString MakeNameBase(const FString& Expression)
 	{
@@ -655,7 +698,10 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 				: nullptr;
 
 			const FNodeScribeLookup Lookup = FNodeScribeCatalog::Get().FindFunction(DisplayName, SelfClass, nullptr);
-			if (Lookup.Function == Function)
+
+			// O catalogo achar a funcao nao basta: o builder testa as formas
+			// especiais antes dele, e `Break Vector` cairia na struct.
+			if (Lookup.Function == Function && !IsShadowedByStructForm(DisplayName))
 			{
 				return DisplayName;
 			}
@@ -881,12 +927,13 @@ FString FNodeScribeReadContext::MakeReferenceTo(UEdGraphPin* SourcePin, int32 In
 
 	if (Name.IsEmpty())
 	{
-		if (EmittedExec.Contains(SourceNode))
+		// Node de execucao nunca vira linha de dado: ele tem cadeia propria, e
+		// emiti-lo aqui criaria um segundo node ao colar. A pre-passagem ja'
+		// deveria ter dado nome a ele.
+		if (IsExecNode(SourceNode))
 		{
-			// A pre-passagem deveria ter nomeado esse node antes de emiti-lo.
-			// Emitir a linha de novo aqui criaria um segundo node ao colar.
 			AddWarning(FString::Printf(
-				TEXT("`%s` ja' apareceu na cadeia de execucao e nao recebeu nome. ")
+				TEXT("`%s` participa da execucao e nao recebeu nome. ")
 				TEXT("Essa ligacao de dado saiu do texto -- religue na mao."),
 				*ShortTitle(SourceNode)));
 			return FString();
@@ -920,14 +967,9 @@ void FNodeScribeReadContext::EmitNodeLine(UEdGraphNode* Node, int32 Indent)
 		AddWarning(RoundTripIssue);
 	}
 
-	// O nome tem que ser decidido antes da linha sair, mesmo que quem consome
-	// so' apareca bem mais adiante no texto.
-	FString AssignedName;
-	if (NeedsName.Contains(Node) && !DataNames.Contains(Node))
-	{
-		AssignedName = MakeUniqueName(MakeNameBase(Expression));
-		DataNames.Add(Node, AssignedName);
-	}
+	// O nome ja' foi decidido na pre-passagem, quando se soube que alguem
+	// consome a saida deste node.
+	const FString AssignedName = DataNames.FindRef(Node);
 
 	// Os argumentos podem emitir linhas de dado, que precisam vir antes desta.
 	const FString Arguments = BuildArgumentList(Node, Indent);
@@ -1003,12 +1045,18 @@ void FNodeScribeReadContext::CollectConsumedNodes()
 
 			UEdGraphNode* SourceNode = SourcePin->GetOwningNode();
 
-			// Nodes puros ganham nome naturalmente na hora em que sao emitidos.
-			// O caso que precisa de aviso previo e' o node de execucao, cuja
-			// linha ja' teria passado quando o consumidor aparece.
-			if (Scope.Contains(SourceNode) && IsExecNode(SourceNode))
+			// Node de execucao consumido como dado ganha nome AGORA, antes de
+			// qualquer linha sair. Atribuir na hora da emissao nao bastava:
+			// um evento referenciado por uma cadeia anterior a' dele ainda nao
+			// teria nome, e acabava emitido duas vezes -- uma como dado, outra
+			// como raiz. Colar esse texto de volta dava "o evento ja' existe".
+			if (Scope.Contains(SourceNode) && IsExecNode(SourceNode) && !DataNames.Contains(SourceNode))
 			{
 				NeedsName.Add(SourceNode);
+
+				FString RoundTripIssue;
+				const FString Expression = DescribeNode(SourceNode, RoundTripIssue);
+				DataNames.Add(SourceNode, MakeUniqueName(MakeNameBase(Expression)));
 			}
 		}
 	}
@@ -1180,10 +1228,22 @@ void FNodeScribeReadContext::Run()
 		}
 	}
 
-	// Eventos antes do resto, depois de cima para baixo: e' a ordem de leitura
-	// de quem olha o grafo.
-	Roots.Sort([](const UEdGraphNode& A, const UEdGraphNode& B)
+	// Quem e' referenciado por outra cadeia sai primeiro: `$aterrissar` so'
+	// existe depois da linha que nomeia aquele evento, entao a ordem no texto
+	// tem que respeitar a dependencia -- se nao, o texto nao volta.
+	//
+	// Depois disso, eventos antes do resto e de cima para baixo, que e' a ordem
+	// de leitura de quem olha o grafo.
+	Roots.Sort([this](const UEdGraphNode& A, const UEdGraphNode& B)
 	{
+		const bool bAReferenced = NeedsName.Contains(const_cast<UEdGraphNode*>(&A));
+		const bool bBReferenced = NeedsName.Contains(const_cast<UEdGraphNode*>(&B));
+
+		if (bAReferenced != bBReferenced)
+		{
+			return bAReferenced;
+		}
+
 		const bool bAEvent = A.IsA<UK2Node_Event>();
 		const bool bBEvent = B.IsA<UK2Node_Event>();
 

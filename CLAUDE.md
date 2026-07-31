@@ -12,6 +12,13 @@ Quando alguém colar texto nesse formato pedindo ajuda com um grafo, é saída d
 botão **Copiar grafo inteiro**. A resposta deve voltar no mesmo formato, para
 ser colada de volta com **Colar**.
 
+## Para que ele existe
+
+Gastar o mínimo de tokens na conversa entre a IA e a Unreal. A economia vem de
+**eliminar descoberta** — o catálogo resolve nomes localmente —, não de
+encurtar o texto. Ao mexer aqui, não troque legibilidade por bytes: o texto
+ser conferível por uma pessoa é o que torna o resto confiável.
+
 ## Princípio que orienta o código
 
 Quando não dá para decidir com segurança, **não decide**. Node ambíguo vira
