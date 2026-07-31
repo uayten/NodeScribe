@@ -4,7 +4,11 @@
 #include "NodeScribeCatalog.h"
 #include "NodeScribePropertyText.h"
 
+#include "Components/ActorComponent.h"
 #include "Engine/Blueprint.h"
+#include "Engine/SCS_Node.h"
+#include "Engine/SimpleConstructionScript.h"
+#include "GameFramework/Actor.h"
 #include "UObject/UnrealType.h"
 
 namespace
@@ -100,7 +104,7 @@ namespace
 	 * caso das variaveis que o proprio Blueprint declara, que nao existem no
 	 * pai. Ler o mesmo deslocamento la' seria ler memoria de outra coisa.
 	 */
-	const void* FindDefaultValuePtr(const FProperty* Property, UObject* Archetype)
+	const void* FindDefaultValuePtr(const FProperty* Property, const UObject* Archetype)
 	{
 		if (!Archetype)
 		{
@@ -126,10 +130,16 @@ namespace
 	 */
 	void AppendAligned(TArray<FString>& OutLines, const TArray<FEntry>& Entries)
 	{
+		// Teto na coluna. Sem ele, uma linha larga empurra o comentario de todas
+		// as outras para a mesma distancia -- e uma struct de colisao produz
+		// linhas de milhares de caracteres, entao as vizinhas ganhavam milhares
+		// de espacos. Alinhamento e' para ler; passou disso, atrapalha e custa.
+		const int32 MaxColumn = 64;
+
 		int32 Widest = 0;
 		for (const FEntry& Entry : Entries)
 		{
-			if (!Entry.Default.IsEmpty())
+			if (!Entry.Default.IsEmpty() && Entry.Left.Len() <= MaxColumn)
 			{
 				Widest = FMath::Max(Widest, Entry.Left.Len());
 			}
@@ -147,6 +157,182 @@ namespace
 			OutLines.Add(Entry.Left + FString::ChrN(Padding, TEXT(' '))
 				+ TEXT("# padrao ") + Entry.Default);
 		}
+	}
+}
+
+namespace
+{
+	/** O que uma passada de propriedades produziu, alem das linhas. */
+	struct FCollectStats
+	{
+		int32 AtDefault = 0;
+		int32 Considered = 0;
+		TArray<FString> Unreadable;
+		TArray<FString> TooLong;
+	};
+
+	/**
+	 * Acima disto o valor deixa de informar e passa a esconder.
+	 *
+	 * `Body Instance` de uma capsula sai com a tabela inteira de resposta de
+	 * colisao: ~2.000 caracteres, mais outros ~2.000 do valor de fabrica ao
+	 * lado. Sozinho, era maior que toda a ficha do BP_Golem -- exatamente o
+	 * despejo que este formato existe para nao fazer.
+	 *
+	 * O corte vale so' na visao geral. Quem filtra pelo nome da propriedade
+	 * esta' pedindo aquilo, e ai' sai inteiro.
+	 */
+	const int32 MaxSurveyValueLength = 160;
+
+	/**
+	 * Percorre as propriedades de um objeto e devolve as linhas.
+	 *
+	 * Uma funcao so' para objeto, componente e variavel: as tres perguntam a
+	 * mesma coisa -- o que aqui foge do padrao -- e responder diferente em cada
+	 * uma seria tres formatos para o leitor aprender.
+	 */
+	void CollectEntries(const UObject* Target, const UObject* Archetype,
+		const FString& NormalizedFilter, const TSet<FName>& Skip,
+		const FString& Context, TArray<FEntry>& OutEntries, FCollectStats& Stats)
+	{
+		const bool bFiltering = !NormalizedFilter.IsEmpty();
+
+		// `Body Instance, Body Instance` num rodape nao diz de quem sao. Toda
+		// capsula e todo mesh tem uma, entao sem o componente na frente a nota
+		// so' confunde.
+		auto Qualify = [&Context](const FString& Name)
+		{
+			return Context.IsEmpty() ? Name : Context + TEXT(".") + Name;
+		};
+
+		for (TFieldIterator<FProperty> It(Target->GetClass(), EFieldIterationFlags::IncludeSuper); It; ++It)
+		{
+			const FProperty* Property = *It;
+			if (!IsVisible(Property) || Skip.Contains(Property->GetFName()))
+			{
+				continue;
+			}
+
+			++Stats.Considered;
+
+			const FString Name = DisplayName(Property);
+
+			if (bFiltering && !FNodeScribeCatalog::Normalize(Name).Contains(NormalizedFilter))
+			{
+				continue;
+			}
+
+			const void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Target);
+			const void* DefaultPtr = FindDefaultValuePtr(Property, Archetype);
+			const bool bChanged = DiffersFromDefault(Property, ValuePtr, DefaultPtr);
+
+			if (!bFiltering && !bChanged)
+			{
+				++Stats.AtDefault;
+				continue;
+			}
+
+			FString Value;
+			if (!ValueToText(Property, ValuePtr, Value))
+			{
+				// Nao inventar uma linha que parece certa e volta diferente. Some da
+				// ficha e aparece no aviso, com nome, para a ausencia ser visivel.
+				Stats.Unreadable.Add(Qualify(Name));
+				continue;
+			}
+
+			if (!bFiltering && Value.Len() > MaxSurveyValueLength)
+			{
+				// Nomeado, nao sumido: quem le' fica sabendo que aquilo mudou e
+				// que da' para pedir. Some em silencio seria mentir por omissao.
+				Stats.TooLong.Add(Qualify(Name));
+				continue;
+			}
+
+			FEntry Entry;
+			Entry.Left = bFiltering
+				? FString::Printf(TEXT("%s : %s = %s"), *Name, *DescribeType(Property), *Value)
+				: FString::Printf(TEXT("%s = %s"), *Name, *Value);
+
+			// O valor de fabrica so' entra onde houve mudanca. Nas outras linhas ele
+			// seria uma repeticao do que ja' esta' escrito.
+			FString DefaultText;
+			if (bChanged && DefaultPtr && ValueToText(Property, DefaultPtr, DefaultText)
+				&& DefaultText.Len() <= MaxSurveyValueLength)
+			{
+				Entry.Default = DefaultText;
+			}
+
+			OutEntries.Add(MoveTemp(Entry));
+		}
+	}
+
+	/** O Blueprint por tras do alvo, quando ha' um. */
+	UBlueprint* FindBlueprint(const UObject* Requested, const UClass* Class)
+	{
+		if (UBlueprint* Direct = const_cast<UBlueprint*>(Cast<UBlueprint>(Requested)))
+		{
+			return Direct;
+		}
+		return Class ? Cast<UBlueprint>(Class->ClassGeneratedBy) : nullptr;
+	}
+
+	/** Os nomes das variaveis que o proprio Blueprint declara. */
+	TSet<FName> CollectOwnVariableNames(const UBlueprint* Blueprint)
+	{
+		TSet<FName> Names;
+		if (Blueprint)
+		{
+			for (const FBPVariableDescription& Variable : Blueprint->NewVariables)
+			{
+				Names.Add(Variable.VarName);
+			}
+		}
+		return Names;
+	}
+
+	/**
+	 * Os componentes do alvo, por nome.
+	 *
+	 * Duas origens, porque um Blueprint guarda em dois lugares: o que veio do
+	 * construtor em C++ vive no proprio CDO, e o que foi arrastado no editor
+	 * vive como template no SimpleConstructionScript. Ler so' um deles esconde
+	 * metade dos componentes sem avisar.
+	 */
+	TMap<FString, UObject*> CollectComponents(UObject* Target, UBlueprint* Blueprint)
+	{
+		TMap<FString, UObject*> Components;
+
+		if (const AActor* Actor = Cast<AActor>(Target))
+		{
+			for (UActorComponent* Component : Actor->GetComponents())
+			{
+				if (Component)
+				{
+					Components.Add(Component->GetName(), Component);
+				}
+			}
+		}
+
+		// Sobe a cadeia: componente que o Blueprint pai criou tambem e' do filho.
+		for (const UBlueprint* Current = Blueprint; Current; )
+		{
+			if (const USimpleConstructionScript* SCS = Current->SimpleConstructionScript)
+			{
+				for (const USCS_Node* Node : SCS->GetAllNodes())
+				{
+					if (Node && Node->ComponentTemplate)
+					{
+						Components.Add(Node->GetVariableName().ToString(), Node->ComponentTemplate);
+					}
+				}
+			}
+
+			const UClass* ParentClass = Current->ParentClass;
+			Current = ParentClass ? Cast<UBlueprint>(ParentClass->ClassGeneratedBy) : nullptr;
+		}
+
+		return Components;
 	}
 }
 
@@ -180,72 +366,68 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 	UObject* Archetype = Target->GetArchetype();
 
 	const bool bFiltering = !Filter.IsEmpty();
-	const FString NormalizedFilter = FNodeScribeCatalog::Normalize(Filter);
+	const FString NormalizedFilter = bFiltering
+		? FNodeScribeCatalog::Normalize(Filter) : FString();
 
+	UBlueprint* Blueprint = FindBlueprint(Object, Class);
+	const TSet<FName> OwnVariables = CollectOwnVariableNames(Blueprint);
+
+	FCollectStats Stats;
+
+	// As variaveis do proprio Blueprint saem em bloco proprio, com `variavel` e
+	// o tipo, entao ficam de fora da passada comum.
 	TArray<FEntry> Entries;
-	TArray<FString> Unreadable;
-	int32 AtDefault = 0;
-	int32 Considered = 0;
+	CollectEntries(Target, Archetype, NormalizedFilter, OwnVariables,
+		FString(), Entries, Stats);
 
-	for (TFieldIterator<FProperty> It(Class, EFieldIterationFlags::IncludeSuper); It; ++It)
+	TArray<FEntry> VariableEntries;
+	for (const FBPVariableDescription& Variable : Blueprint
+		? Blueprint->NewVariables : TArray<FBPVariableDescription>())
 	{
-		const FProperty* Property = *It;
-		if (!IsVisible(Property))
+		const FProperty* Property = Class->FindPropertyByName(Variable.VarName);
+		if (!Property || !IsVisible(Property))
 		{
 			continue;
 		}
 
-		++Considered;
+		++Stats.Considered;
 
 		const FString Name = DisplayName(Property);
-
 		if (bFiltering && !FNodeScribeCatalog::Normalize(Name).Contains(NormalizedFilter))
 		{
 			continue;
 		}
 
-		const void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Target);
-		const void* DefaultPtr = FindDefaultValuePtr(Property, Archetype);
-		const bool bChanged = DiffersFromDefault(Property, ValuePtr, DefaultPtr);
-
-		if (!bFiltering && !bChanged)
-		{
-			++AtDefault;
-			continue;
-		}
-
+		// Variavel declarada aqui aparece sempre, mesmo no valor de fabrica: ela
+		// nao existe na classe pai, entao a existencia dela ja' e' a informacao.
 		FString Value;
-		if (!ValueToText(Property, ValuePtr, Value))
-		{
-			// Nao inventar uma linha que parece certa e volta diferente. Some da
-			// ficha e aparece no aviso, com nome, para a ausencia ser visivel.
-			Unreadable.Add(Name);
-			continue;
-		}
+		const void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Target);
+		const bool bHasValue = ValueToText(Property, ValuePtr, Value);
 
 		FEntry Entry;
-		Entry.Left = bFiltering
-			? FString::Printf(TEXT("%s : %s = %s"), *Name, *DescribeType(Property), *Value)
-			: FString::Printf(TEXT("%s = %s"), *Name, *Value);
-
-		// O valor de fabrica so' entra onde houve mudanca. Nas outras linhas ele
-		// seria uma repeticao do que ja' esta' escrito.
-		FString DefaultText;
-		if (bChanged && DefaultPtr && ValueToText(Property, DefaultPtr, DefaultText))
+		Entry.Left = FString::Printf(TEXT("variavel %s : %s"), *Name, *DescribeType(Property));
+		if (bHasValue && Value != TEXT("None") && Value != TEXT("0") && Value != TEXT("false"))
 		{
-			Entry.Default = DefaultText;
+			Entry.Left += TEXT(" = ") + Value;
 		}
 
-		Entries.Add(MoveTemp(Entry));
+		VariableEntries.Add(MoveTemp(Entry));
 	}
 
 	TArray<FString> Lines;
 
-	// O nome do asset, nao o da classe. Em Blueprint os dois coincidem, e por
-	// isso o erro passou; num BehaviorTree o cabecalho virava `ficha
-	// BehaviorTree (Object)`, que nao diz qual asset e' este.
-	Lines.Add(FString::Printf(TEXT("ficha %s (%s)"),
-		*DescribeTargetName(Object, Target), *CleanClassName(Class)));
+	// O nome do asset, e entre parenteses a classe -- `ficha BT_Golem
+	// (BehaviorTree)`. Em Blueprint os dois sao a mesma palavra, e repetir nao
+	// diz nada; ali vale a classe pai, que e' a informacao que falta:
+	// `ficha BP_Golem (Character)`.
+	const FString TargetName = DescribeTargetName(Object, Target);
+	FString ClassName = CleanClassName(Class);
+	if (ClassName == TargetName && Class->GetSuperClass())
+	{
+		ClassName = CleanClassName(Class->GetSuperClass());
+	}
+
+	Lines.Add(FString::Printf(TEXT("ficha %s (%s)"), *TargetName, *ClassName));
 
 	const FString Ancestry = DescribeAncestry(Class);
 	if (!Ancestry.IsEmpty())
@@ -253,25 +435,65 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 		Lines.Add(TEXT("# herda: ") + Ancestry);
 	}
 
-	if (bFiltering)
-	{
-		Lines[0] += FString::Printf(TEXT("  ~ \"%s\" (%d de %d)"),
-			*Filter, Entries.Num(), Considered);
-	}
+	const int32 HeaderIndex = 0;
 
+	AppendAligned(Lines, VariableEntries);
 	AppendAligned(Lines, Entries);
 
-	if (!bFiltering)
+	int32 Shown = VariableEntries.Num() + Entries.Num();
+
+	// Componente e' onde mora metade do que se pergunta de um ator: `Max Walk
+	// Speed` nao esta' no Character, esta' no CharacterMovement dele.
+	for (const TPair<FString, UObject*>& Pair : CollectComponents(Target, Blueprint))
+	{
+		UObject* Component = Pair.Value;
+
+		TArray<FEntry> ComponentEntries;
+		CollectEntries(Component, Component->GetArchetype(),
+			NormalizedFilter, TSet<FName>(), Pair.Key, ComponentEntries, Stats);
+
+		if (ComponentEntries.Num() == 0)
+		{
+			continue;
+		}
+
+		Lines.Add(FString::Printf(TEXT("%s : %s"),
+			*Pair.Key, *CleanClassName(Component->GetClass())));
+
+		TArray<FString> ComponentLines;
+		AppendAligned(ComponentLines, ComponentEntries);
+		for (const FString& Line : ComponentLines)
+		{
+			Lines.Add(TEXT("  ") + Line);
+		}
+
+		Shown += ComponentEntries.Num();
+	}
+
+	if (bFiltering)
+	{
+		Lines[HeaderIndex] += FString::Printf(TEXT("  ~ \"%s\" (%d de %d)"),
+			*Filter, Shown, Stats.Considered);
+	}
+	else
 	{
 		// O silencio precisa ser explicito: sem esta linha, "nao apareceu" fica
 		// ambiguo entre estar no padrao e o plugin nao saber ler.
-		Lines.Add(FString::Printf(TEXT("~ %d propriedades no padrao"), AtDefault));
+		Lines.Add(FString::Printf(TEXT("~ %d propriedades no padrao"), Stats.AtDefault));
 	}
 
-	if (Unreadable.Num() > 0)
+	if (Stats.TooLong.Num() > 0)
+	{
+		Lines.Add(FString::Printf(
+			TEXT("# [nota]: mudou, mas o valor e' longo demais para a visao geral -- ")
+			TEXT("peca pelo nome para ver: %s"),
+			*FString::Join(Stats.TooLong, TEXT(", "))));
+	}
+
+	if (Stats.Unreadable.Num() > 0)
 	{
 		Lines.Add(FString::Printf(TEXT("# [aviso]: nao sei escrever o valor de: %s"),
-			*FString::Join(Unreadable, TEXT(", "))));
+			*FString::Join(Stats.Unreadable, TEXT(", "))));
 	}
 
 	return FString::Join(Lines, TEXT("\n"));

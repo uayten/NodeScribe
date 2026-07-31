@@ -257,22 +257,53 @@ o `_C`: `BTTask_Patrulhar` aparecia com o prefixo técnico do lado de um
 árvore e não reconverge, então a perda que o `FORMATO.md` declara para grafo
 ("cadeia de execução que reconverge, essa volta se perde") não existe aqui.
 
-#### Etapa 3 — Componentes na ficha
+#### Etapa 3 — Componentes na ficha — **pronta**
 
-Para o `AIC_Golem` e para o movimento do Golem. Hoje
-`read_object(BP_Golem, "walk")` responde `0 de 78`, porque `Max Walk Speed`
-vive no `CharacterMovement` — certo para o que existe, e inútil para a
-pergunta que se quis fazer.
+```
+ficha BP_Golem (Character)
+# herda: Character < Pawn < Actor
+variavel Facção : GameplayTag = '(TagName="Facção.Inimigos")'
+Auto Possess AI = PlacedInWorldOrSpawned # padrao PlacedInWorld
+CollisionCylinder : CapsuleComponent
+  Capsule Half Height = 98.0 # padrao 88.0
+  Capsule Radius = 80.0      # padrao 34.0
+CharMoveComp : CharacterMovementComponent
+  Max Walk Speed = 300.0 # padrao 600.0
+~ 620 propriedades no padrao
+# [nota]: mudou, mas o valor e' longo demais para a visao geral -- peca pelo
+#   nome para ver: CollisionCylinder.Body Instance, CharacterMesh0.Body Instance
+```
 
-Percurso: `Blueprint->SimpleConstructionScript->GetAllNodes()` →
-`USCS_Node::ComponentTemplate` para Blueprint; `Actor->GetComponents()` para
-instância. Junto vem a etapa 4, que é pequena.
+`read_object(BP_Golem, "walk")` agora responde `11 de 637`, com
+`Max Walk Speed : Float = 300.0 # padrao 600.0`. Antes respondia `0 de 78`.
 
-#### Etapa 4 — Variáveis do Blueprint com a linha `variavel`
+**Componente vem de dois lugares e é preciso ler os dois:** o que veio do
+construtor em C++ vive no CDO (`AActor::GetComponents()`), e o que foi
+arrastado no editor vive como template no `SimpleConstructionScript`. A busca
+sobe a cadeia de Blueprints pais, porque componente que o pai criou também é
+do filho. Ler só uma das origens esconde metade dos componentes sem avisar.
 
-Hoje caem na lista comum e saem como `Ability System = None`, sem tipo e sem
-prefixo. O código de ler o tipo e o valor padrão do CDO **já existe** no
-`NodeScribeReader` (commit `1ff554b`) — é reuso, não implementação.
+**Teto no valor (160 caracteres) na visão geral.** `Body Instance` de uma
+cápsula sai com a tabela inteira de resposta de colisão: ~2.000 caracteres,
+mais outros ~2.000 do valor de fábrica ao lado. Sozinho era maior que toda a
+ficha do Golem — exatamente o despejo que este formato existe para não fazer.
+O corte **nomeia** o que cortou, com o componente na frente, e não vale no
+modo filtrado: quem pede pelo nome está pedindo aquilo.
+
+**Teto na coluna de alinhamento (64).** Sem ele, uma linha larga empurra o
+comentário de todas as outras para a mesma distância — com aquela struct de
+2.000 caracteres, as vizinhas ganhavam 2.000 espaços cada. Alinhamento é para
+ler; passou disso, atrapalha e ainda custa token.
+
+**Ainda por fazer aqui:** recursar dentro da struct e mostrar só o membro que
+mudou. `Body Instance` difere em três campos, não em cinquenta. É a correção
+certa para o teto acima, que hoje é remendo honesto.
+
+#### Etapa 4 — Variáveis do Blueprint com a linha `variavel` — **pronta**
+
+Saem em bloco próprio, com tipo, antes das propriedades herdadas. Variável
+declarada pelo próprio Blueprint aparece **sempre**, mesmo no valor de fábrica:
+ela não existe na classe pai, então a existência dela já é a informação.
 
 #### Etapa 5 — Escrita
 
