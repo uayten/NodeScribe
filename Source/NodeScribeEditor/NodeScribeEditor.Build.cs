@@ -11,6 +11,10 @@ public class NodeScribeEditor : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			// Blackboard e Behavior Tree. Os tipos concretos de chave nao entram
+			// por include: sao lidos por reflexao, para que chave criada pelo
+			// projeto seja lida igual as da Engine.
+			"AIModule",
 			"ApplicationCore",
 			"InputCore",
 			"Slate",

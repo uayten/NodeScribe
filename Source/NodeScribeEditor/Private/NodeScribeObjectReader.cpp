@@ -1,5 +1,6 @@
 #include "NodeScribeObjectReader.h"
 
+#include "NodeScribeAIReader.h"
 #include "NodeScribeCatalog.h"
 #include "NodeScribePropertyText.h"
 
@@ -46,6 +47,28 @@ namespace
 		FString Name = Class->GetName();
 		Name.RemoveFromEnd(TEXT("_C"));
 		return Name;
+	}
+
+	/**
+	 * Como chamar o alvo no cabecalho.
+	 *
+	 * O que o usuario reconhece e' o nome do asset -- `BT_Golem`, nao
+	 * `BehaviorTree`. Quando o alvo veio como CDO de um Blueprint, o CDO se
+	 * chama `Default__BP_Golem_C`, entao vale o nome do que foi pedido.
+	 */
+	FString DescribeTargetName(const UObject* Requested, const UObject* Target)
+	{
+		if (const UBlueprint* Blueprint = Cast<UBlueprint>(Requested))
+		{
+			return Blueprint->GetName();
+		}
+
+		if (const UClass* Class = Cast<UClass>(Requested))
+		{
+			return CleanClassName(Class);
+		}
+
+		return Target->GetName();
 	}
 
 	/**
@@ -134,6 +157,17 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 		return TEXT("[erro]: nenhum objeto informado.");
 	}
 
+	// Asset de IA tem forma propria: a informacao dele nao esta nas propriedades
+	// do objeto de cima, e sim na estrutura pendurada nele. Uma ficha generica
+	// de blackboard diz `Keys` e mais nada.
+	//
+	// Fica na mesma ferramenta de proposito: duas portas parecidas fazem quem
+	// chama escolher errado e gastar um turno descobrindo isso.
+	if (FNodeScribeAIReader::Handles(Object))
+	{
+		return FNodeScribeAIReader::ReadAsset(Object);
+	}
+
 	UObject* Target = ResolveTarget(Object);
 	if (!Target)
 	{
@@ -207,9 +241,11 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 
 	TArray<FString> Lines;
 
+	// O nome do asset, nao o da classe. Em Blueprint os dois coincidem, e por
+	// isso o erro passou; num BehaviorTree o cabecalho virava `ficha
+	// BehaviorTree (Object)`, que nao diz qual asset e' este.
 	Lines.Add(FString::Printf(TEXT("ficha %s (%s)"),
-		*CleanClassName(Class), *CleanClassName(Class->GetSuperClass()
-			? Class->GetSuperClass() : Class)));
+		*DescribeTargetName(Object, Target), *CleanClassName(Class)));
 
 	const FString Ancestry = DescribeAncestry(Class);
 	if (!Ancestry.IsEmpty())

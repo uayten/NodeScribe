@@ -137,33 +137,126 @@ Versão 0.3. UE 5.8.1, build limpa sem avisos.
 
 ### Em que ponto estamos
 
-Grafo é o que existe. **Ficha de propriedades é o que está sendo construído** —
-a especificação está em *Possíveis recursos futuros*, abaixo, e é a próxima
-coisa a codar.
+Funcionam hoje: **grafo** (`read_graph` / `write_graph`) e **ficha de objeto
+único** (`read_object`, modo padrão e filtrado).
+
+A frente ativa é **ler a IA de um inimigo inteira** — o Golem do BossRush é o
+caso real que guia o desenvolvimento. O roteiro está logo abaixo.
 
 Uma frente por vez, e madura antes da seguinte. Ideia de ferramenta nova que
 aparecer no meio do caminho vai para *Possíveis recursos futuros*, não para o
 código: o plugin só vale se cada peça for confiável, e uma peça só fica
 confiável com uso repetido.
 
-Dentro da ficha, a ordem é **`read_object` primeiro, sozinho**, e `write_object`
-só depois que o formato de leitura tiver sobrevivido a uso real. Ler não
-estraga asset nenhum, então dá para testar à vontade enquanto o formato ainda
-está mudando de ideia — e é onde está quase toda a economia de token. Escrever
-num formato que ainda vai mudar é como se arrepender caro.
+Em toda frente, **leitura primeiro, sozinha.** Ler não estraga asset nenhum,
+então dá para testar à vontade enquanto o formato ainda está mudando de ideia
+— e é onde está quase toda a economia de token. Escrever num formato que
+ainda vai mudar é se arrepender caro.
 
-**Onde `read_object` está:** anda em objeto único — propriedades da própria
-classe, modo padrão e modo filtrado, com o alinhamento e a contagem. Falta o
-que está listado abaixo, em ordem:
+### Roteiro: ler a IA do inimigo
 
-1. **Componentes.** É a falta que mais se sente: `Max Walk Speed` vive no
-   `CharacterMovement`, então hoje `read_object(BP_Golem, "walk")` responde
-   `0 de 78` — certo para o que existe, e inútil para a pergunta que se quis
-   fazer.
-2. **Variáveis do Blueprint com a linha `variavel`.** Hoje elas caem na lista
-   comum e saem como `Ability System = None`, sem tipo e sem o prefixo.
-3. **O modo filtrado alcançar componente**, uma vez que (1) exista.
-4. Só então `write_object`.
+Os assets do caso real, em `Content/BossRush/`: `IA/Golem/Behavior/`
+(`BT_Golem`, `BB_Golem`, `AIC_Golem`, `BTService_LocalizarJogador`,
+`BTTask_Patrulhar`) e `GAS/Habilidades/Golem/` (quatro `GA_`).
+
+**Uma suposição que se provou falsa e economiza trabalho:** BT e Blackboard
+**não** dependem de componentes na ficha. Um node de BT é um UObject com
+propriedades e nada mais. Componentes só fazem falta no `AIC_Golem` e para
+afinar o movimento do Golem, e por isso desceram na fila.
+
+#### Etapa 0 — Habilidades: pronto, sem código novo
+
+`read_object` já entrega um `GA_` inteiro. GameplayAbility não tem componente,
+então a lacuna da ficha não morde ali:
+
+```
+ficha GA_ChuvaDePedras (GameplayAbility)
+Classe Pedra = /Game/BossRush/GAS/Habilidades/Golem/ChuvaDePedras/BP_Pedra.BP_Pedra_C
+Quantidade De Pedras = 8
+Raio Da Área = 1500.0
+Intervalo Entre Pedras = 0.25
+~ 22 propriedades no padrao
+```
+
+#### Etapa 1 — Chaves do Blackboard
+
+Vem primeiro porque decorator de BT referencia chave **por nome**: sem as
+chaves, a árvore sai cheia de nome solto sem sentido.
+
+Hoje falha com `nao sei escrever o valor de: Keys`. `UBlackboardData::Keys` é
+um `TArray<FBlackboardEntry>`, e cada entrada guarda um `KeyType` que é
+**subobjeto instanciado** — é isso que o formatador genérico não sabe abrir.
+O detalhe do tipo mora em propriedade da subclasse (`UBlackboardKeyType_Object`
+tem `BaseClass`, `_Enum` tem `EnumType`).
+
+```
+blackboard BB_Golem
+chave Alvo : Object (Actor)
+chave PosicaoInicial : Vector
+chave Fase : Int
+```
+
+O nome do tipo sai da classe do `KeyType`, sem o prefixo
+`BlackboardKeyType_`. `UBlackboardData::Parent` vira uma linha de cabeçalho
+quando existir.
+
+#### Etapa 2 — Árvore do BT
+
+É o trabalho grande, e onde está a economia. Hoje a ficha vê só a raiz
+(`Root Node = ...BTComposite_Selector_0`); ver a árvore exige seguir ponteiro
+node a node.
+
+**O `AIModuleToolset` nem está ligado neste projeto** — não existe ferramenta
+nativa de BT aqui. A árvore numa chamada não é "mais barata", é a diferença
+entre viável e não viável.
+
+```
+arvore BT_Golem  (blackboard BB_Golem)
+Selector
+  Blackboard (Alvo esta definido):
+    Sequence
+      Move To (Blackboard Key = Alvo, Acceptable Radius = 150)
+      Wait (Wait Time = 0.5)
+  Sequence
+    Patrulhar (Raio = 800)
+```
+
+Percurso: `UBehaviorTree::RootNode` e `RootDecorators`, depois
+`UBTCompositeNode::Children` — cada `FBTCompositeChild` tem `Decorators`,
+`ChildComposite` e `ChildTask` —, mais `Services` em cada composite.
+Decorator e service viram rótulo indentado, o mesmo mecanismo do
+`verdadeiro:`. Os parâmetros de cada node saem pelo formatador de valor que a
+ficha já usa — é por isso que a ficha veio antes.
+
+**BT é o melhor encaixe que este formato já teve:** uma BT é literalmente uma
+árvore e não reconverge, então a perda que o `FORMATO.md` declara para grafo
+("cadeia de execução que reconverge, essa volta se perde") não existe aqui.
+
+#### Etapa 3 — Componentes na ficha
+
+Para o `AIC_Golem` e para o movimento do Golem. Hoje
+`read_object(BP_Golem, "walk")` responde `0 de 78`, porque `Max Walk Speed`
+vive no `CharacterMovement` — certo para o que existe, e inútil para a
+pergunta que se quis fazer.
+
+Percurso: `Blueprint->SimpleConstructionScript->GetAllNodes()` →
+`USCS_Node::ComponentTemplate` para Blueprint; `Actor->GetComponents()` para
+instância. Junto vem a etapa 4, que é pequena.
+
+#### Etapa 4 — Variáveis do Blueprint com a linha `variavel`
+
+Hoje caem na lista comum e saem como `Ability System = None`, sem tipo e sem
+prefixo. O código de ler o tipo e o valor padrão do CDO **já existe** no
+`NodeScribeReader` (commit `1ff554b`) — é reuso, não implementação.
+
+#### Etapa 5 — Escrita
+
+Nesta ordem de dificuldade: chave de blackboard é fácil; propriedade de GA é
+o `write_object` já especificado; **BT é o caro** — o asset guarda a
+hierarquia de execução *e* um grafo de editor (`UBehaviorTreeGraph`) que
+precisa ficar em sincronia. Escrever só o lado de runtime dá um asset que roda
+e aparece vazio na tela, que é exatamente o "compila, roda e está errado" que
+este plugin recusa.
 
 ## Desenvolvimento
 
@@ -373,54 +466,16 @@ ele erra e gasta um turno descobrindo que escolheu errado.
 
 ### Behavior Tree e Blackboard
 
-Candidato forte, e por uma razão estrutural: **uma Behavior Tree é literalmente
-uma árvore, e o formato já é uma árvore.** A limitação que o `FORMATO.md`
-declara para grafo — "cadeia de execução que reconverge: o formato é uma
-árvore, essa volta se perde" — **não existe aqui**, porque BT não reconverge.
-É o único caso até agora em que o formato não perde nada por construção.
+Saiu daqui: virou frente ativa. O plano completo — formato, percurso de
+implementação e ordem das etapas — está em **Roteiro: ler a IA do inimigo**,
+mais acima.
 
-O nativo (`AIModuleToolset`, 7 ferramentas) é só leitura — **não edita nada** —
-e a leitura é das piores que vi: `list_nodes` devolve referências de UObject e
-`get_node_depths` devolve um array paralelo de inteiros, que o modelo tem que
-casar de cabeça. Para saber o que cada node *é*, ainda são N chamadas de
-`get_properties`. Uma árvore de 20 nodes custa ~22 chamadas.
-
-```
-arvore BT_Golem  (blackboard BB_Golem)
-Selector
-  Blackboard (Alvo esta definido):
-    Sequence
-      Move To (Blackboard Key = Alvo, Acceptable Radius = 150)
-      Wait (Wait Time = 0.5)
-  Sequence
-    Patrulhar (Raio = 800)
-```
-
-Decorator e service viram rótulo indentado — o mesmo mecanismo do
-`verdadeiro:`. Nome de node (`Sequence`, `Move To`) é catalogável igual a
-UFunction. O blackboard é um bloco à parte, e é quase o que já existe:
-
-```
-blackboard BB_Golem
-chave Alvo : Object (BP_Player)
-chave PosicaoInicial : Vector
-chave Fase : Int
-```
-
-**Vem depois da ficha, não antes.** `Move To (Acceptable Radius = 150)` é o
-formatador de valor da ficha trabalhando dentro de uma árvore — construir BT
-primeiro significaria escrever esse formatador duas vezes.
-
-**Onde está a dificuldade, para não subestimar:** um asset de BT guarda a
-hierarquia de execução *e* um grafo de editor (`UBehaviorTreeGraph`) que
-precisa ficar em sincronia. Escrever só o lado de runtime dá um asset que roda
-e aparece vazio no editor — exatamente o "compila, roda e está errado" que este
-plugin recusa. O escritor tem que passar pelo grafo do editor, como o builder
-de Blueprint passa pelo `UEdGraph`. Chaves de blackboard são subobjetos
-`UBlackboardKeyType_*`, mais chatas de criar que variável. E `FlowAbortMode` é
-semântica que não se adivinha.
-
-Por isso, aqui também: **leitura primeiro, sozinha.**
+Fica só a nota que não cabia lá, sobre o toolset nativo. O `AIModuleToolset`
+da Engine existe (7 ferramentas) mas **não está ligado neste projeto**, e
+mesmo ligado seria só leitura — não edita nada. E a leitura é das piores que
+vi: `list_nodes` devolve referências de UObject e `get_node_depths` devolve um
+array paralelo de inteiros que o modelo tem que casar de cabeça, e ainda
+faltam N chamadas de `get_properties` para saber o que cada node é.
 
 ### O resto do mapa
 
