@@ -1019,6 +1019,51 @@ void FNodeScribeReadContext::Run()
 		}
 
 		Lines.Add(Header);
+
+		// As variaveis do Blueprint junto. Sem elas, quem le' o texto nao tem
+		// como saber se `$Slot` existe, qual o tipo dele, nem que outras ha' --
+		// e acaba escrevendo texto que referencia coisa que nao existe.
+		UClass* OwnClass = nullptr;
+		if (Blueprint)
+		{
+			// O esqueleto tem as variaveis criadas sem compilar ainda.
+			if (Blueprint->SkeletonGeneratedClass)
+			{
+				OwnClass = Blueprint->SkeletonGeneratedClass;
+			}
+			else
+			{
+				OwnClass = Blueprint->GeneratedClass.Get();
+			}
+		}
+
+		if (OwnClass)
+		{
+			TArray<FString> Declared;
+
+			// ExcludeSuper: so' o que este Blueprint declara. Com a heranca
+			// junto seriam centenas de linhas da Engine, e nenhuma util aqui.
+			for (TFieldIterator<FProperty> PropertyIt(OwnClass, EFieldIteratorFlags::ExcludeSuper);
+				PropertyIt; ++PropertyIt)
+			{
+				const FProperty* Property = *PropertyIt;
+				if (!Property->HasAnyPropertyFlags(CPF_BlueprintVisible))
+				{
+					continue;
+				}
+
+				Declared.Add(FString::Printf(TEXT("#   %s : %s"),
+					*Property->GetName(),
+					*UEdGraphSchema_K2::TypeToText(Property).ToString()));
+			}
+
+			if (Declared.Num() > 0)
+			{
+				Lines.Add(TEXT("# variaveis:"));
+				Lines.Append(Declared);
+			}
+		}
+
 		Lines.Add(FString());
 	}
 

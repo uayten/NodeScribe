@@ -266,13 +266,29 @@ namespace
 			Editor->JumpToNode(Result.CreatedNodes[0], false);
 		}
 
-		const FText Summary = (Result.ErrorCount > 0)
-			? FText::Format(
+		// O aviso de pino vazio ficava so' no log, e o log e' onde ninguem olha
+		// antes de apertar Play. Um `?` esquecido num pino de objeto compila e
+		// so' explode em runtime, entao ele precisa aparecer aqui.
+		FText Summary;
+
+		if (Result.ErrorCount > 0)
+		{
+			Summary = FText::Format(
 				LOCTEXT("PasteWithErrors", "{0} node(s) colados, mas {1} linha(s) nao resolveram."),
-				FText::AsNumber(Result.CreatedNodes.Num()), FText::AsNumber(Result.ErrorCount))
-			: FText::Format(
+				FText::AsNumber(Result.CreatedNodes.Num()), FText::AsNumber(Result.ErrorCount));
+		}
+		else if (Result.WarningCount > 0)
+		{
+			Summary = FText::Format(
+				LOCTEXT("PasteWithWarnings", "{0} node(s) colados. {1} pino(s) esperam uma escolha sua antes de rodar."),
+				FText::AsNumber(Result.CreatedNodes.Num()), FText::AsNumber(Result.WarningCount));
+		}
+		else
+		{
+			Summary = FText::Format(
 				LOCTEXT("PasteDone", "{0} node(s) colados. Ctrl+Z desfaz."),
 				FText::AsNumber(Result.CreatedNodes.Num()));
+		}
 
 		Report(Result.Diagnostics, Result.ErrorCount, Result.WarningCount, Summary,
 			FString::Printf(TEXT("%s -> %s"), *Blueprint->GetName(), *Graph->GetName()));
