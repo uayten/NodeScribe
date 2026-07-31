@@ -5,6 +5,7 @@
 #include "NodeScribePropertyText.h"
 
 #include "Components/ActorComponent.h"
+#include "EdGraph/EdGraph.h"
 #include "Engine/Blueprint.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
@@ -568,6 +569,36 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 	if (!Ancestry.IsEmpty())
 	{
 		Lines.Add(TEXT("# herda: ") + Ancestry);
+	}
+
+	// Os grafos, pelo nome com que `read_graph` os encontra.
+	//
+	// Sem esta linha o nome do grafo e' adivinhacao: `EventGraph` funciona quase
+	// sempre e falha sem dizer por que, e nao havia como descobrir o certo --
+	// ficava-se tentando nomes ate' acertar, ou desistindo do asset.
+	if (Blueprint && !bFiltering)
+	{
+		TArray<FString> GraphNames;
+
+		auto Collect = [&GraphNames](const TArray<TObjectPtr<UEdGraph>>& Graphs)
+		{
+			for (const UEdGraph* Graph : Graphs)
+			{
+				if (Graph)
+				{
+					GraphNames.Add(Graph->GetName());
+				}
+			}
+		};
+
+		Collect(Blueprint->UbergraphPages);
+		Collect(Blueprint->FunctionGraphs);
+		Collect(Blueprint->MacroGraphs);
+
+		if (GraphNames.Num() > 0)
+		{
+			Lines.Add(TEXT("# grafos: ") + FString::Join(GraphNames, TEXT(", ")));
+		}
 	}
 
 	const int32 HeaderIndex = 0;

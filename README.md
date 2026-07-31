@@ -695,6 +695,31 @@ Se isso incomodar, vale construir — com `IAssetTools::CreateAsset` e a factory
 do tipo, é pequeno. Mas então é para poder fazer algo novo, e o README não deve
 fingir que é economia.
 
+### Cast com continuação não volta igual
+
+Achado usando o plugin de verdade. No `Gameplay Ability Graph` do
+`GA_GolemSalto`, a cadeia depois de um `Cast to Character` sai **sem rótulo e
+sem aviso**. O `FORMATO.md` diz que node com mais de uma saída de execução para
+a cadeia de propósito e espera um rótulo — mas ali o leitor parou e não disse.
+
+O texto lido, colado de volta, deixaria o `Launch Character` desligado: um
+grafo que compila e não faz nada. É exatamente o modo de falha que este projeto
+existe para evitar, e passou porque leitor e escritor foram exercitados em
+grafos sem Cast no meio da execução.
+
+**Conserto:** o leitor emite o rótulo do pino sob o Cast, ou avisa que não
+sabe. Falhar em voz alta é o mínimo.
+
+### Listar os grafos de um Blueprint — **pronto**
+
+`read_object` num Blueprint agora traz `# grafos: ...`. Sem isso o nome do
+grafo era adivinhação: `EventGraph` funciona quase sempre e falha sem dizer por
+que. O `GA_GolemSalto` usa `Gameplay Ability Graph`, com espaços, e o
+`GA_ChuvaDePedras` usa `EventGraph` — dois assets do mesmo tipo, criados por
+caminhos diferentes. Sem a listagem, restava tentar nomes até acertar.
+
+### Enviar só o que mudou
+
 Hoje, editar um node num grafo de 40 custa o grafo inteiro em cada direção:
 ler tudo, devolver tudo, reescrever tudo.
 
