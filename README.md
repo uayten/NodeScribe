@@ -602,6 +602,41 @@ Quando fizer falta rodar dentro da suíte da Engine, o molde é
 `ToolsetRegistry/Source/ToolsetRegistry/Private/Tests/ToolsetLibraryTest.cpp`
 (`BEGIN_DEFINE_SPEC`). Os casos migram como estão; o que muda é quem chama.
 
+### O vocabulário que falta
+
+`Saved/NodeScribe/vocabulario.txt` acumula uma linha por **nome escrito que não
+casou com nada**: node não encontrado, node ambíguo, pino de entrada inexistente,
+saída inexistente num `$x.Pino`.
+
+```
+node     Fazer Cafe
+ambiguo  Apply Settings
+pino     In Vec  em  Break Vector
+saida    Xicara  em  $pc
+```
+
+Não é log de erro, e a distinção importa. O erro já volta no retorno da chamada,
+já vai para o Message Log e já fica como **comentário vermelho dentro do grafo**
+— que é onde ele serve, junto do problema, e de onde o próprio `read_graph` o
+traz de volta. Duplicar aquilo seria uma cópia mais pobre, e cara de ler.
+
+Este arquivo responde outra pergunta, que sem ele não dá para responder: **quais
+apelidos faltam no catálogo.**
+
+```bash
+sort vocabulario.txt | uniq -c | sort -rn
+```
+
+Depois de algumas semanas de uso, isso é uma lista de tarefas ordenada por
+frequência. Foi um caso desses que mostrou que o exemplo `Break Vector (In Vec =
+...)` da documentação nunca funcionou.
+
+Por isso não há data na linha: repetido precisa sair **idêntico**, senão a
+contagem não existe — e a ordem do arquivo já é cronológica. E por isso não entra
+aqui o que não é vocabulário (tipo incompatível, pino vazio, evento duplicado):
+esses têm causa conhecida e viram ruído numa contagem que existe para achar
+padrão.
+
 ### Armadilhas que já morderam
 
 Compilam sem reclamar e falham em tempo de execução. A build passar não diz

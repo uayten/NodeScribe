@@ -38,6 +38,7 @@ errado. Ao mexer aqui, preserve isso — em caso de dúvida, falhe em voz alta.
 | `NodeScribeReader` | o caminho de volta: nodes → texto. |
 | `NodeScribeGraphActions` | os três botões na barra do editor. |
 | `Testes/rodar_testes.py` | ida e volta automatizada, sem interface. Rode antes e depois de mexer no leitor ou no builder; o comando está em *Testar*, no README. |
+| `Saved/NodeScribe/vocabulario.txt` | os nomes que ninguém conseguiu resolver, um por linha. `sort \| uniq -c \| sort -rn` dá a lista de apelidos que faltam no catálogo, por frequência. Não é log de erro — veja *O vocabulário que falta*, no README. |
 
 Leitor e builder são espelhos: ao ensinar um tipo de node novo, os dois mudam.
 

@@ -2,6 +2,10 @@
 
 #include "NodeScribeCatalog.h"
 
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
@@ -45,6 +49,50 @@
 
 namespace
 {
+	/**
+	 * Um nome que alguem escreveu e o plugin nao casou com nada, numa linha, num
+	 * arquivo so'.
+	 *
+	 * **Nao e' log de erro.** O erro ja' volta no retorno da chamada, ja' vai
+	 * para o Message Log e ja' fica como comentario vermelho dentro do grafo --
+	 * que e' onde ele serve, junto do problema, e de onde o proprio `read_graph`
+	 * o traz de volta. Duplicar isso seria uma copia mais pobre.
+	 *
+	 * Isto responde outra pergunta, que hoje nao da' para responder de jeito
+	 * nenhum: **quais apelidos faltam no catalogo**. Depois de algumas semanas de
+	 * uso, `sort | uniq -c | sort -rn` neste arquivo e' uma lista de tarefas
+	 * ordenada por frequencia -- "voce escreveu `Delay` sete vezes e o catalogo
+	 * achou outra coisa".
+	 *
+	 * Nao ha' data na linha, de proposito: repetido precisa sair como linha
+	 * *identica*, senao a contagem nao existe, e a ordem do arquivo ja' e'
+	 * cronologica. Pelo mesmo motivo nao entram aqui os erros que nao sao de
+	 * vocabulario -- tipo incompativel, pino vazio, evento duplicado. Esses tem
+	 * causa conhecida, e virariam ruido numa contagem que existe para achar
+	 * padrao.
+	 */
+	void AnotaNomeNaoResolvido(const TCHAR* Tipo, const FString& Nome, const FString& Contexto = FString())
+	{
+		FString Linha = FString(Tipo) + TEXT("  ") + Nome.TrimStartAndEnd();
+
+		if (!Contexto.IsEmpty())
+		{
+			Linha += TEXT("  em  ") + Contexto.TrimStartAndEnd();
+		}
+
+		Linha += LINE_TERMINATOR;
+
+		const FString Pasta = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("NodeScribe"));
+		IFileManager::Get().MakeDirectory(*Pasta, /*Tree*/ true);
+
+		FFileHelper::SaveStringToFile(
+			Linha,
+			*FPaths::Combine(Pasta, TEXT("vocabulario.txt")),
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM,
+			&IFileManager::Get(),
+			FILEWRITE_Append);
+	}
+
 	/** Espacamento horizontal entre nodes de uma mesma cadeia de execucao. */
 	constexpr int32 ColumnWidth = 620;
 
@@ -1463,6 +1511,8 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveReference(const FString& Name, int3
 		}
 	}
 
+	AnotaNomeNaoResolvido(TEXT("saida"), PinPath, TEXT("$") + BaseName);
+
 	AddError(Line, FString::Printf(
 		TEXT("`$%s` nao tem saida `%s`. Saidas de dado: %s"),
 		*BaseName, *PinPath, *FString::Join(Available, TEXT(", "))));
@@ -1629,6 +1679,11 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 				{
 					Available.Add(Candidate->PinName.ToString());
 				}
+
+				// Nome de pino errado e' a mesma familia: foi assim que apareceu
+				// que o exemplo `Break Vector (In Vec = ...)` da documentacao
+				// nunca funcionou -- o pino se chama como a struct.
+				AnotaNomeNaoResolvido(TEXT("pino"), Arg.PinName, Statement.NodeExpression);
 
 				AddError(Statement.LineNumber, FString::Printf(
 					TEXT("O node nao tem pino `%s`. Pinos de entrada: %s"),
@@ -2622,6 +2677,10 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 			TEXT("Mais de uma funcao combina. Escreva o nome exato de uma delas:\n  %s"),
 			*FString::Join(Lookup.Candidates, TEXT("\n  ")));
 
+		// Ambiguo tambem e' falta de vocabulario: o nome curto existe e nao chega
+		// para decidir. Ou falta um apelido, ou falta o formato saber desempatar.
+		AnotaNomeNaoResolvido(TEXT("ambiguo"), Statement.NodeExpression);
+
 		AddError(Statement.LineNumber, FString::Printf(
 			TEXT("`%s` e' ambiguo. Candidatos: %s"),
 			*Statement.NodeExpression, *FString::Join(Lookup.Candidates, TEXT(" | "))));
@@ -2665,6 +2724,8 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 			break;
 		}
 	}
+
+	AnotaNomeNaoResolvido(TEXT("node"), Statement.NodeExpression);
 
 	AddError(Statement.LineNumber, FString::Printf(
 		TEXT("Nao achei nenhum node chamado `%s`.%s"),
