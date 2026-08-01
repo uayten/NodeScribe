@@ -39,9 +39,14 @@ class NodeScribeTools(unreal.ToolsetDefinition):
     def read_graph(graph: unreal.EdGraph) -> str:
         """Le' um grafo inteiro como texto no formato NodeScribe.
 
-        O texto volta colavel em write_graph. O cabecalho traz o asset, o grafo
-        e as variaveis declaradas. Avisos sobre o que nao volta igual saem
-        comentados no fim.
+        O texto volta colavel em write_graph. O cabecalho traz o asset, o grafo,
+        o caminho exato do grafo (`refPath:`) e as variaveis declaradas. Avisos
+        sobre o que nao volta igual saem comentados no fim.
+
+        O caminho e' `/Raiz/Pasta/Asset.Asset:NomeDoGrafo`. A raiz de um asset de
+        plugin e' o nome do plugin (`/JoyShockLibrary4Unreal/...`), nao `/Game/`,
+        e o nome do grafo nao e' adivinhavel -- `read_object` no Blueprint lista
+        os grafos que ele tem.
 
         Args:
             graph: O grafo a ler.
@@ -52,7 +57,7 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
     @toolset_registry.tool_call
     @staticmethod
-    def read_object(target: unreal.Object, filter: str = '') -> str:
+    def read_object(target: unreal.Object, filter: str | None = None) -> str:
         """Le' um objeto, classe, CDO, ator ou asset como ficha de propriedades.
 
         Uma linha por propriedade, e so' o que difere do valor de fabrica --
@@ -64,14 +69,18 @@ class NodeScribeTools(unreal.ToolsetDefinition):
         resposta ja' vem com tipo e valor. Nunca leia tudo para depois
         procurar.
 
+        O alvo e' um caminho de objeto: `/Raiz/Pasta/Asset.Asset`. A raiz de um
+        asset de plugin e' o nome do plugin (`/JoyShockLibrary4Unreal/...`), nao
+        `/Game/`.
+
         Args:
             target: O objeto a ler. Blueprint e classe viram o CDO delas.
-            filter: Vazio devolve o que mudou. Com texto, devolve as
+            filter: Omitido devolve o que mudou. Com texto, devolve as
                     propriedades cujo nome contem esse texto.
         Returns:
             A ficha.
         """
-        return unreal.NodeScribeLibrary.read_object(target, filter)
+        return unreal.NodeScribeLibrary.read_object(target, filter or '')
 
     @toolset_registry.tool_call
     @staticmethod
@@ -118,19 +127,19 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
     @toolset_registry.tool_call
     @staticmethod
-    def read_tags(filter: str = '') -> str:
+    def read_tags(filter: str | None = None) -> str:
         """Le' as Gameplay Tags declaradas, uma por linha.
 
         Args:
-            filter: Vazio traz todas. Com texto, so' as que contem esse trecho.
+            filter: Omitido traz todas. Com texto, so' as que contem esse trecho.
         Returns:
             Uma linha `tag Nome` por tag, com a contagem no cabecalho.
         """
-        return unreal.NodeScribeLibrary.read_tags(filter)
+        return unreal.NodeScribeLibrary.read_tags(filter or '')
 
     @toolset_registry.tool_call
     @staticmethod
-    def write_tags(text: str, source: str = '') -> str:
+    def write_tags(text: str, source: str | None = None) -> str:
         """Cria Gameplay Tags, uma por linha.
 
         Existe porque tag nao e' asset nem propriedade -- vive num ini --, entao
@@ -143,14 +152,15 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
         Args:
             text: Uma tag por linha.
-            source: O ini de destino, pelo nome de tela: 'BossRush.ini'. Vazio
-                    deixa a Engine escolher, que da' 'DefaultGameplayTags.ini'
-                    -- que pode nao ser onde as outras tags do projeto moram.
-                    Fonte inexistente e' recusada com a lista das que existem.
+            source: O ini de destino, pelo nome de tela: 'BossRush.ini'.
+                    Omitido deixa a Engine escolher, que da'
+                    'DefaultGameplayTags.ini' -- que pode nao ser onde as outras
+                    tags do projeto moram. Fonte inexistente e' recusada com a
+                    lista das que existem.
         Returns:
             Quantas foram criadas e em que arquivo, e uma linha por diagnostico.
         """
-        return unreal.NodeScribeLibrary.write_tags(text, source)
+        return unreal.NodeScribeLibrary.write_tags(text, source or '')
 
     @toolset_registry.tool_call
     @staticmethod

@@ -56,6 +56,8 @@ variavel Pulos Totais : Integer = 3
 variavel Duração do Pulo : Float = 1.0
 variavel Timer Salto : Timer Handle
 variavel Inputs : Array de Name
+variavel Espelhos : Mapa de Int64 para BP_Espelho
+variavel Já Vistos : Conjunto de Name
 ```
 
 A variável é criada antes dos nodes que a usam. Se já existir, a linha é
@@ -64,7 +66,11 @@ ignorada — colar o mesmo texto duas vezes não faz mal.
 O tipo é o nome que aparece na interface: `Float`, `Integer`, `Boolean`,
 `Name`, `Text`, `String`, qualquer struct (`Timer Handle`, `Vector`), qualquer
 enum (`EPlayerMappableKeySlot`) e qualquer classe (`BP_Golem`).
-`Array de X` para lista.
+
+Coleção: `Array de X` para lista, `Conjunto de X` para set, `Mapa de X para Y`
+para mapa. A chave e o valor de um mapa não podem ser coleção — a Unreal não
+tem `TMap<int, TArray<X>>` —, e uma linha que peça isso é recusada em vez de
+virar outra coisa.
 
 **Widget do Designer não se declara.** Um `ScrollBox` da tela vira variável ao
 ser colocado no Designer com *Is Variable* marcado — declarar uma com o mesmo
@@ -236,8 +242,12 @@ tipo.
 
 ```
 args = Make MapPlayerKeyArgs (Mapping Name = $Nome, Slot = First)
-Break Vector (In Vec = $posicao)
+Break Vector ($posicao)
 ```
+
+No `Make`, cada pino tem o nome do campo. No `Break` há um pino de entrada só,
+e ele se chama como a struct (`Vector`) — por isso a forma sem nome, por
+posição, é a que se lê melhor.
 
 Aceita o nome interno (`MapPlayerKeyArgs`) ou o de exibição
 (`Map Player Key Args`). Só vira node de struct se a struct existir — assim
@@ -277,6 +287,25 @@ For Each Loop (Array = $Inimigos)
 ```
 
 Também: `Do Once`, `Flip Flop`, `Gate`, `While Loop`, `Multi Gate`, `Is Valid`.
+
+## Outros nomes que o plugin conhece
+
+`Return` é o node de retorno de um grafo de função. `To Text` converte qualquer
+valor em Text. `Self` é a referência a este Blueprint.
+
+Uma **ação assíncrona** — os nodes que a Engine e os plugins expõem por
+`UBlueprintAsyncActionBase`, com um pino de execução por evento — entra pelo
+nome que aparece no grafo, e cada saída é um rótulo indentado:
+
+```
+Wait For Any Controller Changes
+  On Connected:
+    Print String (In String = "conectou")
+  On Disconnected:
+    Print String (In String = "caiu")
+```
+
+O pino que continua na hora chama-se `then`, e é rótulo como qualquer outro.
 
 ## Buracos: o que o plugin **não** decide por você
 
@@ -327,11 +356,17 @@ O cabeçalho diz de onde o texto veio e declara as variáveis:
 
 ```
 # WBP_LinhaRemapear -> EventGraph (selecao parcial)
+# refPath: /Game/UI/WBP_LinhaRemapear.WBP_LinhaRemapear:EventGraph
 # do Designer (crie na tela, marcando Is Variable):
 #   NomedaHabilidadeText : Text Object Reference
 variavel Nome do Input : Name
 variavel KeySlot : EPlayerMappableKeySlot
 ```
+
+O `refPath` é o caminho exato daquele grafo, para pedir de volta sem adivinhar.
+São duas coisas que não dá para deduzir: o nome do grafo (`EventGraph` num
+asset, `Gameplay Ability Graph` em outro) e a raiz de conteúdo — um asset de
+plugin mora em `/NomeDoPlugin/`, não em `/Game/`.
 
 Colar num Blueprint vazio recria as variáveis junto com os nodes. As do
 Designer saem como comentário, porque não é o texto que as cria.
@@ -339,16 +374,58 @@ Designer saem como comentário, porque não é o texto que as cria.
 Só o que o próprio Blueprint declara — as herdadas seriam centenas de linhas
 da Engine.
 
-A tradução não é perfeita, e onde ela não é o plugin fala:
+### Três coisas que a leitura escreve e o parser descarta
+
+**Âncora de reconvergência.** Duas cadeias que caem no mesmo node não cabem numa
+árvore. Em vez de o segundo ramo sair vazio — igualzinho a um ramo que ninguém
+ligou —, o node de destino ganha um `# ancora N` no fim da linha, e o ponto de
+volta diz para onde vai:
+
+```
+Branch (Condition = $bLigado)
+  verdadeiro:
+    Print String (In String = "ligou")
+    Atualizar Tela  # ancora 1
+  falso:
+    # -> volta para a ancora 1 (`Atualizar Tela`)
+```
+
+A volta continua se perdendo ao colar — o que mudou é você conseguir ver que ela
+existe, e onde.
+
+**Conversão de tipo.** Ligar um `Integer` num pino de `String` faz a Unreal
+inserir um node de conversão. Ele não vira linha (o plugin o recria sozinho ao
+refazer a ligação), mas fica marcado:
+
+```
+Append (A = "n = ", B = $Contador (Integer -> String))
+```
+
+Sem isso, um `Device Id` promovido para `int64` e um `Connection Id` que já era
+`int64` escrevem exatamente a mesma linha — e um dos dois faz todo controle
+colidir na mesma chave do mapa.
+
+**Pino sem nome.** Quando o plugin não consegue nomear a saída de onde um valor
+sai, ele escreve `$x.<pino desconhecido>` em vez de `$x`, que pareceria a saída
+principal e ligaria em outro pino na volta.
+
+### Pino que não aparece na linha
+
+Um pino omitido está no **valor de fábrica dele** — nunca significa "não tem
+nada ligado". `Set Is Enabled (Target = $X)` é o `bInIsEnabled` no padrão, que é
+`false`. Valor apagado de propósito, que difere do padrão, sai explícito: `""`.
+
+### O resto do que não é perfeito
 
 | Situação | O que acontece |
 |---|---|
-| Cadeia de execução que reconverge | aviso: o formato é uma árvore, essa volta se perde |
+| Cadeia de execução que reconverge | âncora nas duas pontas + aviso: a volta se perde ao colar |
 | Pino alimentado por node fora da seleção | aviso: o pino sai sem valor |
 | Node que o plugin não sabe nomear de volta | sai o título do node + aviso de que pode não voltar igual |
 | Valor com aspas dos dois tipos | aviso: não há escape, copie na mão |
-| Node de dado que não alimenta ninguém | nota: ficou de fora |
+| Node de dado que não alimenta ninguém | nota, com o nome de cada um |
 | Evento ligado a dispatcher/delegate | aviso na leitura; comentário vermelho ao colar |
+| Entrada de função (`Function Entry`) | aviso com a assinatura: crie a função e cole dentro dela |
 
 Reroute (os pontinhos de organizar fio) some na volta — é layout, não lógica.
 Get de variável do próprio Blueprint vira `$Nome` direto, sem linha própria.

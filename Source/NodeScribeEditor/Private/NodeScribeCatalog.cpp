@@ -2,6 +2,7 @@
 
 #include "NodeScribeTypes.h"
 #include "Engine/Blueprint.h"
+#include "Kismet/BlueprintAsyncActionBase.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
@@ -41,7 +42,13 @@ namespace
 			return false;
 		}
 
-		if (Function->HasMetaData(TEXT("BlueprintInternalUseOnly")))
+		// `BlueprintInternalUseOnly` marca o que nao se chama direto -- e a fabrica
+		// de uma acao assincrona e' exatamente isso: quem a expoe no grafo e' o
+		// `UK2Node_AsyncAction`, nao um node de chamada. Descartar todas fazia um
+		// plugin inteiro construido sobre `UBlueprintAsyncActionBase` ficar fora do
+		// catalogo, e nenhum grafo dele voltava colavel.
+		if (Function->HasMetaData(TEXT("BlueprintInternalUseOnly"))
+			&& !FNodeScribeCatalog::IsAsyncActionFactory(Function))
 		{
 			return false;
 		}
@@ -97,6 +104,37 @@ FString FNodeScribeCatalog::Normalize(const FString& In)
 	}
 
 	return Out;
+}
+
+bool FNodeScribeCatalog::IsAsyncActionFactory(const UFunction* Function)
+{
+	if (!Function || !Function->HasAnyFunctionFlags(FUNC_Static))
+	{
+		return false;
+	}
+
+	const FObjectProperty* ReturnProperty = CastField<FObjectProperty>(Function->GetReturnProperty());
+	if (!ReturnProperty || !ReturnProperty->PropertyClass)
+	{
+		return false;
+	}
+
+	if (!ReturnProperty->PropertyClass->IsChildOf(UBlueprintAsyncActionBase::StaticClass()))
+	{
+		return false;
+	}
+
+	// A classe que pede node proprio (as tasks de GAS, por exemplo) fica de fora:
+	// ali o node certo nao e' o `UK2Node_AsyncAction`, e criar esse daria um node
+	// parecido e errado. E' a mesma checagem que `UK2Node_AsyncAction` faz ao se
+	// oferecer no menu.
+	const UClass* Owner = Function->GetOwnerClass();
+	if (Owner && Owner->HasMetaData(TEXT("HasDedicatedAsyncNode")))
+	{
+		return false;
+	}
+
+	return true;
 }
 
 FString FNodeScribeCatalog::StripEventPrefix(const FString& FunctionName)

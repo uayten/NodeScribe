@@ -11,6 +11,7 @@
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "K2Node_AsyncAction.h"
 #include "K2Node_BreakStruct.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_ComponentBoundEvent.h"
@@ -22,6 +23,7 @@
 #include "K2Node_Event.h"
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_FunctionResult.h"
+#include "K2Node_GenericToText.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_MacroInstance.h"
 #include "K2Node_AddDelegate.h"
@@ -308,6 +310,72 @@ namespace
 			}
 		}
 
+		// Mapa: `Mapa de Int64 para BP_Mirror`. As duas metades sao resolvidas
+		// pela mesma funcao, entao valem os mesmos nomes de tipo de sempre.
+		//
+		// Vem antes do array porque a chave de um mapa nunca e' container: se a
+		// linha disser `Mapa de Array de X para Y`, e' erro, e o `return false`
+		// aqui embaixo e' que faz isso ser dito em voz alta.
+		{
+			static const TCHAR* const MapPrefixes[] = {
+				TEXT("Mapa de "), TEXT("Map de "), TEXT("Map of "), TEXT("Mapa ")
+			};
+
+			for (const TCHAR* Prefix : MapPrefixes)
+			{
+				if (!TypeName.StartsWith(Prefix, ESearchCase::IgnoreCase))
+				{
+					continue;
+				}
+
+				const FString Rest = TypeName.RightChop(FCString::Strlen(Prefix)).TrimStartAndEnd();
+
+				FString KeyName;
+				FString ValueName;
+				if (!Rest.Split(TEXT(" para "), &KeyName, &ValueName, ESearchCase::IgnoreCase)
+					&& !Rest.Split(TEXT(" to "), &KeyName, &ValueName, ESearchCase::IgnoreCase))
+				{
+					return false;
+				}
+
+				FEdGraphPinType KeyType;
+				FEdGraphPinType ValueType;
+				if (!ResolvePinTypeFromNameInternal(KeyName.TrimStartAndEnd(), KeyType)
+					|| !ResolvePinTypeFromNameInternal(ValueName.TrimStartAndEnd(), ValueType))
+				{
+					return false;
+				}
+
+				if (KeyType.ContainerType != EPinContainerType::None
+					|| ValueType.ContainerType != EPinContainerType::None)
+				{
+					return false;
+				}
+
+				OutType = KeyType;
+				OutType.ContainerType = EPinContainerType::Map;
+				OutType.PinValueType = FEdGraphTerminalType::FromPinType(ValueType);
+				return true;
+			}
+		}
+
+		bool bIsSet = false;
+		{
+			static const TCHAR* const SetPrefixes[] = {
+				TEXT("Conjunto de "), TEXT("Set de "), TEXT("Set of ")
+			};
+
+			for (const TCHAR* Prefix : SetPrefixes)
+			{
+				if (TypeName.StartsWith(Prefix, ESearchCase::IgnoreCase))
+				{
+					TypeName = TypeName.RightChop(FCString::Strlen(Prefix)).TrimStartAndEnd();
+					bIsSet = true;
+					break;
+				}
+			}
+		}
+
 		static const TCHAR* const ArrayPrefixes[] = {
 			TEXT("Array de "), TEXT("Array of "), TEXT("Lista de ")
 		};
@@ -345,6 +413,27 @@ namespace
 
 		const FString Normalized = FNodeScribeCatalog::Normalize(TypeName);
 
+		// Struct que casou so' pelo *nome de tela* perde para uma classe de nome
+		// exato.
+		//
+		// `FTypedElementActorTag` e' declarada `USTRUCT(meta = (DisplayName =
+		// "Actor"))`, e a busca de struct vem antes da de classe: sem esta regra,
+		// `variavel X : Actor` criava aquela struct. Compila, parece certo no
+		// painel, e nao e' um Actor -- o pior resultado possivel.
+		//
+		// So' o nome de tela cede. `Vector` e `TimerHandle` casam pelo nome
+		// interno da struct e continuam ganhando de qualquer classe homonima, que
+		// e' o comportamento que ja' servia. E a busca de classe so' conhece nome
+		// interno (e o `_C` de Blueprint), entao "classe de nome exato" nao abre
+		// uma segunda porta de nome de tela.
+		UScriptStruct* Struct = FindStructByFriendlyName(TypeName);
+		if (Struct
+			&& FNodeScribeCatalog::Normalize(Struct->GetName()) != Normalized
+			&& FindClassByFriendlyNameInternal(TypeName) != nullptr)
+		{
+			Struct = nullptr;
+		}
+
 		if (const FName* Category = Primitives.Find(Normalized))
 		{
 			OutType.PinCategory = *Category;
@@ -354,7 +443,7 @@ namespace
 				OutType.PinSubCategory = UEdGraphSchema_K2::PC_Double;
 			}
 		}
-		else if (UScriptStruct* Struct = FindStructByFriendlyName(TypeName))
+		else if (Struct)
 		{
 			OutType.PinCategory = UEdGraphSchema_K2::PC_Struct;
 			OutType.PinSubCategoryObject = Struct;
@@ -386,6 +475,10 @@ namespace
 		if (bIsArray)
 		{
 			OutType.ContainerType = EPinContainerType::Array;
+		}
+		else if (bIsSet)
+		{
+			OutType.ContainerType = EPinContainerType::Set;
 		}
 
 		return true;
@@ -1809,6 +1902,18 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		return Node;
 	}
 
+	// --- To Text ----------------------------------------------------------
+	//
+	// Node proprio, e nao a funcao de mesmo nome: a funcao e'
+	// `BlueprintInternalUseOnly` e nao esta' no catalogo. Sem este caso a linha
+	// que o leitor escreve nao teria como voltar.
+	if (Normalized == TEXT("totext") || Normalized == TEXT("paratexto"))
+	{
+		UK2Node_GenericToText* Node = AllocateNode<UK2Node_GenericToText>();
+		FinalizeNode(Node);
+		return Node;
+	}
+
 	// --- Self -------------------------------------------------------------
 	if (Normalized == TEXT("self") || Normalized == TEXT("eu"))
 	{
@@ -2490,6 +2595,21 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 
 	if (Lookup.IsConfident())
 	{
+		// Acao assincrona nao e' chamada de funcao: e' um node proprio, com uma
+		// saida de execucao para cada delegate do proxy (`On Connected`,
+		// `On Disconnected`). Essas saidas ja' sao pinos de execucao comuns,
+		// entao os rotulos indentados do formato servem sem nada novo.
+		if (FNodeScribeCatalog::IsAsyncActionFactory(Lookup.Function))
+		{
+			UK2Node_AsyncAction* Node = AllocateNode<UK2Node_AsyncAction>();
+
+			// Antes de alocar os pinos: sao os delegates do proxy que dizem quais
+			// pinos existem, e o proxy so' e' conhecido depois desta linha.
+			Node->InitializeProxyFromFunction(Lookup.Function);
+			FinalizeNode(Node);
+			return Node;
+		}
+
 		UK2Node_CallFunction* Node = AllocateNode<UK2Node_CallFunction>();
 		Node->SetFromFunction(Lookup.Function);
 		FinalizeNode(Node);

@@ -49,6 +49,17 @@ public:
 	static FString Normalize(const FString& In);
 
 	/**
+	 * true quando a funcao nao vira uma chamada, e sim um node de acao
+	 * assincrona (`UK2Node_AsyncAction`).
+	 *
+	 * E' a mesma regra que a Engine usa para montar o menu: funcao estatica cujo
+	 * retorno e' um `UBlueprintAsyncActionBase`. Essas funcoes sao marcadas
+	 * `BlueprintInternalUseOnly` de proposito -- ninguem as chama direto --, e por
+	 * isso o catalogo precisa abrir uma excecao para elas em vez de descartar.
+	 */
+	static bool IsAsyncActionFactory(const UFunction* Function);
+
+	/**
 	 * Nome do evento como o usuario escreve: `ReceiveBeginPlay` -> `BeginPlay`.
 	 * A Engine prefixa os eventos implementaveis; ninguem digita o prefixo.
 	 */

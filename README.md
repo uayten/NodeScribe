@@ -124,16 +124,92 @@ formato que só a máquina lê.
 
 ## Estado
 
-Versão 0.3. UE 5.8.1, build limpa sem avisos.
+Versão 0.4. UE 5.8.1, build limpa sem avisos.
 
 - **Exercitado num projeto real:** ida e volta em grafos de UI e de gameplay.
   Rodaram: eventos (override, custom, de dispatcher, de Input Action), Branch,
   For Each Loop, Switch, Cast, structs (Make/Break e pino dividido),
-  subsistemas, Create Widget com Expose on Spawn, variáveis próprias e de
-  outro objeto, e os três botões.
+  subsistemas, Create Widget com Expose on Spawn, ação assíncrona
+  (`UBlueprintAsyncActionBase`), mapa e conjunto, variáveis próprias e de outro
+  objeto, e os três botões.
 - **Compila mas nunca rodou:** Select, Call/Bind/Unbind de dispatcher.
 - **Idioma:** interface e mensagens em português. O formato aceita palavras em
   PT e EN desde sempre (`evento`/`event`, `verdadeiro`/`true`).
+
+### O que a 0.4 mudou: a leitura parar de mentir
+
+A 0.3 foi boa o bastante para achar bugs reais numa revisão longa de UI. Onde
+ela falhou foi pior que falhar: em dois pontos o texto era **plausível e
+errado**, e isso virou afirmação errada em mensagem de commit.
+
+Três eram defeito de correção, não de diagnóstico:
+
+- **Campo de struct sumia do pino.** `$x` puro saía quando o Break tinha um
+  campo visível só — e os pinos de um Break são os campos *marcados* no painel
+  dele. O Break recriado ao colar nasce com todos marcados, então `$x` entrava
+  no primeiro campo da struct, que podia ser outro. Agora Break sempre nomeia o
+  campo.
+- **Nome de tela com parênteses não voltava.** `SetText (Text)` está em todo
+  grafo de UI; o parser corta a linha no primeiro `(` e aquilo voltava como um
+  node `SetText` recebendo um argumento `Text`. Nome com parênteses agora sai
+  qualificado (`TextBlock.SetText`).
+- **`then` de um node assíncrono saía como `True:`.** O apelido existe para o
+  Branch, e fora dele inventava uma condição que não existe — quem lia entendia
+  que havia um teste, e o ramo seguinte virava o `False` dele.
+
+E o resto do que a revisão pediu: âncora nas duas pontas de uma reconvergência,
+marca de conversão implícita de tipo, nome de cada node órfão, `Mapa de X para
+Y` e `Conjunto de X`, ação assíncrona pelos dois lados, `refPath` no cabeçalho,
+e valor apagado saindo como `""` em vez de sumir.
+
+### O que a 0.4 mudou: o resto
+
+**Teste de ida e volta automatizado** (`Testes/rodar_testes.py`), que na
+primeira execução já pegou um exemplo do `FORMATO.md` que não funcionava:
+`Break Vector (In Vec = ...)`. O pino de entrada de um Break se chama como a
+struct, então o exemplo certo é `Break Vector ($posicao)`.
+
+**O catálogo agora é invalidado quando um Blueprint compila.** Ele é montado uma
+vez por sessão, e `Invalidate()` existia sem ninguém chamar: criar uma função
+num Blueprint e chamá-la de *outro*, na mesma sessão, dava "não achei nenhum
+node chamado X" para algo que existe.
+
+**Três coisas que faziam o texto ensinar o nome errado:**
+
+- `100.000000` num pino virou `100.0`. A ficha já formatava assim, com o
+  comentário explicando por quê; o leitor de grafo não — era a mesma decisão
+  aplicada em metade do plugin.
+- `BP_Golem_C` virou `BP_Golem`. O sufixo é da compilação, não aparece em lugar
+  nenhum da interface, e a busca aceita as duas formas.
+- `TargetMap` virou `Target Map`, e `bIsChecked` virou `Is Checked` — o nome do
+  parâmetro em C++ dava lugar ao que a tela mostra. **Com uma guarda:** nome com
+  sigla ou número sai cru, porque `NameToDisplayString` decide onde cabe espaço
+  pela troca de caixa e erra em sigla — `JSL4UControllerInfo` saía como
+  `JSL4UController Info`. Isso só apareceu relendo um grafo de verdade depois da
+  mudança; o teste de ponto fixo passava, porque a busca normaliza as duas
+  formas.
+
+### `variavel X : Actor` criava uma struct
+
+A ida e volta da 0.4 esbarrou nisto: `Mapa de Int64 para Actor` voltou como
+`Mapa de Int64 para TypedElementActorTag`.
+
+A Engine declara `FTypedElementActorTag` como
+`USTRUCT(meta = (DisplayName = "Actor"))`, em
+`Elements/Columns/TypedElementCompatibilityColumns.h`. O
+`ResolvePinTypeFromNameInternal` procura struct antes de classe, e a busca de
+struct aceita nome de tela — então "Actor" casava com ela primeiro. Era anterior
+à 0.4, valia para qualquer declaração, e `Actor` é dos nomes de tipo mais
+escritos que existem.
+
+A regra nova é estreita: **struct que casou só pelo nome de tela perde para uma
+classe de nome exato.** `Vector` e `TimerHandle` casam pelo nome interno da
+struct e continuam ganhando; a busca de classe só conhece nome interno (e o `_C`
+de Blueprint), então não abre uma segunda porta de nome de tela.
+
+Conferido por regressão: `Vector`, `Timer Handle`, `Transform`, `Rotator`,
+`Linear Color`, `Array de Vector`, `Mapa de Name para Vector` e um enum
+continuam resolvendo como antes; `Actor` e `Pawn` agora dão a classe.
 
 ### Em que ponto estamos
 
@@ -463,16 +539,34 @@ colar o texto num Blueprint vazio, ler de novo, comparar os dois textos.
 Leitor e escritor são espelhos por projeto — quando o texto não fecha, um dos
 dois está mentindo, e o diff diz qual.
 
-Não há testes automatizados ainda. Quando houver, o molde é
-`ToolsetRegistry/Source/ToolsetRegistry/Private/Tests/ToolsetLibraryTest.cpp`
-na Engine (`BEGIN_DEFINE_SPEC`), e eles rodam sem abrir a interface:
+`Testes/rodar_testes.py` faz isso sozinho, sem interface, em ~20 segundos:
 
 ```powershell
-& "E:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "C:\Unreal Projects\BossRush\BossRush.uproject" -ExecCmds="Automation RunTests NodeScribe; Quit" -unattended -nopause -nosplash -NullRHI
+& "E:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" --% "C:/Unreal Projects/BossRush/BossRush.uproject" -run=pythonscript -script="C:/Unreal Projects/BossRush/Plugins/NodeScribe/Testes/rodar_testes.py" -unattended -nopause -nosplash -NullRHI
 ```
 
-Vale o investimento na hora em que a ficha começar a mexer em propriedade de
-verdade: ali um erro escreve no asset, e ida e volta manual não cobre isso.
+O relatório sai em `Saved/NodeScribe/testes.txt`, e falhou, o processo sai com
+código diferente de zero.
+
+**Duas armadilhas no comando, as duas por causa do espaço em "Unreal
+Projects".** O `--%` faz o PowerShell parar de interpretar e passar o resto
+literal — sem ele o caminho é cortado no espaço. E o caminho vai com **barra
+normal**: dentro das aspas a Engine come a barra invertida como escape, e
+`Testes\rodar` vira `Testesodar`.
+
+Cada caso é escrito num Blueprint vazio, lido, e essa leitura é escrita num
+*segundo* Blueprint vazio e lida de novo. Espelho de verdade dá as duas
+leituras idênticas. É o formato de teste que não precisa de resposta guardada a
+mão — nada para atualizar quando o formato mudar, e nenhum caso que passa por
+estar desatualizado junto com o código.
+
+Ele não cobre legibilidade: `True:` num node que não é Branch fecha o ponto fixo
+igual, e só apareceu porque alguém leu. Para isso ainda é preciso ler um grafo
+real de vez em quando — `read_graph` num asset de verdade, e olho no texto.
+
+Quando fizer falta rodar dentro da suíte da Engine, o molde é
+`ToolsetRegistry/Source/ToolsetRegistry/Private/Tests/ToolsetLibraryTest.cpp`
+(`BEGIN_DEFINE_SPEC`). Os casos migram como estão; o que muda é quem chama.
 
 ### Armadilhas que já morderam
 
@@ -519,6 +613,113 @@ precisa responder quatro coisas — as mesmas que a ficha responde:
   só adiciona.
 
 ## Possíveis recursos futuros
+
+### MCP próprio: falar direto com o cliente
+
+Hoje as nove ferramentas do NodeScribe chegam ao cliente por três camadas da
+Epic: o plugin `ModelContextProtocol` (o servidor HTTP), o `ToolsetRegistry` (o
+registro) e o `AllToolsets`/`EditorToolset` (que expõem as três ferramentas
+genéricas). O cliente vê `list_toolsets`, `describe_toolset` e `call_tool` — e
+todo `read_graph` viaja dentro de um `call_tool`.
+
+A proposta é o plugin falar MCP por conta própria. **Em dois estágios, e o
+primeiro serve sozinho** — o segundo só troca quem hospeda.
+
+#### Estágio 1 — registrar as ferramentas direto
+
+`IModelContextProtocolModule::GetChecked().AddTool(...)` aceita qualquer
+`IModelContextProtocolTool`: nome, descrição, JSON Schema de entrada e um `Run`.
+São exatamente as quatro coisas que a ferramenta já tem, hoje escritas em
+Python. Registrando direto, `read_graph` vira uma ferramenta de primeira classe
+no cliente, e a camada Python inteira sai.
+
+#### Estágio 2 — servir o protocolo
+
+O `HTTPServer` é módulo do **core** da Engine (`Runtime/Online/HTTPServer`), não
+plugin — é sobre ele que o servidor da Epic é construído. Ele é um
+`FTSTickerObjectBase`, então os handlers rodam na thread de jogo, que é
+justamente onde se pode mexer em Blueprint: nada de marshalling.
+
+O mínimo de MCP para um servidor só de ferramentas é `initialize`,
+`notifications/initialized`, `tools/list` e `tools/call`, em JSON-RPC 2.0 sobre
+POST. **SSE não é obrigatório** — o servidor da Epic só abre `text/event-stream`
+quando o cliente pede progresso, e responder JSON puro é conforme a
+especificação. O `.mcp.json` do projeto passa a apontar para a nossa porta.
+
+#### Onde o token vaza hoje
+
+Medido, não de memória:
+
+- As nove descrições somam **4.551 caracteres (~1.140 tokens)**, mais o schema
+  dos parâmetros. É o que `describe_toolset` devolve, uma vez por sessão.
+- O envelope do `call_tool` custa ~30–40 tokens por chamada — o nome do toolset
+  sozinho (`nodescribe_toolset.toolsets.graph.NodeScribeTools`) são 46
+  caracteres repetidos em toda chamada.
+- `list_toolsets` são ~600 tokens quando chamado.
+
+**Seja honesto com essa conta: não é uma economia de ordem de grandeza.** As
+descrições que hoje vêm por `describe_toolset` passam a morar no prompt, então
+nesse eixo é quase empate — troca-se uma chamada de descoberta por presença
+permanente. O que sobra de ganho limpo é o envelope (~1.000 tokens numa sessão
+de trinta chamadas) e as três descrições genéricas que deixam de existir.
+
+A economia grande deste plugin já foi feita, e foi o catálogo. Quem prometer
+mais que isso aqui está vendendo.
+
+#### O que ela deixa desligar
+
+Essa é a pergunta que decide. Com o estágio 1: `ToolsetRegistry`,
+`PythonScriptPlugin` (para nós) e a camada `toolset_registry` inteira — some
+junto o `__pycache__` que suja o repositório a cada execução. Com o estágio 2:
+o `ModelContextProtocol` também.
+
+Desligar `AllToolsets`/`EditorToolset` é **uma decisão à parte, e tem preço**:
+vão junto o `duplicate`, o `move` e o `delete` de asset, que este projeto usa e
+que o NodeScribe não substitui. Medido em *Criar asset*: ~4.000 tokens de
+descoberta uma vez por sessão e ~50 por chamada.
+
+#### O que melhora além de token
+
+É aqui que a proposta se paga:
+
+- **O erro de caminho errado passa a ser nosso.** Hoje `/Game/UI/...` num asset
+  de plugin devolve `... is not valid Object for property 'target'`, do
+  `ReferenceConverter` da Engine, antes de qualquer código nosso rodar. Com o
+  parâmetro chegando como string, o plugin resolve o caminho e pode sugerir as
+  raízes de conteúdo parecidas.
+- **Parâmetro opcional funciona de verdade.** O registro em Python ignora
+  `= ''` e só respeita `str | None`; com schema nosso, `filter` é opcional
+  porque nós dizemos que é.
+- **Três plugins experimentais a menos entre nós e o cliente.** Os três são
+  `IsExperimentalVersion` e podem mudar de forma entre versões da Engine.
+
+#### O que continua igual, e não adianta fingir
+
+O README já registra, em *Desenvolvimento*, que um servidor próprio "não vale"
+— aquilo foi dito sobre substituir o **arquivo de comando**, que existe
+justamente para quando a rede cai. O argumento sobrevive nesta parte: o estágio
+2 não elimina o risco de ter um protocolo de rede de pé, só muda de dono. O
+`Saved/NodeScribe/comando.txt` continua sendo o caminho que não depende de nada,
+e não sai.
+
+#### Custo e ordem
+
+| etapa | onde | custo |
+|---|---|---|
+| 1 | interface própria de ferramenta + 9 adaptadores + resolução de `refPath` | ~400 linhas |
+| 1 | apagar `Content/Python/` e a dependência do `ToolsetRegistry` | ~0 |
+| 2 | servidor JSON-RPC sobre `FHttpServerModule` (`initialize`, `tools/list`, `tools/call`) | ~350 linhas |
+| 2 | porta configurável, `bind` em 127.0.0.1, checagem de `Origin` | ~50 linhas |
+
+O estágio 1 é pré-requisito do 2 de qualquer jeito: as ferramentas precisam
+existir como objeto com nome, schema e `Run` antes de importar quem as serve. E
+o desenho que os dois compartilham é o mesmo — **as ferramentas se escrevem
+contra uma interface nossa, e um adaptador as entrega a quem estiver
+servindo**: o servidor da Epic no estágio 1, o nosso no 2.
+
+Duas coisas para decidir antes de escrever código: a **porta** (8000 é a da
+Epic; conviver exige outra) e se `AllToolsets` fica ligado pelo `duplicate`/
+`move`/`delete`.
 
 ### Ficha: propriedades de objeto como texto
 

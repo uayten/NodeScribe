@@ -82,19 +82,6 @@ namespace
 		return Text;
 	}
 
-	/**
-	 * `-90.0` em vez de `-90.000000`.
-	 *
-	 * Nao e' economia de token -- seria ~1% do custo, que este projeto nao
-	 * persegue. E' que seis zeros a' direita em cada componente de vetor
-	 * escondem o numero no meio do ruido, e o ponto da ficha e' voce bater o
-	 * olho e ver o que mudou.
-	 */
-	FString FormatFloat(double Value)
-	{
-		return FString::SanitizeFloat(Value);
-	}
-
 	/** O enum como aparece na tela, sem o prefixo do tipo. */
 	bool EnumValueToText(const UEnum* Enum, int64 Value, FString& OutText)
 	{
@@ -128,6 +115,11 @@ namespace
 
 // -- Nomes -------------------------------------------------------------------
 
+FString FormatFloat(double Value)
+{
+	return FString::SanitizeFloat(Value);
+}
+
 FString DescribePinType(const FEdGraphPinType& PinType)
 {
 	FString Base;
@@ -151,6 +143,12 @@ FString DescribePinType(const FEdGraphPinType& PinType)
 	{
 		Base = SubCategory->GetName();
 
+		// `BP_Golem_C` e' o nome da classe gerada pela compilacao. Ninguem digita
+		// esse sufixo, ele nao aparece em lugar nenhum da interface, e a busca de
+		// classe aceita as duas formas -- escrever `BP_Golem_C` na volta so'
+		// ensinaria um segundo nome para a mesma coisa.
+		Base.RemoveFromEnd(TEXT("_C"));
+
 		// Referencia a classe, nao a instancia. Sem o sufixo, o texto lido volta
 		// como referencia a objeto -- uma variavel `BP_Pedra Class` viraria
 		// `BP_Pedra`, e o node de Spawn Actor deixaria de aceitar.
@@ -165,9 +163,32 @@ FString DescribePinType(const FEdGraphPinType& PinType)
 		return FString();
 	}
 
-	return PinType.ContainerType == EPinContainerType::Array
-		? TEXT("Array de ") + Base
-		: Base;
+	switch (PinType.ContainerType)
+	{
+	case EPinContainerType::Array:
+		return TEXT("Array de ") + Base;
+
+	case EPinContainerType::Set:
+		return TEXT("Conjunto de ") + Base;
+
+	case EPinContainerType::Map:
+	{
+		// Sem isto um `TMap<int64, BP_Mirror>` saia como `Int64`: some que e'
+		// mapa e some o tipo do valor. Quem le' entende "uma variavel int64", e
+		// colar essa linha de volta cria exatamente isso -- uma variavel de
+		// outro tipo, sem aviso nenhum.
+		const FString ValueName = DescribePinType(
+			FEdGraphPinType::GetPinTypeForTerminalType(PinType.PinValueType));
+
+		// `?` no lugar do tipo que nao soubemos dizer: o builder recusa a linha e
+		// diz qual e'. Melhor que devolver vazio, que sumiria com a variavel toda.
+		return FString::Printf(TEXT("Mapa de %s para %s"),
+			*Base, ValueName.IsEmpty() ? TEXT("?") : *ValueName);
+	}
+
+	default:
+		return Base;
+	}
 }
 
 FString DescribeType(const FProperty* Property)

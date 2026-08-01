@@ -3,6 +3,12 @@ Binaries/
 Intermediate/
 Saved/
 
+# O editor compila o toolset toda vez que sobe, e os .pyc apareciam como
+# alteracao a cada execucao -- ruido em todo `git status`, e nenhum deles e'
+# fonte de nada.
+__pycache__/
+*.pyc
+
 # Visual Studio / Rider
 .vs/
 .idea/

@@ -36,6 +36,15 @@ namespace NodeScribePropertyText
 	// -- Nomes ---------------------------------------------------------------
 
 	/**
+	 * `-90.0` em vez de `-90.000000`.
+	 *
+	 * Nao e' economia de token -- seria ~1% do custo, que este projeto nao
+	 * persegue. E' que seis zeros a' direita escondem o numero no meio do ruido,
+	 * e bater o olho e ver o valor e' o que faz o texto valer.
+	 */
+	FString FormatFloat(double Value);
+
+	/**
 	 * O tipo como o formato escreve: `Float`, `Integer`, `TimerHandle`,
 	 * `Array de Name`. Vazio quando o tipo nao tem forma no texto.
 	 */

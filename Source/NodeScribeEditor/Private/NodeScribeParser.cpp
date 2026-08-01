@@ -217,6 +217,21 @@ FNodeScribeArg FNodeScribeParser::ParseArg(const FString& Raw)
 		Arg.bIsReference = true;
 		Arg.Value = ValuePart.Mid(1);
 		Arg.Value.TrimStartAndEndInline();
+
+		// Anotacao de conversao que o leitor escreve: `$c.Device Id (Integer ->
+		// Int64)`. Ela diz que a Unreal poe um node de conversao ali -- coisa que
+		// o builder refaz sozinho ao ligar os pinos, entao aqui e' texto para
+		// pessoa ler. Sem descartar, o `.Pino` sairia daqui com a anotacao colada
+		// no nome e nao acharia pino nenhum.
+		int32 NoteStart = INDEX_NONE;
+		if (Arg.Value.EndsWith(TEXT(")")) && Arg.Value.FindLastChar(TEXT('('), NoteStart))
+		{
+			const FString Note = Arg.Value.RightChop(NoteStart);
+			if (Note.Contains(TEXT("->")))
+			{
+				Arg.Value = Arg.Value.Left(NoteStart).TrimEnd();
+			}
+		}
 	}
 	else
 	{
