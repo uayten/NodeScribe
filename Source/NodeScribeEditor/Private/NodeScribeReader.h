@@ -31,6 +31,16 @@ public:
 		int32 NodeCount = 0;
 		int32 ErrorCount = 0;
 		int32 WarningCount = 0;
+
+		/**
+		 * Nodes que existem no grafo e nao existem no texto: os de dado que nao
+		 * alimentam ninguem.
+		 *
+		 * Sao inofensivos numa leitura -- viram uma nota no fim. Sao fatais para
+		 * quem pensa em apagar o grafo e recolar a partir deste texto, porque
+		 * eles nao voltam. Por isso saem contados a' parte, e nao so' como nota.
+		 */
+		int32 LostNodeCount = 0;
 	};
 
 	/**

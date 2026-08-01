@@ -1685,7 +1685,14 @@ void FNodeScribeReadContext::Run()
 	// Evento sem nada ligado nao diz nada, e colar o texto de volta esbarraria
 	// no guard de evento duplicado. Os stubs desabilitados que todo Blueprint
 	// novo traz -- BeginPlay, Tick, ActorBeginOverlap -- caem exatamente aqui.
-	Roots.RemoveAll([this](UEdGraphNode* Node)
+	//
+	// Sao anotados porque a contagem de orfaos, la' embaixo, pega tudo que nao
+	// virou linha: sem isto eles apareciam como "3 nodes de dado nao alimentam
+	// nada" -- que os descreve errado (nao sao de dado) e conta como perda o que
+	// foi omitido de proposito. Um evento vazio nao carrega comportamento nenhum.
+	TSet<UEdGraphNode*> EventosVazios;
+
+	Roots.RemoveAll([this, &EventosVazios](UEdGraphNode* Node)
 	{
 		if (!Node->IsA<UK2Node_Event>() || NeedsName.Contains(Node))
 		{
@@ -1700,6 +1707,7 @@ void FNodeScribeReadContext::Run()
 			}
 		}
 
+		EventosVazios.Add(Node);
 		return true;
 	});
 
@@ -1758,8 +1766,18 @@ void FNodeScribeReadContext::Run()
 			continue;
 		}
 
+		// Evento vazio foi omitido de proposito, e nao ha' o que perder nele.
+		if (EventosVazios.Contains(Node))
+		{
+			continue;
+		}
+
 		Orphans.Add(ShortTitle(Node));
 	}
+
+	// Contados a' parte da nota: quem quer apagar o grafo e recolar precisa saber
+	// que estes nao voltam, e uma nota nao e' verificavel por codigo.
+	Result.LostNodeCount = Orphans.Num();
 
 	if (Orphans.Num() > 0)
 	{

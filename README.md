@@ -162,6 +162,40 @@ marca de conversão implícita de tipo, nome de cada node órfão, `Mapa de X pa
 Y` e `Conjunto de X`, ação assíncrona pelos dois lados, `refPath` no cabeçalho,
 e valor apagado saindo como `""` em vez de sumir.
 
+### Substituir o grafo, e até onde a guarda enxerga
+
+`write_graph(graph, text, substituir=True)` apaga o grafo antes de escrever, em
+vez de acrescentar. Existe porque iterar num grafo pelo modo aditivo acumula
+node, e apagar na mão a cada volta é o atrito que faz alguém parar de usar a
+ferramenta.
+
+**A guarda:** antes de apagar, o plugin lê o grafo atual. Se a leitura tiver
+qualquer aviso de "isso não volta igual", ou node de dado que ninguém consome, a
+substituição é recusada e **nada** é alterado. Apagar a partir de um texto que
+perdeu alguma coisa destrói justamente o que ninguém tem escrito.
+
+Não há modo forçado, de propósito. Quem quer mesmo limpar seleciona tudo no
+grafo e aperta Delete: é um gesto humano, visível, e com Ctrl+Z do lado. O
+apagar e o escrever do plugin ficam na mesma transação, então o Ctrl+Z também
+desfaz os dois de uma vez.
+
+**Onde a guarda não enxerga, e isso precisa estar escrito.** Ela recusa o que o
+leitor *sabe* que perde. Não cobre o que o leitor não sabe que perdeu:
+
+- **pureza de um node** — um `Cast` puro volta impuro, porque o texto não diz
+  qual dos dois é;
+- **node desabilitado** que esteja no meio de uma cadeia — volta habilitado;
+- **layout** — posição, tamanho de caixa de comentário, reroute.
+
+Nenhum desses muda o que o grafo faz, fora o caso da pureza. Mas a lista existe
+porque "a guarda passou" não é prova de que o texto reconstrói o grafo — é prova
+de que o leitor não viu problema.
+
+A versão forte disso seria o ponto fixo em memória: montar o texto lido num
+grafo transiente, ler de volta e comparar, que é exatamente o que
+`Testes/rodar_testes.py` faz por fora. Fica anotado como o próximo passo se a
+substituição virar rotina.
+
 ### O que a 0.4 mudou: o resto
 
 **Teste de ida e volta automatizado** (`Testes/rodar_testes.py`), que na

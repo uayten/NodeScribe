@@ -212,6 +212,71 @@ def ida_e_volta(caso):
     return False, relato
 
 
+def substituir_troca_o_grafo():
+    """Substituir num grafo que volta limpo troca o conteudo, nao acumula."""
+    grafo, erro = novo_blueprint('NS_substituir_limpo')
+    if not grafo:
+        return False, [erro]
+
+    unreal.NodeScribeLibrary.write_graph(grafo, 'evento Antes\nPrint String (In String = "antes")\n')
+    relato = unreal.NodeScribeLibrary.write_graph(
+        grafo, 'evento Depois\nPrint String (In String = "depois")\n', True)
+
+    texto = unreal.NodeScribeLibrary.read_graph(grafo)
+
+    problemas = []
+    if 'apagados' not in relato:
+        problemas.append('a substituicao nao apagou nada: %s' % relato)
+    if 'event Antes' in texto:
+        problemas.append('o evento antigo continua no grafo')
+    if 'event Depois' not in texto:
+        problemas.append('o evento novo nao entrou')
+
+    if problemas:
+        problemas.append('')
+        problemas.extend(texto.splitlines())
+        return False, problemas
+
+    return True, []
+
+
+def substituir_recusa_grafo_com_perda():
+    """Grafo com node de dado solto nao pode ser substituido: ele nao volta."""
+    grafo, erro = novo_blueprint('NS_substituir_recusa')
+    if not grafo:
+        return False, [erro]
+
+    # `pc` nao alimenta ninguem: fica orfao, some do texto, e nao voltaria.
+    unreal.NodeScribeLibrary.write_graph(
+        grafo, 'evento Antes\nPrint String (In String = "antes")\npc = Get Player Controller\n')
+
+    antes = unreal.NodeScribeLibrary.read_graph(grafo)
+    relato = unreal.NodeScribeLibrary.write_graph(grafo, 'evento Depois\n', True)
+    depois = unreal.NodeScribeLibrary.read_graph(grafo)
+
+    problemas = []
+    if '[erro]' not in relato:
+        problemas.append('a substituicao devia ter sido recusada, e o retorno foi: %s' % relato)
+    if 'event Depois' in depois:
+        problemas.append('recusou e mesmo assim escreveu')
+    if corpo(antes) != corpo(depois):
+        problemas.append('recusou e mesmo assim mexeu no grafo')
+
+    if problemas:
+        problemas.append('')
+        problemas.append('--- retorno ---')
+        problemas.extend(relato.splitlines())
+        return False, problemas
+
+    return True, []
+
+
+OUTROS = [
+    ('substituir_troca_o_grafo', substituir_troca_o_grafo),
+    ('substituir_recusa_grafo_com_perda', substituir_recusa_grafo_com_perda),
+]
+
+
 def main():
     partes = []
     falhas = []
@@ -225,7 +290,16 @@ def main():
             partes.extend('       ' + l for l in relato)
             partes.append('')
 
-    resumo = '%d caso(s), %d falha(s)' % (len(CASOS), len(falhas))
+    for nome, funcao in OUTROS:
+        passou, relato = funcao()
+        partes.append('%s  %s' % ('ok   ' if passou else 'FALHA', nome))
+
+        if not passou:
+            falhas.append(nome)
+            partes.extend('       ' + l for l in relato)
+            partes.append('')
+
+    resumo = '%d caso(s), %d falha(s)' % (len(CASOS) + len(OUTROS), len(falhas))
     partes.append('')
     partes.append(resumo)
 

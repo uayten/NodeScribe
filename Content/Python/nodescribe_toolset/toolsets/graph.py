@@ -18,7 +18,8 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
     @toolset_registry.tool_call
     @staticmethod
-    def write_graph(graph: unreal.EdGraph, text: str) -> str:
+    def write_graph(graph: unreal.EdGraph, text: str,
+                    substituir: bool | None = None) -> str:
         """Cria nodes num grafo a partir de texto no formato NodeScribe.
 
         Uma linha por node. Chame get_format_docs() antes da primeira vez.
@@ -29,10 +30,18 @@ class NodeScribeTools(unreal.ToolsetDefinition):
         Args:
             graph: O grafo a popular.
             text: O script no formato NodeScribe.
+            substituir: Omitido acrescenta ao que ja' existe. True apaga o grafo
+                        antes de escrever -- e **so' se o grafo atual voltar
+                        limpo na leitura**. Havendo aviso de "isso nao volta
+                        igual", ou node de dado que ninguem consome, a
+                        substituicao e' recusada e nada muda: apagar a partir de
+                        um texto que perdeu algo destruiria justamente o que o
+                        texto nao soube dizer. Nao ha' modo forcado; para isso,
+                        apague na mao no editor.
         Returns:
             Quantos nodes entraram, e uma linha por diagnostico.
         """
-        return unreal.NodeScribeLibrary.write_graph(graph, text)
+        return unreal.NodeScribeLibrary.write_graph(graph, text, bool(substituir))
 
     @toolset_registry.tool_call
     @staticmethod

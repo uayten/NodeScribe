@@ -24,12 +24,20 @@ public:
 	/**
 	 * Transcreve texto do formato NodeScribe para nodes reais no grafo.
 	 *
+	 * @param bReplace  true apaga o que ja' esta' no grafo antes de escrever, em
+	 *                  vez de acrescentar. **So' se o grafo atual voltar limpo
+	 *                  na leitura** -- se houver qualquer aviso de "isso nao
+	 *                  volta igual", ou node de dado que ninguem consome, a
+	 *                  substituicao e' recusada e nada e' alterado. Apagar a
+	 *                  partir de um texto que perdeu alguma coisa destruiria
+	 *                  justamente o que o texto nao soube dizer.
+	 *
 	 * @return Diagnosticos em texto, uma linha por mensagem. Vazio = tudo certo.
 	 *         Nunca lanca: linha que nao resolve vira comentario vermelho no
 	 *         grafo e uma linha aqui, e o resto do texto continua sendo criado.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
-	static FString WriteGraph(UEdGraph* Graph, const FString& Text);
+	static FString WriteGraph(UEdGraph* Graph, const FString& Text, bool bReplace = false);
 
 	/** Le' o grafo inteiro de volta como texto no mesmo formato. */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")

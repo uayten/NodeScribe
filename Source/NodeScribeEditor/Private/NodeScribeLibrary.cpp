@@ -11,6 +11,7 @@
 #include "NodeScribeTypes.h"
 
 #include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
 #include "Editor.h"
 #include "Engine/Blueprint.h"
 #include "FileHelpers.h"
@@ -59,7 +60,33 @@ namespace
 	}
 }
 
-FString UNodeScribeLibrary::WriteGraph(UEdGraph* Graph, const FString& Text)
+/**
+ * Apaga o que da' para apagar do grafo, e diz quantos foram.
+ *
+ * Node de entrada de funcao recusa ser apagado (`CanUserDeleteNode`), e recusa
+ * com razao: ele nasce com a funcao. Pular esses e' o comportamento certo, nao
+ * uma limitacao.
+ */
+static int32 ClearGraph(UEdGraph* Graph, UBlueprint* Blueprint)
+{
+	TArray<UEdGraphNode*> ToRemove;
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (Node && Node->CanUserDeleteNode())
+		{
+			ToRemove.Add(Node);
+		}
+	}
+
+	for (UEdGraphNode* Node : ToRemove)
+	{
+		FBlueprintEditorUtils::RemoveNode(Blueprint, Node, /*bDontRecompile*/ true);
+	}
+
+	return ToRemove.Num();
+}
+
+FString UNodeScribeLibrary::WriteGraph(UEdGraph* Graph, const FString& Text, bool bReplace)
 {
 	if (!Graph)
 	{
@@ -72,12 +99,61 @@ FString UNodeScribeLibrary::WriteGraph(UEdGraph* Graph, const FString& Text)
 		return TEXT("[erro]: esse grafo nao pertence a um Blueprint.");
 	}
 
+	// A guarda da substituicao, antes de qualquer alteracao.
+	//
+	// Apagar e' a unica coisa que este plugin faz que nao da' para conferir
+	// depois: o que sumiu nao aparece no texto que sobrou. Entao a pergunta que
+	// decide nao e' "o texto novo esta' bom", e sim "o grafo que esta' la' cabe
+	// em texto". Se a leitura dele perde alguma coisa -- uma reconvergencia, um
+	// Cast com continuacao, um node que o formato nao sabe nomear, um node de
+	// dado solto --, apagar destroi exatamente aquilo que ninguem tem escrito.
+	//
+	// Nao ha' modo forcado de proposito. Quem realmente quer limpar seleciona
+	// tudo no grafo e aperta Delete: e' um gesto humano, visivel, e com Ctrl+Z
+	// do lado.
+	if (bReplace)
+	{
+		const FNodeScribeReader::FResult Current = FNodeScribeReader::ReadGraph(Graph, Blueprint);
+
+		if (Current.WarningCount > 0 || Current.LostNodeCount > 0)
+		{
+			TArray<FString> Motivos;
+			for (const FNodeScribeDiagnostic& Diagnostic : Current.Diagnostics)
+			{
+				if (Diagnostic.Severity == ENodeScribeSeverity::Warning)
+				{
+					Motivos.Add(TEXT("  - ") + Diagnostic.Message);
+				}
+			}
+
+			if (Current.LostNodeCount > 0)
+			{
+				Motivos.Add(FString::Printf(
+					TEXT("  - %d node(s) de dado nao alimentam nada, e nao voltariam."),
+					Current.LostNodeCount));
+			}
+
+			return FString::Printf(
+				TEXT("[erro]: nao substitui este grafo -- ele tem coisa que o texto nao sabe dizer, ")
+				TEXT("e apagar destruiria justamente isso. Nada foi alterado.\n%s\n")
+				TEXT("Escreva sem substituir, ou apague na mao o que quiser trocar (Ctrl+A, Delete no grafo) e escreva depois."),
+				*FString::Join(Motivos, TEXT("\n")));
+		}
+	}
+
 	TArray<FNodeScribeDiagnostic> ParseDiagnostics;
 	const TArray<FNodeScribeStatement> Statements = FNodeScribeParser::Parse(Text, ParseDiagnostics);
 
 	const FScopedTransaction Transaction(LOCTEXT("WriteGraphTransaction", "NodeScribe: escrever grafo"));
 	Blueprint->Modify();
 	Graph->Modify();
+
+	// Dentro da transacao: o Ctrl+Z desfaz o apagar e o escrever de uma vez.
+	int32 Removed = 0;
+	if (bReplace)
+	{
+		Removed = ClearGraph(Graph, Blueprint);
+	}
 
 	FNodeScribeBuilder::FResult Result = FNodeScribeBuilder::Build(
 		Statements, Graph, Blueprint, FNodeScribeTarget::FindFreeOrigin(Graph));
@@ -90,7 +166,12 @@ FString UNodeScribeLibrary::WriteGraph(UEdGraph* Graph, const FString& Text)
 
 	// A contagem vai junto mesmo quando nao ha' diagnostico: quem chamou nao
 	// esta' olhando o grafo e precisa saber que algo aconteceu.
-	return FString::Printf(TEXT("%d node(s) criados.%s%s"),
+	const FString Apagados = Removed > 0
+		? FString::Printf(TEXT("%d node(s) apagados, "), Removed)
+		: FString();
+
+	return FString::Printf(TEXT("%s%d node(s) criados.%s%s"),
+		*Apagados,
 		Result.CreatedNodes.Num(),
 		Report.IsEmpty() ? TEXT("") : TEXT("\n"),
 		*Report);
