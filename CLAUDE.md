@@ -48,6 +48,10 @@ compilar → reabrir → testar (com os comandos prontos), como testar por ida e
 volta, os quatro invariantes que não podem quebrar, e o que uma proposta de
 ferramenta nova precisa responder antes de virar código.
 
-Frente atual: **ficha de propriedades** (`read_object` primeiro, sozinho). A
-especificação está em *Possíveis recursos futuros*, no README. Ideia de
-ferramenta nova que aparecer no meio vai para lá, não para o código.
+Frente atual: **ler a IA de um inimigo inteira**, o Golem do BossRush. A ficha
+(`read_object` / `write_object`), o blackboard, a árvore de BT, `create_asset` e
+as Gameplay Tags (`read_tags` / `write_tags`) já estão de pé; falta **escrever
+Behavior Tree** e **componentes de Gameplay Effect**. O roteiro com o estado de
+cada etapa está em *Onde estamos nessa lista*, no README. Ideia de ferramenta
+nova que aparecer no meio vai para *Possíveis recursos futuros*, não para o
+código.

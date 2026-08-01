@@ -80,6 +80,32 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString CreateAsset(const FString& Path, const FString& Parent);
 
+	/**
+	 * As Gameplay Tags declaradas, uma por linha.
+	 *
+	 * @param Filter  vazio traz todas; com texto, so' as que contem esse trecho.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
+	static FString ReadTags(const FString& Filter);
+
+	/**
+	 * O espelho: cria as tags do texto, uma por linha.
+	 *
+	 * Existe por capacidade, nao por economia -- tag nao e' asset nem
+	 * propriedade, vive num ini, e sem isto ela so' nasce por alguem abrir a
+	 * janela de configuracao. Um cooldown novo precisa da tag existir antes de o
+	 * Gameplay Effect poder concede-la.
+	 *
+	 * Tag ja' declarada e' pulada sem erro. Nao apaga nem renomeia.
+	 *
+	 * @param Source  o ini de destino, pelo nome de tela (`BossRush.ini`).
+	 *                Vazio deixa a Engine escolher, que da' o
+	 *                `DefaultGameplayTags.ini`. Fonte que nao existe e' recusada
+	 *                com a lista das que existem.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
+	static FString WriteTags(const FString& Text, const FString& Source);
+
 	/** A especificacao do formato, para quem nunca a viu. */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString GetFormatDocs();

@@ -6,6 +6,7 @@
 #include "NodeScribeObjectWriter.h"
 #include "NodeScribeParser.h"
 #include "NodeScribeReader.h"
+#include "NodeScribeTags.h"
 #include "NodeScribeTarget.h"
 #include "NodeScribeTypes.h"
 
@@ -147,6 +148,16 @@ FString UNodeScribeLibrary::WriteObject(UObject* Object, const FString& Text)
 FString UNodeScribeLibrary::CreateAsset(const FString& Path, const FString& Parent)
 {
 	return FNodeScribeAssetMaker::CreateAsset(Path, Parent);
+}
+
+FString UNodeScribeLibrary::ReadTags(const FString& Filter)
+{
+	return FNodeScribeTags::ReadTags(Filter);
+}
+
+FString UNodeScribeLibrary::WriteTags(const FString& Text, const FString& Source)
+{
+	return FNodeScribeTags::WriteTags(Text, Source);
 }
 
 FString UNodeScribeLibrary::SaveAllAndQuit()

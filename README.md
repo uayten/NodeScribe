@@ -137,8 +137,9 @@ Versão 0.3. UE 5.8.1, build limpa sem avisos.
 
 ### Em que ponto estamos
 
-Funcionam hoje: **grafo** (`read_graph` / `write_graph`) e **ficha de objeto
-único** (`read_object`, modo padrão e filtrado).
+Funcionam hoje: **grafo** (`read_graph` / `write_graph`), **ficha de objeto
+único** (`read_object`, modo padrão e filtrado) e **Gameplay Tags**
+(`read_tags` / `write_tags`).
 
 A frente ativa é **ler a IA de um inimigo inteira** — o Golem do BossRush é o
 caso real que guia o desenvolvimento. O roteiro está logo abaixo.
@@ -745,10 +746,10 @@ caminhos diferentes. Sem a listagem, restava tentar nomes até acertar.
 | 2 — Criar asset | **pronto** | — |
 | 3 — Escrever Behavior Tree | falta | toda mudança na árvore |
 | 4 — Componentes de Gameplay Effect | falta | todo cooldown novo |
-| 5 — Criar Gameplay Tag | falta | a tag que o cooldown concede |
+| 5 — Criar Gameplay Tag | **pronto** | — |
 | 6 — Consertos de leitura | falta | `Default Starting Data`; Cast que não volta igual |
 
-Com 1 e 2 prontos, o que resta para a IA do Golem fechar sem clique é 3, 4 e 5.
+Com 1, 2 e 5 prontos, o que resta para a IA do Golem fechar sem clique é 3 e 4.
 O 3 é o maior e o único onde errar grava um asset que parece certo e está
 vazio — por isso vai por último.
 
@@ -842,9 +843,47 @@ subobjeto instanciado dentro de `UGameplayEffect::GEComponents`, e
 é clique. Vale como caso geral: **array de subobjeto instanciado** aparece em
 muito lugar da Engine.
 
-**5. Criar Gameplay Tag.** `Cooldown.Golem.Salto` precisou existir antes de ser
-usada. Vive em `Config/DefaultGameplayTags.ini`, e a Engine expõe
-`UGameplayTagsManager::AddNewGameplayTagToINI`.
+**5. Criar Gameplay Tag.** **Pronto.**
+
+```
+read_tags("Cooldown")        →  tags  ~ "Cooldown" (1 de 31)
+                                tag Cooldown.Golem.Salto
+
+write_tags("tag Cooldown.Golem.Laser", "BossRush.ini")
+                             →  1 tag(s) criada(s) em BossRush.ini.
+```
+
+`Cooldown.Golem.Salto` precisou existir antes de ser usada, e tag não é asset
+nem propriedade — vive num ini —, então nem `create_asset` nem a ficha
+alcançavam. Quem cria é `IGameplayTagsEditorModule::AddNewGameplayTagToINI`, do
+módulo de editor; não é `UGameplayTagsManager`, onde ela não está.
+
+Aceita `tag X` ou só `X`, e **pula o cabeçalho que o leitor emite** — sem isso a
+ida e volta falhava numa linha escrita pelo próprio plugin. Não apaga nem
+renomeia: as duas coisas quebram todo asset que usa a tag, e isso pede uma
+decisão, não um efeito de formatação.
+
+Três coisas que só o teste real mostrou:
+
+- **"Já existe" tem que ser `IsDictionaryTag`, não `RequestGameplayTag`.** A
+  pergunta é se a tag foi *declarada*, não se ela resolve. `Cooldown.Golem`
+  resolve porque `Cooldown.Golem.Salto` existe, mas não está declarada em ini
+  nenhum — e o leitor, que só lista as declaradas, nunca a mostraria. A primeira
+  versão pulava por resolver: pedia-se a tag, ouvia-se "já existia", e ela não
+  aparecia na listagem. A própria Engine faz essa distinção, e pelo mesmo motivo.
+- **O ini de destino não é o mesmo dos outros.** Com a fonte vazia a Engine
+  grava em `DefaultGameplayTags.ini`, e as tags do BossRush moram em
+  `Config/Tags/BossRush.ini`. O parâmetro `source` escolhe, e o retorno **diz em
+  qual arquivo caiu** — o destino sair calado espalharia as tags em dois lugares
+  sem ninguém notar. Fonte que não existe é recusada com a lista das que
+  existem, em vez de virar um ini novo por erro de digitação.
+- **Não adivinhe por que a Engine recusou um nome.** A primeira versão dizia
+  "aceita letras, numeros, ponto e underscore" — e este projeto tem
+  `Facção.Inimigos` e `Estado.Ação.Defendendo`. Acento passa; o que vale é o
+  `InvalidTagCharacters` do projeto. `IsValidGameplayTagString` devolve o motivo
+  da Engine **e um nome corrigido para sugerir**, e é isso que sai:
+  ``Teste,Virgula (Tag may not contain the following characters: , tente
+  `Teste_Virgula`)``.
 
 **6. Dois defeitos de leitura**, que não são recurso e sim conserto:
 `Default Starting Data` do AbilitySystemComponent não é legível pela ficha — e

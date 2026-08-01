@@ -28,7 +28,10 @@ public class NodeScribeEditor : ModuleRules
 			"Kismet",
 			"MessageLog",
 			// Criar asset: o nativo nao tem criacao, so' duplicate.
-			"AssetTools"
+			"AssetTools",
+			// Tag: ler pelo Manager, escrever no ini pelo modulo de editor.
+			"GameplayTags",
+			"GameplayTagsEditor"
 		});
 	}
 }

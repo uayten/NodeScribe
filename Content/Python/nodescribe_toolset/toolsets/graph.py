@@ -118,6 +118,42 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
     @toolset_registry.tool_call
     @staticmethod
+    def read_tags(filter: str = '') -> str:
+        """Le' as Gameplay Tags declaradas, uma por linha.
+
+        Args:
+            filter: Vazio traz todas. Com texto, so' as que contem esse trecho.
+        Returns:
+            Uma linha `tag Nome` por tag, com a contagem no cabecalho.
+        """
+        return unreal.NodeScribeLibrary.read_tags(filter)
+
+    @toolset_registry.tool_call
+    @staticmethod
+    def write_tags(text: str, source: str = '') -> str:
+        """Cria Gameplay Tags, uma por linha.
+
+        Existe porque tag nao e' asset nem propriedade -- vive num ini --, entao
+        nem create_asset nem write_object alcancam. Sem isto, toda tag nova
+        depende de alguem abrir a janela de configuracao.
+
+        Mesmo formato de read_tags: aceita `tag X` ou so' `X`, e o cabecalho da
+        leitura e' ignorado. Tag ja' declarada e' pulada sem erro. **Nao apaga
+        nem renomeia** -- as duas coisas quebram todo asset que usa a tag.
+
+        Args:
+            text: Uma tag por linha.
+            source: O ini de destino, pelo nome de tela: 'BossRush.ini'. Vazio
+                    deixa a Engine escolher, que da' 'DefaultGameplayTags.ini'
+                    -- que pode nao ser onde as outras tags do projeto moram.
+                    Fonte inexistente e' recusada com a lista das que existem.
+        Returns:
+            Quantas foram criadas e em que arquivo, e uma linha por diagnostico.
+        """
+        return unreal.NodeScribeLibrary.write_tags(text, source)
+
+    @toolset_registry.tool_call
+    @staticmethod
     def save_all_and_quit() -> str:
         """Salva tudo e fecha o editor.
 
