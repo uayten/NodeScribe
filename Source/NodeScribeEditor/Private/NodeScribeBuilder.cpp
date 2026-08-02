@@ -1,6 +1,7 @@
 #include "NodeScribeBuilder.h"
 
 #include "NodeScribeCatalog.h"
+#include "NodeScribePropertyText.h"
 
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -46,6 +47,8 @@
 #include "Subsystems/LocalPlayerSubsystem.h"
 #include "Subsystems/Subsystem.h"
 #include "UObject/UObjectIterator.h"
+
+using namespace NodeScribePropertyText;
 
 namespace
 {
@@ -114,27 +117,6 @@ namespace
 	/** Deslocamento de um node de dado criado implicitamente para o seu consumidor. */
 
 	const TCHAR* const StandardMacrosPath = TEXT("/Engine/EditorBlueprintResources/StandardMacros.StandardMacros");
-
-	bool IsExecPin(const UEdGraphPin* Pin)
-	{
-		return Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec;
-	}
-
-	/** Um pino cujo valor so' pode vir de uma escolha de asset, nao de texto. */
-	bool IsObjectLikePin(const UEdGraphPin* Pin)
-	{
-		if (!Pin)
-		{
-			return false;
-		}
-
-		const FName Category = Pin->PinType.PinCategory;
-		return Category == UEdGraphSchema_K2::PC_Object
-			|| Category == UEdGraphSchema_K2::PC_Class
-			|| Category == UEdGraphSchema_K2::PC_SoftObject
-			|| Category == UEdGraphSchema_K2::PC_SoftClass
-			|| Category == UEdGraphSchema_K2::PC_Interface;
-	}
 
 	/** true para o que aparece na lista de eventos sobrescreviveis do grafo. */
 	bool IsOverridableEvent(const UFunction* Function)
@@ -934,6 +916,16 @@ private:
 	TArray<UEdGraphNode*> AutoCreatedGets;
 
 	/**
+	 * Nodes de conversao que o schema inseriu sozinho dentro de Connect().
+	 *
+	 * Ninguem os escreveu, entao eles nao entram em CreatedNodes -- a contagem
+	 * que o usuario ve' e' de linhas que ele mandou. Mas eles precisam ser
+	 * posicionados como qualquer node de dado, senao ficam parados onde os dois
+	 * lados estavam na hora da ligacao, que o layout depois abandona.
+	 */
+	TArray<UEdGraphNode*> ConversionNodes;
+
+	/**
 	 * Nodes de varias saidas de execucao ainda sem rotulo.
 	 *
 	 * O aviso so' pode sair no fim: na hora em que o node nasce, o rotulo que
@@ -1058,7 +1050,15 @@ void FNodeScribeBuildContext::LayoutDataNodes()
 	TMap<UEdGraphNode*, TArray<FDataNode>> ByConsumer;
 	TArray<UEdGraphNode*> Orphans;
 
-	for (UEdGraphNode* Node : Result.CreatedNodes)
+	// Os de conversao entram junto com os que o texto pediu: para o layout eles
+	// sao nodes de dado como quaisquer outros, e quem os consome ja' e' achado
+	// pela mesma travessia. A lista e' explicita, e nao uma varredura do grafo
+	// atras de nodes de dado sem posicao, porque uma varredura arrastaria
+	// tambem o que ja' estava no grafo antes desta colagem.
+	TArray<UEdGraphNode*> DataCandidates = Result.CreatedNodes;
+	DataCandidates.Append(ConversionNodes);
+
+	for (UEdGraphNode* Node : DataCandidates)
 	{
 		if (!IsPureDataNode(Node))
 		{
@@ -1399,7 +1399,29 @@ void FNodeScribeBuildContext::Connect(UEdGraphPin* From, UEdGraphPin* To, int32 
 
 	// TryCreateConnection do schema K2 insere sozinho um node de conversao
 	// quando os tipos sao compativeis por cast implicito (int -> float, etc).
-	if (!Schema->TryCreateConnection(From, To))
+	if (Schema->TryCreateConnection(From, To))
+	{
+		// Quando isso acontece, os dois pinos nao ficam ligados um no outro: o
+		// que passou a alimentar `To` e' a saida do node de conversao. E' assim
+		// que ele se deixa reconhecer -- e precisa ser reconhecido aqui, porque
+		// depois da ligacao nada mais distingue esse node de um que o texto
+		// pediu. Sem isso ele fica na posicao em que os dois lados estavam
+		// agora, que LayoutDataNodes() logo abandona, e o resultado e' um node
+		// solto no meio do nada com dois fios atravessando o grafo inteiro.
+		if (!From->LinkedTo.Contains(To))
+		{
+			const UEdGraphNode* SourceNode = From->GetOwningNodeUnchecked();
+			for (UEdGraphPin* Feeding : To->LinkedTo)
+			{
+				UEdGraphNode* Inserted = Feeding ? Feeding->GetOwningNodeUnchecked() : nullptr;
+				if (Inserted && Inserted != SourceNode && !Result.CreatedNodes.Contains(Inserted))
+				{
+					ConversionNodes.AddUnique(Inserted);
+				}
+			}
+		}
+	}
+	else
 	{
 		// Dizer os dois tipos e' o que resolve o caso mais confuso: um nome que
 		// existe, mas nao e' o que voce quis dizer. `$Slot` acha o `Slot` que

@@ -2,6 +2,7 @@
 
 #include "NodeScribeAIReader.h"
 #include "NodeScribeCatalog.h"
+#include "NodeScribeObjectTarget.h"
 #include "NodeScribePropertyText.h"
 
 #include "Components/ActorComponent.h"
@@ -11,6 +12,8 @@
 #include "Engine/SimpleConstructionScript.h"
 #include "GameFramework/Actor.h"
 #include "UObject/UnrealType.h"
+
+using namespace NodeScribeObjectTarget;
 
 namespace
 {
@@ -23,29 +26,6 @@ namespace
 		FString Default;   // valor de fabrica, vazio quando nao mudou ou nao ha'
 		int32 Depth = 0;   // membro de struct entra recuado sob ela
 	};
-
-	/**
-	 * O objeto que carrega os valores.
-	 *
-	 * Blueprint e classe nao tem valor nenhum em si: quem guarda e' o CDO da
-	 * classe compilada. E' de la' que o painel de detalhes le', entao e' de la'
-	 * que a ficha tem que ler para dizer a mesma coisa que a tela.
-	 */
-	UObject* ResolveTarget(UObject* Object)
-	{
-		if (const UBlueprint* Blueprint = Cast<UBlueprint>(Object))
-		{
-			UClass* Generated = Blueprint->GeneratedClass.Get();
-			return Generated ? Generated->GetDefaultObject() : nullptr;
-		}
-
-		if (UClass* Class = Cast<UClass>(Object))
-		{
-			return Class->GetDefaultObject();
-		}
-
-		return Object;
-	}
 
 	/** `BP_Golem_C` -> `BP_Golem`. O sufixo e' da compilacao, nao do nome. */
 	FString CleanClassName(const UClass* Class)
@@ -403,16 +383,6 @@ namespace
 		}
 	}
 
-	/** O Blueprint por tras do alvo, quando ha' um. */
-	UBlueprint* FindBlueprint(const UObject* Requested, const UClass* Class)
-	{
-		if (UBlueprint* Direct = const_cast<UBlueprint*>(Cast<UBlueprint>(Requested)))
-		{
-			return Direct;
-		}
-		return Class ? Cast<UBlueprint>(Class->ClassGeneratedBy) : nullptr;
-	}
-
 	/** Os nomes das variaveis que o proprio Blueprint declara. */
 	TSet<FName> CollectOwnVariableNames(const UBlueprint* Blueprint)
 	{
@@ -427,49 +397,6 @@ namespace
 		return Names;
 	}
 
-	/**
-	 * Os componentes do alvo, por nome.
-	 *
-	 * Duas origens, porque um Blueprint guarda em dois lugares: o que veio do
-	 * construtor em C++ vive no proprio CDO, e o que foi arrastado no editor
-	 * vive como template no SimpleConstructionScript. Ler so' um deles esconde
-	 * metade dos componentes sem avisar.
-	 */
-	TMap<FString, UObject*> CollectComponents(UObject* Target, UBlueprint* Blueprint)
-	{
-		TMap<FString, UObject*> Components;
-
-		if (const AActor* Actor = Cast<AActor>(Target))
-		{
-			for (UActorComponent* Component : Actor->GetComponents())
-			{
-				if (Component)
-				{
-					Components.Add(Component->GetName(), Component);
-				}
-			}
-		}
-
-		// Sobe a cadeia: componente que o Blueprint pai criou tambem e' do filho.
-		for (const UBlueprint* Current = Blueprint; Current; )
-		{
-			if (const USimpleConstructionScript* SCS = Current->SimpleConstructionScript)
-			{
-				for (const USCS_Node* Node : SCS->GetAllNodes())
-				{
-					if (Node && Node->ComponentTemplate)
-					{
-						Components.Add(Node->GetVariableName().ToString(), Node->ComponentTemplate);
-					}
-				}
-			}
-
-			const UClass* ParentClass = Current->ParentClass;
-			Current = ParentClass ? Cast<UBlueprint>(ParentClass->ClassGeneratedBy) : nullptr;
-		}
-
-		return Components;
-	}
 }
 
 FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filter)

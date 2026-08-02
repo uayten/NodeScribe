@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 class FProperty;
+class UEdGraphPin;
 struct FEdGraphPinType;
 
 /**
@@ -55,6 +56,14 @@ namespace NodeScribePropertyText
 
 	/** O nome que aparece no painel de detalhes: `bShowMouseCursor` -> `Show Mouse Cursor`. */
 	FString DisplayName(const FProperty* Property);
+
+	// -- Pinos ---------------------------------------------------------------
+
+	/** O fio branco de execucao, que o formato escreve como indentacao. */
+	bool IsExecPin(const UEdGraphPin* Pin);
+
+	/** Um pino cujo valor so' pode vir de uma escolha de asset, nao de texto. */
+	bool IsObjectLikePin(const UEdGraphPin* Pin);
 
 	// -- Visibilidade --------------------------------------------------------
 

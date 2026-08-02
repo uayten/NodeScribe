@@ -3,6 +3,8 @@
 #include "NodeScribeAIWriter.h"
 #include "NodeScribeBuilder.h"
 #include "NodeScribeCatalog.h"
+#include "NodeScribeObjectTarget.h"
+#include "NodeScribeParser.h"
 #include "NodeScribePropertyText.h"
 
 #include "Components/ActorComponent.h"
@@ -17,68 +19,11 @@
 
 #define LOCTEXT_NAMESPACE "NodeScribe"
 
+using namespace NodeScribeObjectTarget;
+
 namespace
 {
 	using namespace NodeScribePropertyText;
-
-	/** O objeto que carrega os valores: Blueprint e classe viram o CDO delas. */
-	UObject* ResolveTarget(UObject* Object)
-	{
-		if (const UBlueprint* Blueprint = Cast<UBlueprint>(Object))
-		{
-			UClass* Generated = Blueprint->GeneratedClass.Get();
-			return Generated ? Generated->GetDefaultObject() : nullptr;
-		}
-		if (UClass* Class = Cast<UClass>(Object))
-		{
-			return Class->GetDefaultObject();
-		}
-		return Object;
-	}
-
-	UBlueprint* FindBlueprint(const UObject* Requested, const UClass* Class)
-	{
-		if (UBlueprint* Direct = const_cast<UBlueprint*>(Cast<UBlueprint>(Requested)))
-		{
-			return Direct;
-		}
-		return Class ? Cast<UBlueprint>(Class->ClassGeneratedBy) : nullptr;
-	}
-
-	/** Os componentes do alvo, pelo nome com que a ficha os escreve. */
-	TMap<FString, UObject*> CollectComponents(UObject* Target, UBlueprint* Blueprint)
-	{
-		TMap<FString, UObject*> Components;
-
-		if (const AActor* Actor = Cast<AActor>(Target))
-		{
-			for (UActorComponent* Component : Actor->GetComponents())
-			{
-				if (Component)
-				{
-					Components.Add(Component->GetName(), Component);
-				}
-			}
-		}
-
-		for (const UBlueprint* Current = Blueprint; Current; )
-		{
-			if (const USimpleConstructionScript* SCS = Current->SimpleConstructionScript)
-			{
-				for (const USCS_Node* Node : SCS->GetAllNodes())
-				{
-					if (Node && Node->ComponentTemplate)
-					{
-						Components.Add(Node->GetVariableName().ToString(), Node->ComponentTemplate);
-					}
-				}
-			}
-			const UClass* ParentClass = Current->ParentClass;
-			Current = ParentClass ? Cast<UBlueprint>(ParentClass->ClassGeneratedBy) : nullptr;
-		}
-
-		return Components;
-	}
 
 	/**
 	 * Acha a propriedade pelo nome que a ficha escreve.
@@ -134,35 +79,6 @@ namespace
 			++Spaces;
 		}
 		return Spaces / 2;
-	}
-
-	FString StripComment(const FString& Line)
-	{
-		int32 Hash = INDEX_NONE;
-
-		// Um `#` dentro de aspas e' valor, nao comentario.
-		bool bInQuote = false;
-		TCHAR QuoteChar = TEXT('\0');
-		for (int32 Index = 0; Index < Line.Len(); ++Index)
-		{
-			const TCHAR C = Line[Index];
-			if (bInQuote)
-			{
-				if (C == QuoteChar) { bInQuote = false; }
-			}
-			else if (C == TEXT('"') || C == TEXT('\''))
-			{
-				bInQuote = true;
-				QuoteChar = C;
-			}
-			else if (C == TEXT('#'))
-			{
-				Hash = Index;
-				break;
-			}
-		}
-
-		return Hash == INDEX_NONE ? Line : Line.Left(Hash);
 	}
 
 	bool IsResetToDefault(const FString& Value)
@@ -230,7 +146,7 @@ FNodeScribeObjectWriter::FResult FNodeScribeObjectWriter::WriteObject(
 	{
 		const int32 LineNumber = Index + 1;
 		const int32 Indent = MeasureIndent(Lines[Index]);
-		FString Line = StripComment(Lines[Index]).TrimStartAndEnd();
+		FString Line = FNodeScribeParser::StripComment(Lines[Index]).TrimStartAndEnd();
 
 		if (Line.IsEmpty())
 		{

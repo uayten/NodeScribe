@@ -43,15 +43,12 @@
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 
+using namespace NodeScribePropertyText;
+
 namespace
 {
 	/** Dois espacos por nivel: e' o que FNodeScribeParser::MeasureIndent conta. */
 	const TCHAR* const IndentUnit = TEXT("  ");
-
-	bool IsExecPin(const UEdGraphPin* Pin)
-	{
-		return Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec;
-	}
 
 	/**
 	 * true para o node que a Unreal insere sozinha ao ligar tipos diferentes.
@@ -410,16 +407,6 @@ namespace
 
 		const bool bIsBool = Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Boolean;
 		return FName::NameToDisplayString(Name, bIsBool);
-	}
-
-	bool IsObjectLikePin(const UEdGraphPin* Pin)
-	{
-		const FName Category = Pin->PinType.PinCategory;
-		return Category == UEdGraphSchema_K2::PC_Object
-			|| Category == UEdGraphSchema_K2::PC_Class
-			|| Category == UEdGraphSchema_K2::PC_SoftObject
-			|| Category == UEdGraphSchema_K2::PC_SoftClass
-			|| Category == UEdGraphSchema_K2::PC_Interface;
 	}
 
 	/** Aspas: mesma regra para grafo e para ficha, definida uma vez so'. */

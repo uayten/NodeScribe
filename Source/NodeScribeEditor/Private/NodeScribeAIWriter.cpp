@@ -1,6 +1,7 @@
 #include "NodeScribeAIWriter.h"
 
 #include "NodeScribeCatalog.h"
+#include "NodeScribeParser.h"
 #include "NodeScribePropertyText.h"
 
 #include "BehaviorTree/BlackboardData.h"
@@ -98,11 +99,6 @@ namespace
 		return false;
 	}
 
-	FString StripComment(const FString& Line)
-	{
-		int32 Hash = INDEX_NONE;
-		return Line.FindChar(TEXT('#'), Hash) ? Line.Left(Hash) : Line;
-	}
 }
 
 bool FNodeScribeAIWriter::Handles(const UObject* Object)
@@ -138,7 +134,7 @@ FNodeScribeAIWriter::FResult FNodeScribeAIWriter::WriteBlackboard(
 	for (int32 Index = 0; Index < Lines.Num(); ++Index)
 	{
 		const int32 LineNumber = Index + 1;
-		FString Line = StripComment(Lines[Index]).TrimStartAndEnd();
+		FString Line = FNodeScribeParser::StripComment(Lines[Index]).TrimStartAndEnd();
 
 		if (Line.IsEmpty() || Line.StartsWith(TEXT("blackboard "), ESearchCase::IgnoreCase))
 		{

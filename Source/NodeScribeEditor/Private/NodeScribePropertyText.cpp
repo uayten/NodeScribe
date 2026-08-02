@@ -1,5 +1,6 @@
 #include "NodeScribePropertyText.h"
 
+#include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
 #include "UObject/EnumProperty.h"
 #include "UObject/TextProperty.h"
@@ -224,6 +225,28 @@ FString DisplayName(const FProperty* Property)
 
 	const FString Display = Property->GetDisplayNameText().ToString();
 	return Display.IsEmpty() ? Property->GetName() : Display;
+}
+
+// -- Pinos -------------------------------------------------------------------
+
+bool IsExecPin(const UEdGraphPin* Pin)
+{
+	return Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec;
+}
+
+bool IsObjectLikePin(const UEdGraphPin* Pin)
+{
+	if (!Pin)
+	{
+		return false;
+	}
+
+	const FName Category = Pin->PinType.PinCategory;
+	return Category == UEdGraphSchema_K2::PC_Object
+		|| Category == UEdGraphSchema_K2::PC_Class
+		|| Category == UEdGraphSchema_K2::PC_SoftObject
+		|| Category == UEdGraphSchema_K2::PC_SoftClass
+		|| Category == UEdGraphSchema_K2::PC_Interface;
 }
 
 // -- Visibilidade ------------------------------------------------------------

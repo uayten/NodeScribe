@@ -16,10 +16,17 @@ class FNodeScribeParser
 public:
 	static TArray<FNodeScribeStatement> Parse(const FString& Text, TArray<FNodeScribeDiagnostic>& OutDiagnostics);
 
-private:
-	/** Remove `#` ate o fim da linha, respeitando aspas. */
+	/**
+	 * Remove `#` (e `//`) ate o fim da linha, respeitando aspas.
+	 *
+	 * Publica porque o que e' comentario e' do formato, nao do grafo: a ficha e o
+	 * blackboard leem linha por linha sem passar pelo Parse, e se cada um
+	 * decidisse sozinho, um `#` dentro de aspas seria valor num lugar e
+	 * comentario no outro.
+	 */
 	static FString StripComment(const FString& Line);
 
+private:
 	/** Conta a indentacao em niveis. Tab = 1 nivel, cada 2 espacos = 1 nivel. */
 	static int32 MeasureIndent(const FString& Line);
 
