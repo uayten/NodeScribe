@@ -374,7 +374,7 @@ Designer saem como comentário, porque não é o texto que as cria.
 Só o que o próprio Blueprint declara — as herdadas seriam centenas de linhas
 da Engine.
 
-### Três coisas que a leitura escreve e o parser descarta
+### Quatro coisas que a leitura escreve e o parser descarta
 
 **Âncora de reconvergência.** Duas cadeias que caem no mesmo node não cabem numa
 árvore. Em vez de o segundo ramo sair vazio — igualzinho a um ramo que ninguém
@@ -392,6 +392,28 @@ Branch (Condition = $bLigado)
 
 A volta continua se perdendo ao colar — o que mudou é você conseguir ver que ela
 existe, e onde.
+
+**Entrada lateral.** Um fio de execução nem sempre cai na entrada principal do
+node do outro lado. O `Reset` de um Do Once, o `Stop` de uma Timeline, o `Close`
+de um Gate: esses não continuam a cadeia, mandam um comando para um node que
+vive em outro lugar do grafo. Sai com a mesma âncora, dizendo por qual pino
+entra:
+
+```
+Branch (Condition = $Rotation Mode?)
+  verdadeiro:
+    Do Once  # ancora 2
+      completo:
+        Set Actor Location (New Location = $Home Location)
+        # -> entra em `Do Once` pelo pino `Reset` (ancora 3)
+  falso:
+    Do Once  # ancora 3
+```
+
+Antes isso era seguido como se fosse continuação, e a leitura escrevia uma
+cadeia que não existe — dois Do Once que se resetam saíam empilhados, um debaixo
+do outro, como se um chamasse o outro. A ligação em si continua se perdendo ao
+colar; o que mudou é ela aparecer, e no pino certo.
 
 **Conversão de tipo.** Ligar um `Integer` num pino de `String` faz a Unreal
 inserir um node de conversão. Ele não vira linha (o plugin o recria sozinho ao
@@ -420,6 +442,7 @@ nada ligado". `Set Is Enabled (Target = $X)` é o `bInIsEnabled` no padrão, que
 | Situação | O que acontece |
 |---|---|
 | Cadeia de execução que reconverge | âncora nas duas pontas + aviso: a volta se perde ao colar |
+| Fio que entra por pino lateral (`Reset`, `Stop`, `Close`) | âncora + o nome do pino, e aviso: a ligação se perde ao colar |
 | Pino alimentado por node fora da seleção | aviso: o pino sai sem valor |
 | Node que o plugin não sabe nomear de volta | sai o título do node + aviso de que pode não voltar igual |
 | Valor com aspas dos dois tipos | aviso: não há escape, copie na mão |

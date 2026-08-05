@@ -156,8 +156,20 @@ namespace
 		return nullptr;
 	}
 
-	/** Idem, no sentido da execucao. */
-	UEdGraphNode* FollowExecTarget(UEdGraphPin* ExecOutput)
+	/**
+	 * Idem, no sentido da execucao -- e devolvendo o PINO em que o fio cai, nao
+	 * so' o node dono dele.
+	 *
+	 * O node nao basta. Um fio de execucao pode chegar num pino que nao e' a
+	 * entrada principal do node: o `Reset` de um Do Once, o `Stop` de uma
+	 * Timeline, o `Close` de um Gate. Esses nao continuam a cadeia -- sao um
+	 * comando lateral para um node que ja' esta' em outro lugar do grafo.
+	 *
+	 * Enquanto so' o node era seguido, os dois eram a mesma coisa para a leitura,
+	 * e ela descrevia o grafo errado com toda a confianca: dois Do Once que se
+	 * resetam saiam empilhados, um debaixo do outro, como se um chamasse o outro.
+	 */
+	UEdGraphPin* FollowExecTargetPin(UEdGraphPin* ExecOutput)
 	{
 		UEdGraphPin* Current = ExecOutput;
 
@@ -169,11 +181,10 @@ namespace
 				return nullptr;
 			}
 
-			UEdGraphNode* Node = Next->GetOwningNode();
-			const UK2Node_Knot* Knot = Cast<UK2Node_Knot>(Node);
+			const UK2Node_Knot* Knot = Cast<UK2Node_Knot>(Next->GetOwningNode());
 			if (!Knot)
 			{
-				return Node;
+				return Next;
 			}
 
 			Current = Knot->GetOutputPin();
@@ -205,6 +216,18 @@ namespace
 			}
 		}
 		return nullptr;
+	}
+
+	/**
+	 * A entrada de execucao por onde a cadeia realmente continua: a primeira.
+	 *
+	 * Qualquer outra e' um comando lateral, e o node do outro lado nao pertence a
+	 * esta cadeia -- ele tem vida propria em outro ponto do grafo. Escrever um
+	 * abaixo do outro diria que um leva ao outro.
+	 */
+	bool IsPrimaryExecInput(UEdGraphNode* Node, const UEdGraphPin* Pin)
+	{
+		return Node && Pin && FindExecInput(Node) == Pin;
 	}
 
 	/** A saida que `$nome` sozinho alcanca. Mesma regra do builder. */
@@ -548,6 +571,19 @@ private:
 	void CollectConsumedNodes();
 
 	void EmitExecChain(UEdGraphNode* Node, int32 Indent);
+
+	/**
+	 * Um fio de execucao saindo de `ExecOutput`: continua a cadeia, volta para
+	 * uma ancora, ou entra de lado num node que vive em outro lugar do grafo.
+	 */
+	void EmitExecLink(UEdGraphPin* ExecOutput, int32 Indent);
+
+	/** O numero de ancora de um node, reservando um se ele ainda nao tiver. */
+	int32 AnchorFor(UEdGraphNode* Node);
+
+	/** Escreve `# ancora N` na linha de cada node ancorado, no fim de tudo. */
+	void StampAnchors();
+
 	void EmitNodeLine(UEdGraphNode* Node, int32 Indent);
 
 	/** Emite a linha de um node puro de dado e devolve o nome dado a ele. */
@@ -1341,21 +1377,7 @@ void FNodeScribeReadContext::EmitExecChain(UEdGraphNode* Node, int32 Indent)
 		// vazio de verdade sai, e as duas coisas eram indistinguiveis. A ancora
 		// vai como comentario nas duas pontas: o parser descarta, entao o texto
 		// continua colavel exatamente como estava.
-		int32 Anchor = 0;
-		if (const int32* Existing = AnchorOf.Find(Node))
-		{
-			Anchor = *Existing;
-		}
-		else
-		{
-			Anchor = NextAnchor++;
-			AnchorOf.Add(Node, Anchor);
-
-			if (const int32* LineIndex = ExecLineIndex.Find(Node))
-			{
-				Lines[*LineIndex] += FString::Printf(TEXT("  # ancora %d"), Anchor);
-			}
-		}
+		const int32 Anchor = AnchorFor(Node);
 
 		EmitLine(Indent, FString::Printf(TEXT("# -> volta para a ancora %d (`%s`)"),
 			Anchor, *ShortTitle(Node)));
@@ -1374,20 +1396,86 @@ void FNodeScribeReadContext::EmitExecChain(UEdGraphNode* Node, int32 Indent)
 
 	if (ExecOutputs.Num() == 1)
 	{
-		EmitExecChain(FollowExecTarget(ExecOutputs[0]), Indent);
+		EmitExecLink(ExecOutputs[0], Indent);
 		return;
 	}
 
 	for (UEdGraphPin* Output : ExecOutputs)
 	{
-		UEdGraphNode* Target = FollowExecTarget(Output);
-		if (!Target)
+		if (!FollowExecTargetPin(Output))
 		{
 			continue;
 		}
 
 		EmitLine(Indent, DescribeExecLabel(Output) + TEXT(":"));
-		EmitExecChain(Target, Indent + 1);
+		EmitExecLink(Output, Indent + 1);
+	}
+}
+
+void FNodeScribeReadContext::EmitExecLink(UEdGraphPin* ExecOutput, int32 Indent)
+{
+	UEdGraphPin* TargetPin = FollowExecTargetPin(ExecOutput);
+	if (!TargetPin)
+	{
+		return;
+	}
+
+	UEdGraphNode* Target = TargetPin->GetOwningNode();
+	if (!Target || !Scope.Contains(Target))
+	{
+		return;
+	}
+
+	if (IsPrimaryExecInput(Target, TargetPin))
+	{
+		EmitExecChain(Target, Indent);
+		return;
+	}
+
+	// Entrada lateral: `Reset` de um Do Once, `Stop` de uma Timeline, `Close` de
+	// um Gate. O node do outro lado nao e' a continuacao desta cadeia -- ele tem
+	// a propria linha em outro ponto do texto, e o que este fio faz e' mandar um
+	// comando para la'. Descer nele escreveria uma cadeia que nao existe: era
+	// assim que dois Do Once resetando um ao outro saiam empilhados, como se o
+	// primeiro levasse ao segundo.
+	//
+	// A ancora e' a mesma da reconvergencia, e aqui ela pode apontar para uma
+	// linha que ainda nao saiu -- por isso o numero e' reservado agora e escrito
+	// no node no fim de tudo.
+	const int32 Anchor = AnchorFor(Target);
+	const FString PinLabel = GetWrittenPinName(TargetPin);
+
+	EmitLine(Indent, FString::Printf(TEXT("# -> entra em `%s` pelo pino `%s` (ancora %d)"),
+		*ShortTitle(Target), *PinLabel, Anchor));
+
+	AddWarning(FString::Printf(
+		TEXT("A execucao entra em `%s` (ancora %d) pelo pino `%s`, que nao e' a entrada principal dele. ")
+		TEXT("O formato de texto so' descreve arvore: essa ligacao se perde ao colar e voce religa na mao."),
+		*ShortTitle(Target), Anchor, *PinLabel));
+}
+
+int32 FNodeScribeReadContext::AnchorFor(UEdGraphNode* Node)
+{
+	if (const int32* Existing = AnchorOf.Find(Node))
+	{
+		return *Existing;
+	}
+
+	const int32 Anchor = NextAnchor++;
+	AnchorOf.Add(Node, Anchor);
+	return Anchor;
+}
+
+void FNodeScribeReadContext::StampAnchors()
+{
+	// No fim, quando toda linha ja' existe. Uma entrada lateral pode apontar para
+	// um node que so' vai ser emitido depois -- marcar na hora perderia essas.
+	for (const TTuple<UEdGraphNode*, int32>& Pair : AnchorOf)
+	{
+		if (const int32* LineIndex = ExecLineIndex.Find(Pair.Key))
+		{
+			Lines[*LineIndex] += FString::Printf(TEXT("  # ancora %d"), Pair.Value);
+		}
 	}
 }
 
@@ -1786,6 +1874,8 @@ void FNodeScribeReadContext::Run()
 			TEXT("%d node(s) de dado nao alimentam nada e ficaram de fora do texto: %s."),
 			Orphans.Num(), *Names));
 	}
+
+	StampAnchors();
 
 	Result.Text = FString::Join(Lines, TEXT("\n"));
 }
