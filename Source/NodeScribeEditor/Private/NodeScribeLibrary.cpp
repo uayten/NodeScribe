@@ -20,6 +20,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "ScopedTransaction.h"
+#include "UObject/Package.h"
 
 #define LOCTEXT_NAMESPACE "NodeScribe"
 
@@ -255,7 +256,7 @@ FString UNodeScribeLibrary::SaveAllAndQuit()
 	}
 
 	bool bNeededSaving = false;
-	const bool bSaved = FEditorFileUtils::SaveDirtyPackages(
+	FEditorFileUtils::SaveDirtyPackages(
 		/*bPromptUserToSave*/ false,
 		/*bSaveMapPackages*/ true,
 		/*bSaveContentPackages*/ true,
@@ -264,9 +265,40 @@ FString UNodeScribeLibrary::SaveAllAndQuit()
 		/*bCanBeDeclined*/ false,
 		&bNeededSaving);
 
-	if (bNeededSaving && !bSaved)
+	// O retorno de SaveDirtyPackages nao serve de prova, e o bNeededSaving
+	// tambem nao. Sao dois caminhos de perda silenciosa:
+	//
+	// - InternalSavePackages so devolve false quando o usuario cancela ("Only
+	//   cancel should return false", diz o comentario da engine). Pacote que
+	//   falhou ao gravar -- somente leitura, travado no controle de versao, erro
+	//   no meio -- devolve sucesso. E com bPromptUserToSave e bCanBeDeclined em
+	//   false nao ha cancelamento possivel, entao o retorno e sempre true.
+	//
+	// - Se todo pacote sujo estiver em FEditorFileUtils::PackagesNotSavedDuringSaveAll
+	//   (a lista do que o usuario desmarcou em algum dialogo de salvar, que dura
+	//   a sessao inteira), a funcao nem tenta gravar e ainda devolve
+	//   bNeededSaving = false.
+	//
+	// Entao se pergunta de novo quem continua sujo, e ai sim se sabe.
+	TArray<UPackage*> AindaSujos;
+	FEditorFileUtils::GetDirtyWorldPackages(AindaSujos);
+	FEditorFileUtils::GetDirtyContentPackages(AindaSujos);
+
+	if (AindaSujos.Num() > 0)
 	{
-		return TEXT("[erro]: algo nao pode ser salvo. Nao fechei -- resolva e chame de novo.");
+		TArray<FString> Nomes;
+		Nomes.Reserve(AindaSujos.Num());
+		for (const UPackage* Pacote : AindaSujos)
+		{
+			Nomes.Add(Pacote->GetName());
+		}
+		Nomes.Sort();
+
+		return FString::Printf(
+			TEXT("[erro]: nao fechei -- %d pacote(s) continuam sem salvar depois do save:\n%s\n")
+			TEXT("Salve na mao (Ctrl+Shift+S) e veja o que o editor reclama."),
+			Nomes.Num(),
+			*FString::Join(Nomes, TEXT("\n")));
 	}
 
 	// Adiado: sair aqui derrubaria a conexao antes desta resposta sair, e quem
