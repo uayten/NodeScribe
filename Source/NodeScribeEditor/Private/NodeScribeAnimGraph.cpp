@@ -35,10 +35,14 @@ bool IsAnimationGraph(const UEdGraph* Graph)
 		return false;
 	}
 
-	// O schema cobre AnimGraph, interior de estado e regra de transicao de uma
-	// vez -- todos os tres aceitam node de anim. Testar a classe do grafo
-	// deixaria de fora os sub-grafos, que sao exatamente onde a maquina de
-	// estado precisa escrever.
+	// O schema cobre AnimGraph e interior de estado de uma vez -- os dois
+	// aceitam node de anim. Testar a classe do grafo deixaria de fora o interior
+	// de estado, que e' exatamente onde a maquina de estados precisa escrever.
+	//
+	// **Nao cobre a regra de transicao.** UAnimationTransitionSchema desce de
+	// UEdGraphSchema_K2, nao daqui, porque a regra nao tem pose: e' uma cadeia
+	// de dado terminando num bool. Quem precisa dela testa
+	// `IsA<UAnimationTransitionGraph>()`.
 	return Graph->GetSchema()->IsA<UAnimationGraphSchema>();
 }
 

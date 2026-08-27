@@ -937,8 +937,14 @@ private:
 	 */
 	int32 BuildStateMachine(UAnimGraphNode_StateMachineBase* Machine, const TArray<FNodeScribeStatement>& Statements, int32 First);
 
-	/** Constroi um sub-grafo com um contexto novo e traz de volta os diagnosticos. */
-	void BuildSubGraph(UEdGraph* SubGraph, const TArray<FNodeScribeStatement>& Statements, int32 First, int32 End);
+	/**
+	 * Constroi um sub-grafo com um contexto novo e traz de volta os diagnosticos.
+	 *
+	 * Devolve o node da ultima linha do bloco -- o resultado dele, pelo mesmo
+	 * criterio de um galho de pose. Quem chama decide o que fazer com isso: a
+	 * regra de uma transicao liga esse resultado no `Can Enter Transition`.
+	 */
+	UEdGraphNode* BuildSubGraph(UEdGraph* SubGraph, const TArray<FNodeScribeStatement>& Statements, int32 First, int32 End);
 
 	/** Nodes criados dentro de sub-grafos. Entram no resultado so' no fim, ja' fora do layout. */
 	TArray<UEdGraphNode*> NestedNodes;
@@ -3274,11 +3280,11 @@ namespace
 	constexpr int32 StateColumnWidth = 320;
 }
 
-void FNodeScribeBuildContext::BuildSubGraph(UEdGraph* SubGraph, const TArray<FNodeScribeStatement>& Statements, int32 First, int32 End)
+UEdGraphNode* FNodeScribeBuildContext::BuildSubGraph(UEdGraph* SubGraph, const TArray<FNodeScribeStatement>& Statements, int32 First, int32 End)
 {
 	if (!SubGraph || First >= End)
 	{
-		return;
+		return nullptr;
 	}
 
 	TArray<FNodeScribeStatement> Body;
@@ -3299,6 +3305,11 @@ void FNodeScribeBuildContext::BuildSubGraph(UEdGraph* SubGraph, const TArray<FNo
 	Result.ErrorCount += Nested.Result.ErrorCount;
 	Result.WarningCount += Nested.Result.WarningCount;
 	NestedNodes.Append(Nested.Result.CreatedNodes);
+
+	// Frames[0] e' o nivel raiz do bloco, e o LastNode dele e' o node da ultima
+	// linha -- inclusive quando essa linha e' um node puro, que nao entra na
+	// cadeia de fluxo e por isso nao aparece no PendingExec.
+	return Nested.Frames.Num() > 0 ? Nested.Frames[0].LastNode : nullptr;
 }
 
 int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase* Machine, const TArray<FNodeScribeStatement>& Statements, int32 First)
@@ -3461,7 +3472,7 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 			continue;
 		}
 
-		BuildSubGraph(Transition->BoundGraph, Statements, Index + 1, BodyEnd);
+		UEdGraphNode* RuleResult = BuildSubGraph(Transition->BoundGraph, Statements, Index + 1, BodyEnd);
 
 		// A regra e' um grafo de dado que termina num bool. Ligar o resultado e'
 		// trabalho do plugin, como qualquer outra ligacao que o texto nao
@@ -3476,27 +3487,76 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 			}
 		}
 
-		UEdGraphPin* CanEnter = ResultNode ? ResultNode->FindPin(TEXT("bCanEnterTransition")) : nullptr;
-		if (!CanEnter || CanEnter->LinkedTo.Num() > 0 || BodyEnd == Index + 1)
+		// Estes dois calavam. Uma transicao sem regra compila, roda, e nunca
+		// dispara -- o pino vazio parece um `false` deliberado, e nada na tela
+		// distingue "o texto nao pediu regra" de "o plugin nao conseguiu ligar".
+		if (!ResultNode)
+		{
+			AddWarning(Statement.LineNumber, FString::Printf(
+				TEXT("A transicao `%s` nasceu sem node de resultado. A regra nao foi ligada."),
+				*Statement.Label));
+			continue;
+		}
+
+		UEdGraphPin* CanEnter = ResultNode->FindPin(TEXT("bCanEnterTransition"));
+		if (!CanEnter)
+		{
+			TArray<FString> Pinos;
+			for (const UEdGraphPin* Pin : ResultNode->Pins)
+			{
+				Pinos.Add(Pin->PinName.ToString());
+			}
+
+			AddWarning(Statement.LineNumber, FString::Printf(
+				TEXT("O resultado de `%s` nao tem pino `bCanEnterTransition`. Tem: %s"),
+				*Statement.Label,
+				Pinos.Num() > 0 ? *FString::Join(Pinos, TEXT(", ")) : TEXT("nenhum")));
+			continue;
+		}
+
+		if (CanEnter->LinkedTo.Num() > 0 || BodyEnd == Index + 1)
 		{
 			continue;
 		}
 
 		// O ultimo node do bloco e' o resultado da regra, do mesmo jeito que o
 		// ultimo node de um galho de pose e' o resultado do galho.
-		for (int32 Back = Transition->BoundGraph->Nodes.Num() - 1; Back >= 0; --Back)
+		//
+		// Quem diz qual e' esse node e' o percurso do bloco, nao a ordem em que
+		// os nodes cairam no grafo: o argumento de um node nasce *depois* dele,
+		// entao varrer `BoundGraph->Nodes` de tras para frente pega o
+		// `$Ground Speed` da regra em vez da comparacao que o consome -- e ai a
+		// transicao fica sem regra, com um aviso de tipo trocado no lugar.
+		UEdGraphPin* Output = RuleResult ? FindPrimaryOutput(RuleResult) : nullptr;
+		if (!Output)
 		{
-			UEdGraphNode* Candidate = Transition->BoundGraph->Nodes[Back];
-			if (Candidate == ResultNode)
-			{
-				continue;
-			}
+			// Transicao sem regra nunca dispara, e nada na tela diz isso: o pino
+			// vazio parece um `false` deliberado.
+			AddWarning(Statement.LineNumber, FString::Printf(
+				TEXT("A regra de `%s` nao terminou num valor. A transicao nunca dispara."),
+				*Statement.Label));
+			continue;
+		}
 
-			if (UEdGraphPin* Output = FindPrimaryOutput(Candidate))
-			{
-				Connect(Output, CanEnter, Statement.LineNumber);
-				break;
-			}
+		// Os dois pinos vivem no grafo da regra, nao neste. Ligar pelo schema
+		// daqui produz um fio que o grafo de la' nao reconhece: ele aparece, e
+		// some no primeiro refresh do Blueprint -- que e' logo ali, no
+		// MarkBlueprintAsStructurallyModified. Quem valida a ligacao tem que ser
+		// o schema do grafo onde os pinos moram.
+		const UEdGraphSchema* RuleSchema = Transition->BoundGraph->GetSchema();
+		if (RuleSchema)
+		{
+			RuleSchema->TryCreateConnection(Output, CanEnter);
+		}
+
+		// Conferir em vez de confiar: sem regra a transicao nunca dispara, e o
+		// pino vazio nao se distingue de um `false` deliberado.
+		if (CanEnter->LinkedTo.Num() == 0)
+		{
+			AddWarning(Statement.LineNumber, FString::Printf(
+				TEXT("A regra de `%s` (`%s`) nao entrou no Can Enter Transition. A transicao nunca dispara."),
+				*Statement.Label,
+				*RuleResult->GetNodeTitle(ENodeTitleType::ListView).ToString()));
 		}
 	}
 

@@ -2114,18 +2114,23 @@ void FNodeScribeReadContext::Run()
 	// consome. Regra de transicao nao tem nem isso: e' uma cadeia de dado que
 	// termina num bool.
 	UEdGraph* CurrentGraph = Nodes.Num() > 0 && Nodes[0] ? Nodes[0]->GetGraph() : nullptr;
-	const bool bAnimPath = NodeScribeAnimGraph::IsAnimationGraph(CurrentGraph);
 
-	if (bAnimPath)
+	// A regra de transicao nao entra por IsAnimationGraph. O schema dela e'
+	// UAnimationTransitionSchema, que desce de UEdGraphSchema_K2 e nao de
+	// UAnimationGraphSchema -- coerente, porque a regra e' uma cadeia de dado
+	// que termina num bool, sem pino de pose nenhum. Perguntar so' ao schema
+	// deixava a regra fora do texto e ainda contava os nodes dela como orfaos:
+	// a transicao lida voltava sempre vazia, mesmo com a regra ligada no grafo.
+	const bool bTransitionRule = CurrentGraph && CurrentGraph->IsA<UAnimationTransitionGraph>();
+	const bool bAnimPath = bTransitionRule || NodeScribeAnimGraph::IsAnimationGraph(CurrentGraph);
+
+	if (bTransitionRule)
 	{
-		if (CurrentGraph->IsA<UAnimationTransitionGraph>())
-		{
-			EmitTransitionRule();
-		}
-		else
-		{
-			EmitAnimGraph();
-		}
+		EmitTransitionRule();
+	}
+	else if (bAnimPath)
+	{
+		EmitAnimGraph();
 	}
 
 	// Raizes: quem tem fio branco mas nao recebe execucao de ninguem. Eventos
