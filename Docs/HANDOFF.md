@@ -9,9 +9,9 @@ pose, node por asset, leitura de volta, criação de asset de animação e
 preenchimento de BlendSpace. A locomoção da MetaHuman Sophia está montada e
 compilando.
 
-Falta: exercitar a correção do **crash ao fechar o editor** (causa achada e
-corrigida, ainda não testada no editor), e a **máquina de estados**, que foi
-escrita e nunca rodou.
+O **crash ao fechar o editor** foi corrigido e exercitado (tarefa 1).
+
+Falta: a **máquina de estados**, que foi escrita e nunca rodou.
 
 ## Caminhos
 
@@ -48,8 +48,7 @@ escutar.
 
 ### Fechar
 
-`save_all_and_quit` pelo MCP. O crash ao fechar foi corrigido no commit
-`785a138` — veja a tarefa 1: falta exercitar.
+`save_all_and_quit` pelo MCP.
 
 ### MCP
 
@@ -77,9 +76,9 @@ aparece — e nada avisa.
 
 ---
 
-## Tarefa 1 — Crash ao fechar pelo `save_all_and_quit` (corrigido, falta testar)
+## Tarefa 1 — Crash ao fechar pelo `save_all_and_quit` (RESOLVIDO)
 
-**Causa achada, correcao no commit `785a138`. Falta exercitar no editor.**
+**Causa achada, corrigida no commit `785a138`, e exercitada no editor.**
 
 ### O que era
 
@@ -126,19 +125,29 @@ you want to close the Unreal Editor?") quando `bConfirmEditorClose` esta'
 ligado. Quem chama isto e' um programa, entao o tool recusa antes, com a
 instrucao de desmarcar. Neste projeto ja' esta' `False`.
 
-### Como testar
+### Como foi testado
 
-1. Abrir `ABP_Sophia` e `BP_ThirdPersonCharacter` como editores de asset — foi
-   so' com eles abertos que quebrou.
-2. `save_all_and_quit`.
-3. Conferir que **nao** apareceu pasta nova em
-   `C:\Unreal Projects\Metahuman\Saved\Crashes\`.
-4. Reabrir e conferir que **nao** ha' convite a recuperar asset.
+`ABP_Sophia` e `BP_ThirdPersonCharacter` abertos como editores de asset —
+a condicao em que quebrava —, e `save_all_and_quit`. Fechou limpo: sem Crash
+Reporter, sem pasta nova em `Saved/Crashes`, log terminando em `LogExit:
+Exiting.`
 
-Se ainda quebrar, o proximo suspeito e' mexer num grafo que um editor de asset
-tem aberto (`clear_graph`/`write_graph` foram usados assim), deixando widget de
-node orfao no painel. Nao ha' evidencia disso, mas e' o outro ponto onde os dois
-lados se tocam.
+A prova de que a causa era a ordem esta' no log. Antes, o `CleanupWorld` das
+cenas de preview vinha **depois** de `Window 'Metahuman - Unreal Editor' being
+destroyed`, seguido do aviso `Expected preview actor 'BP_ThirdPersonCharacter_C_0'
+to be garbage collected, but it was not`. Agora vem **antes**, e o aviso sumiu:
+
+```
+15:334  Cmd: CLOSE_SLATE_MAINFRAME
+15:510  UWorld::CleanupWorld for World_4 ... (as cenas de preview)
+15:622  LogSlate: Window 'Metahuman - Unreal Editor' being destroyed
+15:774  Cmd: QUIT_EDITOR
+```
+
+Se algum dia voltar a quebrar, o proximo suspeito e' mexer num grafo que um
+editor de asset tem aberto (`clear_graph`/`write_graph` foram usados assim),
+deixando widget de node orfao no painel. Nao ha' evidencia disso, mas e' o outro
+ponto onde os dois lados se tocam.
 
 ---
 
