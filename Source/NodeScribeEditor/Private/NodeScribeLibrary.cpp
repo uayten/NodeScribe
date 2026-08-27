@@ -14,6 +14,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "Editor.h"
+#include "Editor/EditorPerProjectUserSettings.h"
 #include "Engine/Blueprint.h"
 #include "FileHelpers.h"
 #include "Interfaces/IPluginManager.h"
@@ -313,6 +314,15 @@ FString UNodeScribeLibrary::SaveAllAndQuit()
 		return TEXT("[erro]: ha' um Play In Editor rodando. Pare o Play antes.");
 	}
 
+	// O caminho do Slate pergunta "tem certeza?" num dialogo modal quando essa
+	// opcao esta ligada. Quem chama isto e' um programa: ninguem estaria la para
+	// clicar, e o editor ficaria pendurado sem explicacao.
+	if (GetDefault<UEditorPerProjectUserSettings>()->bConfirmEditorClose)
+	{
+		return TEXT("[erro]: 'Confirm on Editor Close' esta' ligado -- fechar abriria um dialogo\n")
+			TEXT("que so' um humano fecha. Desmarque em Editor Preferences > General > Loading & Saving.");
+	}
+
 	bool bNeededSaving = false;
 	FEditorFileUtils::SaveDirtyPackages(
 		/*bPromptUserToSave*/ false,
@@ -359,9 +369,23 @@ FString UNodeScribeLibrary::SaveAllAndQuit()
 			*FString::Join(Nomes, TEXT("\n")));
 	}
 
-	// Adiado: sair aqui derrubaria a conexao antes desta resposta sair, e quem
-	// chamou veria um erro de rede em vez da confirmacao.
-	GEngine->DeferredCommands.Add(TEXT("QUIT_EDITOR"));
+	// O QUIT_EDITOR pula o desligamento do Slate: vai direto em
+	// UUnrealEdEngine::CloseEditor -> RequestEngineExit. Os editores de asset
+	// abertos ficam vivos, e so' sao desmontados depois que a janela principal ja
+	// morreu -- com a cena de preview deles apontando para coisa destruida. E' o
+	// crash do AnimationBlueprintEditor. A propria engine avisa, no
+	// EditorServer.cpp, ao lado do QUIT_EDITOR: "Don't call quit_editor directly
+	// with slate".
+	//
+	// CLOSE_SLATE_MAINFRAME e' a porta certa. Cai em
+	// FMainFrameHandler::ShutDownEditor, que na ordem certa: fecha os editores de
+	// asset (BroadcastEditorClose), desliga o arquivo de restauracao do autosave
+	// -- e' ele que fazia o editor oferecer "recuperar" na abertura seguinte --,
+	// salva a posicao da janela, e so' entao enfileira o QUIT_EDITOR.
+	//
+	// Adiado porque sair aqui derrubaria a conexao antes desta resposta sair, e
+	// quem chamou veria um erro de rede em vez da confirmacao.
+	GEngine->DeferredCommands.Add(TEXT("CLOSE_SLATE_MAINFRAME"));
 
 	return bNeededSaving
 		? TEXT("Tudo salvo. Fechando o editor.")
