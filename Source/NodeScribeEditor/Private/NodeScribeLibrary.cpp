@@ -1,6 +1,7 @@
 #include "NodeScribeLibrary.h"
 
 #include "NodeScribeAssetMaker.h"
+#include "NodeScribeBlendSpace.h"
 #include "NodeScribeBuilder.h"
 #include "NodeScribeObjectReader.h"
 #include "NodeScribeObjectWriter.h"
@@ -227,9 +228,22 @@ FString UNodeScribeLibrary::WriteObject(UObject* Object, const FString& Text)
 		*Report);
 }
 
-FString UNodeScribeLibrary::CreateAsset(const FString& Path, const FString& Parent)
+FString UNodeScribeLibrary::CreateAsset(const FString& Path, const FString& Parent, const FString& Options)
 {
-	return FNodeScribeAssetMaker::CreateAsset(Path, Parent);
+	return FNodeScribeAssetMaker::CreateAsset(Path, Parent, Options);
+}
+
+FString UNodeScribeLibrary::WriteBlendSpace(UBlendSpace* BlendSpace, const FString& Text)
+{
+	const NodeScribeBlendSpace::FResult Result = NodeScribeBlendSpace::Write(BlendSpace, Text);
+
+	TArray<FString> Lines;
+	Lines.Add(FString::Printf(TEXT("%d sample(s), %d eixo(s)."),
+		Result.SamplesAdded, Result.AxesSet));
+
+	Lines.Append(Result.Diagnostics);
+
+	return FString::Join(Lines, TEXT("\n"));
 }
 
 FString UNodeScribeLibrary::ReadTags(const FString& Filter)

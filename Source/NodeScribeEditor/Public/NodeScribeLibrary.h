@@ -4,6 +4,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "NodeScribeLibrary.generated.h"
 
+class UBlendSpace;
 class UEdGraph;
 
 /**
@@ -81,12 +82,34 @@ public:
 	 * duplicate, move e delete, e nao tem criacao. Sem isto, todo asset novo e'
 	 * um pedido de clique para uma pessoa, e o resto do trabalho para'.
 	 *
-	 * @param Path    onde criar, com nome: `/Game/BossRush/Testes/BTTask_Foo`.
-	 * @param Parent  o tipo, pelo nome de tela: `BTTask_BlueprintBase`,
-	 *                `GameplayEffect`, `BlackboardData`, `BehaviorTree`.
+	 * @param Path     onde criar, com nome: `/Game/BossRush/Testes/BTTask_Foo`.
+	 * @param Parent   o tipo, pelo nome de tela: `BTTask_BlueprintBase`,
+	 *                 `GameplayEffect`, `BlackboardData`, `BehaviorTree`.
+	 * @param Options  propriedades da factory, no formato da ficha, aplicadas
+	 *                 antes de criar. Ha' asset que nao se cria so' com o tipo:
+	 *                 um AnimBlueprint precisa saber o esqueleto, e um
+	 *                 BlendSpace tambem. Consertar depois nao serve -- no asset
+	 *                 pronto o esqueleto e' somente-leitura, de proposito.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
-	static FString CreateAsset(const FString& Path, const FString& Parent);
+	static FString CreateAsset(const FString& Path, const FString& Parent, const FString& Options);
+
+	/**
+	 * Preenche um BlendSpace: os eixos e os samples, por texto.
+	 *
+	 * Existe porque a ficha nao alcanca. `SampleData` e `BlendParameters` sao
+	 * arrays de struct, e escrever neles a mao pularia a validacao da Engine --
+	 * que e' quem recalcula a malha de interpolacao. Sem a malha o BlendSpace
+	 * existe, abre, mostra os pontos e nao interpola nada.
+	 *
+	 *     eixo X : Speed = 0 .. 600
+	 *     MM_Idle = 0
+	 *     MF_Unarmed_Walk_Fwd = 300
+	 *
+	 * Nao apaga o que ja' esta' la': o texto e' uma lista de mudancas.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
+	static FString WriteBlendSpace(UBlendSpace* BlendSpace, const FString& Text);
 
 	/**
 	 * As Gameplay Tags declaradas, uma por linha.
