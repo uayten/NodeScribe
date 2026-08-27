@@ -390,6 +390,34 @@ FNodeScribeObjectWriter::FResult FNodeScribeObjectWriter::WriteObject(
 			continue;
 		}
 
+		// Propriedade que a Engine aposentou.
+		//
+		// Ela continua EditAnywhere para conseguir carregar asset antigo, entao
+		// a busca por nome a encontra e a escrita "da' certo" -- e nada le' o
+		// que foi gravado. E' exatamente o modo de falhar que este plugin
+		// existe para evitar: grava no asset, ninguem reclama, e so' aparece
+		// rodando. `SkeletalMesh` num componente de mesh e' o caso classico:
+		// virou `SkinnedAsset` na 5.1 e continua la', aceitando valor.
+		//
+		// Limpar uma dessas continua valendo. O perigo e' escrever valor nela,
+		// nao tirar o que ficou para tras.
+		const bool bDeprecated = Property->HasAnyPropertyFlags(CPF_Deprecated)
+			|| Property->HasMetaData(TEXT("DeprecatedProperty"));
+
+		if (bDeprecated && !IsResetToDefault(Value))
+		{
+			const FString Says = Property->GetMetaData(TEXT("DeprecationMessage"));
+
+			Result.Diagnostics.Add(FString::Printf(
+				TEXT("linha %d [erro]: `%s` esta' obsoleta -- nada le' o que for gravado nela, ")
+				TEXT("e a escrita passaria em silencio.%s"),
+				LineNumber, *Name,
+				Says.IsEmpty()
+					? TEXT(" Procure a propriedade que a substituiu.")
+					: *FString::Printf(TEXT(" A Engine diz: %s"), *Says)));
+			continue;
+		}
+
 		void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Container);
 
 		CurrentObject->Modify();

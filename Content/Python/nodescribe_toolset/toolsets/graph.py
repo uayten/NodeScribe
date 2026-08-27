@@ -66,6 +66,35 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
     @toolset_registry.tool_call
     @staticmethod
+    def clear_graph(graph: unreal.EdGraph) -> str:
+        """Esvazia o grafo, e devolve como texto o que estava nele.
+
+        E' o gesto que faltava. O `substituir` do write_graph se recusa a apagar
+        um grafo que o texto nao sabe descrever, e essa recusa esta' certa: o
+        que some nao aparece no que sobrou. Mas ha' caso em que a intencao e'
+        justamente jogar fora -- os stubs que um Blueprint novo traz de fabrica,
+        uma tentativa que falhou --, e ali a recusa so' obriga alguem a fazer na
+        mao o que a chamada faria.
+
+        O que muda em relacao a um modo forcado: nada some calado. O grafo volta
+        transcrito na resposta, com os avisos da leitura junto -- inclusive o
+        aviso de que uma parte nao coube em texto. **Guarde esse retorno antes
+        de escrever por cima.**
+
+        Node que a Engine marca como indelevel fica: o Output Pose de um
+        AnimGraph, o Result de uma transicao, a entrada de uma funcao.
+
+        Uma transacao so': o Ctrl+Z devolve o grafo inteiro.
+
+        Args:
+            graph: O grafo a esvaziar.
+        Returns:
+            Quantos nodes sairam, e o texto do que estava la'.
+        """
+        return unreal.NodeScribeLibrary.clear_graph(graph)
+
+    @toolset_registry.tool_call
+    @staticmethod
     def read_object(target: unreal.Object, filter: str | None = None) -> str:
         """Le' um objeto, classe, CDO, ator ou asset como ficha de propriedades.
 

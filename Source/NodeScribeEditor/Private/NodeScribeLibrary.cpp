@@ -69,7 +69,7 @@ namespace
  * com razao: ele nasce com a funcao. Pular esses e' o comportamento certo, nao
  * uma limitacao.
  */
-static int32 ClearGraph(UEdGraph* Graph, UBlueprint* Blueprint)
+static int32 RemoveDeletableNodes(UEdGraph* Graph, UBlueprint* Blueprint)
 {
 	TArray<UEdGraphNode*> ToRemove;
 	for (UEdGraphNode* Node : Graph->Nodes)
@@ -154,7 +154,7 @@ FString UNodeScribeLibrary::WriteGraph(UEdGraph* Graph, const FString& Text, boo
 	int32 Removed = 0;
 	if (bReplace)
 	{
-		Removed = ClearGraph(Graph, Blueprint);
+		Removed = RemoveDeletableNodes(Graph, Blueprint);
 	}
 
 	FNodeScribeBuilder::FResult Result = FNodeScribeBuilder::Build(
@@ -177,6 +177,50 @@ FString UNodeScribeLibrary::WriteGraph(UEdGraph* Graph, const FString& Text, boo
 		Result.CreatedNodes.Num(),
 		Report.IsEmpty() ? TEXT("") : TEXT("\n"),
 		*Report);
+}
+
+FString UNodeScribeLibrary::ClearGraph(UEdGraph* Graph)
+{
+	if (!Graph)
+	{
+		return TEXT("[erro]: nenhum grafo informado.");
+	}
+
+	UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
+	if (!Blueprint)
+	{
+		return TEXT("[erro]: esse grafo nao pertence a um Blueprint.");
+	}
+
+	// Ler antes de apagar. E' isto que separa este gesto de um modo forcado: o
+	// grafo volta na resposta, e o que a leitura nao soube dizer volta como
+	// aviso -- entao quem apagou sabe o que perdeu, em vez de descobrir depois.
+	const FNodeScribeReader::FResult Before = FNodeScribeReader::ReadGraph(Graph, Blueprint);
+
+	const FScopedTransaction Transaction(LOCTEXT("ClearGraphTransaction", "NodeScribe: esvaziar grafo"));
+	Blueprint->Modify();
+	Graph->Modify();
+
+	const int32 Removed = RemoveDeletableNodes(Graph, Blueprint);
+
+	if (Removed == 0)
+	{
+		return TEXT("O grafo ja' estava vazio. Nada foi alterado.");
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TArray<FString> Lines;
+	Lines.Add(FString::Printf(TEXT("%d node(s) apagados. O que estava la':"), Removed));
+	Lines.Add(Before.Text.IsEmpty() ? TEXT("# (nada que o texto soubesse dizer)") : Before.Text);
+
+	const FString Report = FormatDiagnostics(Before.Diagnostics);
+	if (!Report.IsEmpty())
+	{
+		Lines.Add(Report);
+	}
+
+	return FString::Join(Lines, TEXT("\n"));
 }
 
 FString UNodeScribeLibrary::ReadGraph(UEdGraph* Graph)
