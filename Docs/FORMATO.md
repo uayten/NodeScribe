@@ -331,6 +331,126 @@ Spawn Sound 2D (Sound = /Game/BossRush/Audio/SFX_Hit.SFX_Hit)
 Um nome solto que não seja caminho **não** é aceito — o plugin avisa e deixa o
 pino vazio em vez de adivinhar qual asset era.
 
+## AnimGraph
+
+Num grafo de animação as mesmas regras valem, com uma diferença: o fluxo não é
+execução, é **pose** — e ele não continua, ele *alimenta*. A cadeia termina no
+**Output Pose**, que já existe no grafo e nunca se cria.
+
+```
+Idle_Parado
+```
+
+Uma linha só. `Idle_Parado` é o nome de uma AnimSequence do projeto, e ela vira
+o Sequence Player já com o asset preenchido. A ligação no Output Pose é do
+plugin — como toda ligação que o formato não escreve.
+
+**Nome solto de asset é aceito aqui, e só aqui.** Fora do AnimGraph o plugin o
+recusa, porque não há node óbvio para embrulhar o asset. Aqui há um só, e é o
+mesmo que arrastar o asset para o grafo produz: AnimSequence vira Sequence
+Player, BlendSpace vira BlendSpace Player, e assim por diante. Dois assets com
+o mesmo nome curto não viram escolha — sai a lista dos caminhos.
+
+Node de anim entra pelo nome que aparece no menu do grafo:
+
+```
+BS_Locomotion (Speed = $Velocidade)
+Apply Additive
+```
+
+Duas linhas, duas poses: o BlendSpace alimenta o Apply Additive, que alimenta o
+Output Pose. Consecutivas, elas se ligam na ordem em que aparecem, igual ao
+EventGraph.
+
+### Indentação, aqui, abre uma entrada
+
+É o inverso do EventGraph. Lá o rótulo indentado abre uma **saída** — o que
+acontece depois. Aqui abre uma **entrada** de pose — o que alimenta o node:
+
+```
+Blend Poses by bool (Active Value = $bParado)
+  True Pose:
+    Idle_Parado
+  False Pose:
+    BS_Locomotion (Speed = $Velocidade)
+```
+
+O rótulo é o nome do pino. Um bloco pode ter várias linhas: elas se encadeiam
+entre si, e o resultado do bloco — a última linha — é o que entra no pino.
+
+```
+  False Pose:
+    BS_Locomotion (Speed = $Velocidade)
+    Apply Additive
+```
+
+Aqui o `Apply Additive` é quem alimenta o `False Pose`.
+
+### Output Pose
+
+Não precisa escrever: o fim da cadeia liga nele sozinho. Escrever funciona e
+serve quando você quer deixar explícito onde a cadeia termina:
+
+```
+Idle_Parado
+Output Pose
+```
+
+Se o grafo não tiver Output Pose, o plugin avisa e **não cria outro** — ele
+nasce junto com o AnimGraph, e se sumiu é o grafo que está errado.
+
+Entrada de pose vazia sai como aviso. Ela não quebra nada: compila, roda, e o
+personagem fica na pose de referência, de braços abertos. É o buraco silencioso
+deste tipo de grafo.
+
+### Máquina de estados
+
+```
+Locomocao = State Machine
+  estado Parado:
+    Idle_Parado
+  estado Correndo:
+    BS_Locomotion (Speed = $Velocidade)
+  Parado -> Correndo:
+    Greater (A = $Velocidade, B = 10.0)
+  Correndo -> Parado:
+    Less Equal (A = $Velocidade, B = 10.0)
+```
+
+O `nome =` batiza a máquina — o nome de uma máquina de estados é o do sub-grafo
+dela, e sem isso toda máquina nasceria "New State Machine".
+
+`estado Nome:` abre um estado, e o bloco é o AnimGraph de dentro dele, com as
+mesmas regras de tudo acima. O prefixo `estado` (ou `state`) é obrigatório: sem
+ele, o rótulo seria indistinguível de uma entrada de pose.
+
+`Origem -> Destino:` abre uma transição, e o bloco é a regra dela — um grafo de
+dado que termina num bool. A última linha do bloco é quem entra no
+`Can Enter Transition`; ligar isso é do plugin.
+
+**O primeiro estado declarado é onde a máquina começa.** É a única leitura
+possível sem inventar sintaxe: no grafo o Entry aponta para um estado só.
+
+Os estados são criados **antes** de qualquer transição, então a ordem no texto
+não importa — dá para escrever as transições primeiro. Em compensação, uma
+transição que fale de um estado que não existe é erro, com a lista dos que
+existem, em vez de um estado vazio criado por engano.
+
+### O caminho de volta
+
+**Copiar grafo inteiro** num AnimGraph escreve neste mesmo formato. Duas coisas
+não voltam iguais, e as duas saem avisadas:
+
+| Situação | O que acontece |
+|---|---|
+| A mesma pose alimentando dois lugares | âncora nas duas pontas: o formato é árvore, e a segunda ligação se perde ao colar |
+| Node de anim que tem asset mas não volta por ele (um Sequence *Evaluator*) | sai o título do node + aviso: o asset não vai no texto |
+
+O Output Pose e o resultado de uma transição não viram linha na leitura — eles
+já existem no grafo de destino, e a ligação neles é do plugin.
+
+---
+
 ## Comentários
 
 `#` ou `//` até o fim da linha. Para criar uma caixa de comentário no grafo:
