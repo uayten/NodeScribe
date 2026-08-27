@@ -32,8 +32,16 @@ bool IsStateMachineGraph(const UEdGraph* Graph);
 /** true para pino de pose, local ou component space. */
 bool IsPosePin(const UEdGraphPin* Pin);
 
-/** O pino de pose de entrada do node, se houver. */
+/** O pino de pose de entrada do node, se houver. O primeiro, quando ha' varios. */
 UEdGraphPin* FindPoseInput(UEdGraphNode* Node);
+
+/**
+ * Todos os pinos de pose de entrada do node.
+ *
+ * Um blend tem varios, e e' por eles que a arvore se ramifica: no AnimGraph a
+ * indentacao abre uma *entrada*, nao uma saida como no EventGraph.
+ */
+TArray<UEdGraphPin*> GetPoseInputs(UEdGraphNode* Node);
 
 /** Os pinos de pose de saida do node. */
 TArray<UEdGraphPin*> GetPoseOutputs(UEdGraphNode* Node);
@@ -62,11 +70,24 @@ struct FLookup
  */
 FLookup FindNodeClass(const FString& Query);
 
+/** Resultado de uma busca por asset de animacao. */
+struct FAssetLookup
+{
+	UAnimationAsset* Asset = nullptr;
+	TArray<FString> Candidates;
+
+	bool IsConfident() const { return Asset != nullptr; }
+	bool IsAmbiguous() const { return Asset == nullptr && Candidates.Num() > 0; }
+};
+
 /**
  * Um asset de animacao pelo nome curto ou caminho completo.
- * Devolve nulo em vez de chutar: o formato ja' recusa nome solto de asset.
+ *
+ * Dois assets com o mesmo nome curto nao viram escolha: sai a lista dos
+ * caminhos, e quem decide e' o usuario. Carregar o errado e' um bug que so'
+ * aparece rodando, com a animacao certa em cima do personagem errado.
  */
-UAnimationAsset* FindAnimationAsset(const FString& Query);
+FAssetLookup FindAnimationAsset(const FString& Query);
 
 /**
  * A classe de node que toca um dado asset -- Sequence Player para AnimSequence,

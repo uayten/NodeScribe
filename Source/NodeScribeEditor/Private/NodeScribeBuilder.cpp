@@ -1,5 +1,6 @@
 #include "NodeScribeBuilder.h"
 
+#include "NodeScribeAnimGraph.h"
 #include "NodeScribeCatalog.h"
 #include "NodeScribePropertyText.h"
 
@@ -7,6 +8,14 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
+#include "AnimGraphNode_AssetPlayerBase.h"
+#include "AnimGraphNode_Base.h"
+#include "AnimGraphNode_StateMachineBase.h"
+#include "AnimGraphNode_TransitionResult.h"
+#include "AnimStateEntryNode.h"
+#include "AnimStateNode.h"
+#include "AnimStateTransitionNode.h"
+#include "AnimationStateMachineGraph.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
@@ -740,6 +749,15 @@ struct FPinRef
 	}
 };
 
+namespace
+{
+	const UEdGraphSchema_K2* ResolveK2Schema(const UEdGraph* Graph)
+	{
+		const UEdGraphSchema_K2* Found = Graph ? Cast<UEdGraphSchema_K2>(Graph->GetSchema()) : nullptr;
+		return Found ? Found : GetDefault<UEdGraphSchema_K2>();
+	}
+}
+
 /** Estado de uma transcricao. Vive apenas durante Build(). */
 class FNodeScribeBuildContext
 {
@@ -748,7 +766,12 @@ public:
 		: Graph(InGraph)
 		, Blueprint(InBlueprint)
 		, Origin(InOrigin)
-		, Schema(GetDefault<UEdGraphSchema_K2>())
+		// O schema do proprio grafo, e nao o K2 generico: e' o
+		// `UAnimationGraphSchema` que sabe ligar pose e que insere sozinho a
+		// conversao entre espaco local e de componente. Para EventGraph e
+		// funcao o schema do grafo ja' e' o K2, entao nada muda la'.
+		, Schema(ResolveK2Schema(InGraph))
+		, bAnimGraph(NodeScribeAnimGraph::IsAnimationGraph(InGraph))
 	{
 	}
 
@@ -762,8 +785,19 @@ private:
 	{
 		int32 Indent = 0;
 
-		/** De onde sai a proxima ligacao de execucao. Invalido = cadeia interrompida. */
+		/** De onde sai a proxima ligacao de fluxo. Invalido = cadeia interrompida. */
 		FPinRef PendingExec;
+
+		/**
+		 * O pino de entrada de pose que este bloco alimenta, no AnimGraph.
+		 *
+		 * A indentacao la' abre uma *entrada* -- `True Pose:` de um blend --, e
+		 * quem enche essa entrada e' o resultado do bloco, ou seja o ultimo
+		 * node dele. Em vez de guardar a ligacao para o fim, cada node liga por
+		 * cima do anterior: o pino so' aceita um fio, entao o que sobra no fim
+		 * e' exatamente o ultimo. Invalido no EventGraph e no nivel raiz.
+		 */
+		FPinRef FlowSink;
 
 		/** Ultimo node criado neste nivel, dono dos rotulos que vierem a seguir. */
 		UEdGraphNode* LastNode = nullptr;
@@ -787,10 +821,14 @@ private:
 	 * reaparecia depois de compilar e salvar.
 	 */
 	template <typename TNode>
-	TNode* AllocateNode()
+	TNode* AllocateNode(UEdGraph* Target = nullptr)
 	{
-		TNode* Node = NewObject<TNode>(Graph, NAME_None, RF_Transactional);
-		Graph->AddNode(Node, false, false);
+		// O destino e' quase sempre o grafo da colagem; o parametro existe para
+		// a maquina de estados, cujos estados nascem no sub-grafo dela.
+		UEdGraph* Destination = Target ? Target : Graph;
+
+		TNode* Node = NewObject<TNode>(Destination, NAME_None, RF_Transactional);
+		Destination->AddNode(Node, false, false);
 		Node->CreateNewGuid();
 		return Node;
 	}
@@ -858,6 +896,47 @@ private:
 	static TArray<UEdGraphPin*> GetExecOutputs(UEdGraphNode* Node);
 	static UEdGraphPin* FindPrimaryOutput(UEdGraphNode* Node);
 
+	/**
+	 * Fluxo: execucao no EventGraph, pose no AnimGraph.
+	 *
+	 * Sao a mesma forma -- uma saida do node anterior entra no node seguinte --
+	 * e por isso o percurso e' um so'. O que muda e' qual pino carrega o fluxo,
+	 * e isso o grafo decide, nao a linha.
+	 */
+	bool IsFlowPin(const UEdGraphPin* Pin) const;
+	UEdGraphPin* FindFlowInput(UEdGraphNode* Node) const;
+	TArray<UEdGraphPin*> GetFlowOutputs(UEdGraphNode* Node) const;
+
+	/** Nodes de anim criados nesta colagem, para conferir entrada de pose vazia no fim. */
+	TArray<TWeakObjectPtr<UEdGraphNode>> AnimNodes;
+
+	/**
+	 * Nodes que ja' estavam no grafo e a colagem apenas reaproveitou.
+	 *
+	 * O Output Pose e' o caso: ele nasce com o AnimGraph e escrever a linha dele
+	 * acha o que existe. Nao entra na contagem de criados nem e' reposicionado --
+	 * mover o node que o usuario ja' arrumou seria estranho.
+	 */
+	TSet<UEdGraphNode*> AdoptedNodes;
+
+	UEdGraphNode* TryCreateAnimNode(const FNodeScribeStatement& Statement, bool& bOutHandled);
+
+	/**
+	 * O bloco indentado debaixo de uma maquina de estados.
+	 *
+	 * Devolve o indice do primeiro statement que *nao* e' do bloco. Consome o
+	 * bloco inteiro de uma vez, e nao linha a linha como o resto do percurso,
+	 * porque estado e transicao nao vivem neste grafo: cada um tem o seu, e
+	 * cada um desses e' construido por um contexto proprio.
+	 */
+	int32 BuildStateMachine(UAnimGraphNode_StateMachineBase* Machine, const TArray<FNodeScribeStatement>& Statements, int32 First);
+
+	/** Constroi um sub-grafo com um contexto novo e traz de volta os diagnosticos. */
+	void BuildSubGraph(UEdGraph* SubGraph, const TArray<FNodeScribeStatement>& Statements, int32 First, int32 End);
+
+	/** Nodes criados dentro de sub-grafos. Entram no resultado so' no fim, ja' fora do layout. */
+	TArray<UEdGraphNode*> NestedNodes;
+
 	void Connect(UEdGraphPin* From, UEdGraphPin* To, int32 Line);
 
 	// --- Diagnosticos -----------------------------------------------------
@@ -881,6 +960,9 @@ private:
 	UBlueprint* Blueprint = nullptr;
 	FVector2D Origin = FVector2D::ZeroVector;
 	const UEdGraphSchema_K2* Schema = nullptr;
+
+	/** Grafo de animacao: AnimGraph, interior de estado ou regra de transicao. */
+	bool bAnimGraph = false;
 
 	TArray<FFrame> Frames;
 
@@ -961,14 +1043,39 @@ private:
 	 * o que jogava esse Get para longe -- ele era ancorado num (0,0).
 	 */
 	void LayoutDataNodes();
+
+	/**
+	 * Posiciona a arvore de pose do AnimGraph.
+	 *
+	 * O layout em colunas do EventGraph nao serve aqui: la' a cadeia e' uma
+	 * fila, e aqui e' uma arvore que converge no Output Pose. A largura de um
+	 * galho so' se sabe depois que ele inteiro existe, entao isto roda no fim,
+	 * a partir da raiz, andando para tras pelos pinos de entrada.
+	 */
+	void LayoutAnimNodes();
+
+	/** Coloca `Node` e o que o alimenta. Devolve o Y do node. */
+	int32 PlaceAnimNode(UEdGraphNode* Node, int32 Depth, int32 RootX, int32 RootY, int32& NextRow, TSet<UEdGraphNode*>& Visited);
+
+	/**
+	 * Liga o fim da cadeia no Output Pose, quando o texto nao o escreveu.
+	 *
+	 * Um AnimGraph que so' diz `Idle` quis dizer "Idle e' a pose". Escrever
+	 * `Output Pose` numa segunda linha e' ruido: ligar a saida no fim da cadeia
+	 * e' do plugin, como toda ligacao que o formato nao escreve.
+	 */
+	void ConnectOutputPose();
+
+	/** Reclama de entrada de pose vazia: pose vazia nao quebra nada, so' fica parada. */
+	void ReportEmptyPoseInputs();
 };
 
 bool FNodeScribeBuildContext::IsPureDataNode(UEdGraphNode* Node) const
 {
 	return Node
 		&& !Node->IsA<UEdGraphNode_Comment>()
-		&& !FindExecInput(Node)
-		&& GetExecOutputs(Node).Num() == 0;
+		&& !FindFlowInput(Node)
+		&& GetFlowOutputs(Node).Num() == 0;
 }
 
 UEdGraphNode* FNodeScribeBuildContext::FindConsumingExecNode(UEdGraphNode* Node, int32& OutDepth) const
@@ -984,7 +1091,7 @@ UEdGraphNode* FNodeScribeBuildContext::FindConsumingExecNode(UEdGraphNode* Node,
 
 		for (UEdGraphPin* Pin : Current->Pins)
 		{
-			if (Pin->Direction == EGPD_Output && !IsExecPin(Pin) && Pin->LinkedTo.Num() > 0)
+			if (Pin->Direction == EGPD_Output && !IsFlowPin(Pin) && Pin->LinkedTo.Num() > 0)
 			{
 				Next = Pin->LinkedTo[0]->GetOwningNodeUnchecked();
 				break;
@@ -1020,7 +1127,7 @@ int32 FNodeScribeBuildContext::DataChainRemaining(UEdGraphNode* Node) const
 
 		for (UEdGraphPin* Pin : Current->Pins)
 		{
-			if (Pin->Direction == EGPD_Output && !IsExecPin(Pin) && Pin->LinkedTo.Num() > 0)
+			if (Pin->Direction == EGPD_Output && !IsFlowPin(Pin) && Pin->LinkedTo.Num() > 0)
 			{
 				Next = Pin->LinkedTo[0]->GetOwningNodeUnchecked();
 				break;
@@ -1117,6 +1224,171 @@ void FNodeScribeBuildContext::LayoutDataNodes()
 			Orphans[Index]->NodePosY = Frame.BaseY + (Index * DataRowHeight);
 		}
 	}
+}
+
+int32 FNodeScribeBuildContext::PlaceAnimNode(
+	UEdGraphNode* Node, int32 Depth, int32 RootX, int32 RootY, int32& NextRow, TSet<UEdGraphNode*>& Visited)
+{
+	if (!Node || Visited.Contains(Node))
+	{
+		return RootY;
+	}
+	Visited.Add(Node);
+
+	// Um galho por pino de entrada, na ordem em que os pinos aparecem no node --
+	// que e' a ordem que o usuario ve' na tela.
+	TArray<int32> ChildRows;
+	for (UEdGraphPin* Pin : NodeScribeAnimGraph::GetPoseInputs(Node))
+	{
+		for (UEdGraphPin* Linked : Pin->LinkedTo)
+		{
+			UEdGraphNode* Child = Linked ? Linked->GetOwningNodeUnchecked() : nullptr;
+			if (Child && Result.CreatedNodes.Contains(Child))
+			{
+				ChildRows.Add(PlaceAnimNode(Child, Depth + 1, RootX, RootY, NextRow, Visited));
+			}
+		}
+	}
+
+	int32 Y = 0;
+	if (ChildRows.Num() == 0)
+	{
+		// Ponta da arvore: ganha a proxima linha livre. E' daqui que a altura
+		// do grafo inteiro sai.
+		Y = RootY + (NextRow * BranchRowHeight);
+		++NextRow;
+	}
+	else
+	{
+		// No meio, fica na altura media do que o alimenta -- o fio entra reto
+		// quando ha' um so' galho, e centralizado quando ha' varios.
+		int32 Sum = 0;
+		for (int32 Row : ChildRows)
+		{
+			Sum += Row;
+		}
+		Y = Sum / ChildRows.Num();
+	}
+
+	// O node adotado (o Output Pose) fica onde esta': ele e' a origem.
+	if (!AdoptedNodes.Contains(Node))
+	{
+		Node->NodePosX = RootX - (Depth * ColumnWidth);
+		Node->NodePosY = Y;
+	}
+
+	return Y;
+}
+
+void FNodeScribeBuildContext::LayoutAnimNodes()
+{
+	if (!bAnimGraph)
+	{
+		return;
+	}
+
+	UEdGraphNode* Root = NodeScribeAnimGraph::FindOutputPose(Graph);
+	if (!Root)
+	{
+		return;
+	}
+
+	int32 NextRow = 0;
+	TSet<UEdGraphNode*> Visited;
+	PlaceAnimNode(Root, 0, Root->NodePosX, Root->NodePosY, NextRow, Visited);
+
+	// O que nao chegou ao Output Pose nao esta' na arvore -- galho que o texto
+	// criou e nao ligou em nada. Fica numa faixa propria abaixo, visivel, em
+	// vez de empilhado por cima da arvore.
+	int32 LooseRow = NextRow + 1;
+	for (const TWeakObjectPtr<UEdGraphNode>& Weak : AnimNodes)
+	{
+		UEdGraphNode* Node = Weak.Get();
+		if (!Node || Visited.Contains(Node))
+		{
+			continue;
+		}
+
+		Node->NodePosX = Root->NodePosX - ColumnWidth;
+		Node->NodePosY = Root->NodePosY + (LooseRow * BranchRowHeight);
+		++LooseRow;
+	}
+}
+
+void FNodeScribeBuildContext::ConnectOutputPose()
+{
+	if (!bAnimGraph || Frames.Num() == 0)
+	{
+		return;
+	}
+
+	UEdGraphNode* Root = NodeScribeAnimGraph::FindOutputPose(Graph);
+	UEdGraphPin* RootPose = Root ? NodeScribeAnimGraph::FindPoseInput(Root) : nullptr;
+	if (!RootPose)
+	{
+		return;
+	}
+
+	if (RootPose->LinkedTo.Num() == 0)
+	{
+		// Frames[0] e' o nivel raiz: o que sobrou ali e' a saida do ultimo node
+		// que o texto pos no fio principal.
+		if (UEdGraphPin* End = Frames[0].PendingExec.Resolve())
+		{
+			if (NodeScribeAnimGraph::IsPosePin(End))
+			{
+				Connect(End, RootPose, 0);
+			}
+		}
+	}
+
+	if (RootPose->LinkedTo.Num() == 0 && AnimNodes.Num() > 0)
+	{
+		// O grafo tem nodes de anim e mesmo assim nada chega na saida. Sem isto
+		// o aviso nao sairia: o Output Pose nao e' node criado por esta colagem,
+		// e ReportEmptyPoseInputs so' olha os que sao.
+		AddWarning(0, TEXT("Nada chegou no Output Pose. O personagem fica na pose de referencia."));
+	}
+}
+
+void FNodeScribeBuildContext::ReportEmptyPoseInputs()
+{
+	if (!bAnimGraph)
+	{
+		return;
+	}
+
+	TArray<FString> Empty;
+
+	for (const TWeakObjectPtr<UEdGraphNode>& Weak : AnimNodes)
+	{
+		UEdGraphNode* Node = Weak.Get();
+		if (!Node)
+		{
+			continue;
+		}
+
+		for (UEdGraphPin* Pin : NodeScribeAnimGraph::GetPoseInputs(Node))
+		{
+			if (Pin->LinkedTo.Num() == 0)
+			{
+				Empty.Add(FString::Printf(TEXT("%s.%s"),
+					*Node->GetNodeTitle(ENodeTitleType::ListView).ToString(),
+					*Pin->PinName.ToString()));
+			}
+		}
+	}
+
+	if (Empty.Num() == 0)
+	{
+		return;
+	}
+
+	// Pose vazia e' o buraco silencioso deste tipo de grafo: compila, roda, e o
+	// personagem simplesmente fica na pose de referencia -- de bracos abertos.
+	AddWarning(0, FString::Printf(
+		TEXT("Entrada de pose sem nada ligado: %s. O que sair dali e' a pose de referencia."),
+		*FString::Join(Empty, TEXT(", "))));
 }
 
 // ---------------------------------------------------------------------------
@@ -1274,6 +1546,30 @@ TArray<UEdGraphPin*> FNodeScribeBuildContext::GetExecOutputs(UEdGraphNode* Node)
 		{
 			Outputs.Add(Pin);
 		}
+	}
+	return Outputs;
+}
+
+bool FNodeScribeBuildContext::IsFlowPin(const UEdGraphPin* Pin) const
+{
+	return IsExecPin(Pin) || (bAnimGraph && NodeScribeAnimGraph::IsPosePin(Pin));
+}
+
+UEdGraphPin* FNodeScribeBuildContext::FindFlowInput(UEdGraphNode* Node) const
+{
+	if (UEdGraphPin* Exec = FindExecInput(Node))
+	{
+		return Exec;
+	}
+	return bAnimGraph ? NodeScribeAnimGraph::FindPoseInput(Node) : nullptr;
+}
+
+TArray<UEdGraphPin*> FNodeScribeBuildContext::GetFlowOutputs(UEdGraphNode* Node) const
+{
+	TArray<UEdGraphPin*> Outputs = GetExecOutputs(Node);
+	if (Outputs.Num() == 0 && bAnimGraph)
+	{
+		Outputs = NodeScribeAnimGraph::GetPoseOutputs(Node);
 	}
 	return Outputs;
 }
@@ -1948,9 +2244,172 @@ UEdGraphNode* FNodeScribeBuildContext::CreateDuplicateEventComment(
 		*EventLabel));
 }
 
+// ---------------------------------------------------------------------------
+// AnimGraph
+// ---------------------------------------------------------------------------
+
+/**
+ * Uma linha dentro de um grafo de animacao.
+ *
+ * Tres formas, nesta ordem: o Output Pose que ja' existe, um node de anim pelo
+ * nome do menu, e um asset de animacao -- que aqui vira node em vez de ser
+ * recusado. Fora do AnimGraph nome solto de asset continua sendo recusado, e
+ * por bom motivo: la' nao ha' node obvio para embrulhar o asset. Aqui ha' um
+ * so', e e' o mesmo que arrastar o asset para o grafo produz.
+ *
+ * A classe de node vem antes do asset porque o vocabulario e' fechado e o de
+ * assets nao: uma animacao chamada `Blend` nao pode roubar o node `Blend`.
+ */
+UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimNode(const FNodeScribeStatement& Statement, bool& bOutHandled)
+{
+	bOutHandled = false;
+
+	const FString Expression = Statement.NodeExpression.TrimStartAndEnd();
+	const FString Normalized = FNodeScribeCatalog::Normalize(Expression);
+
+	if (Expression.IsEmpty())
+	{
+		return nullptr;
+	}
+
+	// --- Output Pose ------------------------------------------------------
+	if (Normalized == TEXT("outputpose")
+		|| Normalized == TEXT("posedesaida")
+		|| Normalized == TEXT("finalanimationpose")
+		|| Normalized == TEXT("result")
+		|| Normalized == TEXT("resultado"))
+	{
+		bOutHandled = true;
+
+		if (UEdGraphNode* Existing = NodeScribeAnimGraph::FindOutputPose(Graph))
+		{
+			AdoptedNodes.Add(Existing);
+			return Existing;
+		}
+
+		AddError(Statement.LineNumber,
+			TEXT("Este grafo nao tem Output Pose. Ele nasce com o AnimGraph -- ")
+			TEXT("se sumiu, e' o grafo que esta' errado, e criar outro nao conserta."));
+
+		return CreateErrorComment(Statement,
+			TEXT("Nao achei o Output Pose deste grafo.\n\n")
+			TEXT("Ele nao se cria: nasce junto com o AnimGraph."));
+	}
+
+	// --- Node de anim pelo nome -------------------------------------------
+	const NodeScribeAnimGraph::FLookup Lookup = NodeScribeAnimGraph::FindNodeClass(Expression);
+
+	if (Lookup.IsAmbiguous())
+	{
+		bOutHandled = true;
+
+		AddError(Statement.LineNumber, FString::Printf(
+			TEXT("`%s` e' o nome de mais de um node de anim: %s."),
+			*Expression, *FString::Join(Lookup.Candidates, TEXT(", "))));
+
+		return CreateErrorComment(Statement, FString::Printf(
+			TEXT("`%s` e' ambiguo.\n\nCandidatos: %s"),
+			*Expression, *FString::Join(Lookup.Candidates, TEXT("\n"))));
+	}
+
+	if (Lookup.IsConfident())
+	{
+		bOutHandled = true;
+
+		UAnimGraphNode_Base* Node = NewObject<UAnimGraphNode_Base>(Graph, Lookup.NodeClass, NAME_None, RF_Transactional);
+		Graph->AddNode(Node, false, false);
+		Node->CreateNewGuid();
+		FinalizeNode(Node);
+
+		// `Locomocao = Maquina de Estados` batiza a maquina. O nome de uma
+		// maquina de estados e' o do sub-grafo dela, e sem isto toda maquina
+		// nasceria "New State Machine" -- inclusive a segunda, que viraria
+		// "New State Machine 1".
+		if (UAnimGraphNode_StateMachineBase* Machine = Cast<UAnimGraphNode_StateMachineBase>(Node))
+		{
+			if (!Statement.OutputName.IsEmpty() && Machine->EditorStateMachineGraph)
+			{
+				FBlueprintEditorUtils::RenameGraph(Machine->EditorStateMachineGraph, Statement.OutputName);
+			}
+		}
+
+		AnimNodes.Add(Node);
+		return Node;
+	}
+
+	// --- Asset de animacao ------------------------------------------------
+	const NodeScribeAnimGraph::FAssetLookup Asset = NodeScribeAnimGraph::FindAnimationAsset(Expression);
+
+	if (Asset.IsAmbiguous())
+	{
+		bOutHandled = true;
+
+		AddError(Statement.LineNumber, FString::Printf(
+			TEXT("Ha' mais de uma animacao chamada `%s`. Escreva o caminho completo: %s"),
+			*Expression, *FString::Join(Asset.Candidates, TEXT(", "))));
+
+		return CreateErrorComment(Statement, FString::Printf(
+			TEXT("`%s` e' o nome de mais de uma animacao.\n\nEscreva o caminho:\n%s"),
+			*Expression, *FString::Join(Asset.Candidates, TEXT("\n"))));
+	}
+
+	if (!Asset.IsConfident())
+	{
+		return nullptr;
+	}
+
+	UClass* NodeClass = NodeScribeAnimGraph::NodeClassForAsset(Asset.Asset);
+	if (!NodeClass)
+	{
+		bOutHandled = true;
+
+		AddError(Statement.LineNumber, FString::Printf(
+			TEXT("`%s` e' um asset de animacao, mas nao ha' node de AnimGraph que toque um %s."),
+			*Expression, *Asset.Asset->GetClass()->GetName()));
+
+		return CreateErrorComment(Statement, FString::Printf(
+			TEXT("Nenhum node toca `%s`."), *Expression));
+	}
+
+	bOutHandled = true;
+
+	UAnimGraphNode_AssetPlayerBase* Player =
+		NewObject<UAnimGraphNode_AssetPlayerBase>(Graph, NodeClass, NAME_None, RF_Transactional);
+	Graph->AddNode(Player, false, false);
+	Player->CreateNewGuid();
+	Player->SetAnimationAsset(Asset.Asset);
+
+	// Depois do asset: os pinos de um BlendSpace dependem dos eixos dele, e
+	// alocar antes daria um node com os pinos do espaco errado.
+	FinalizeNode(Player);
+
+	AnimNodes.Add(Player);
+
+	AddInfo(Statement.LineNumber, FString::Printf(
+		TEXT("`%s` virou um %s."), *Expression,
+		*NodeClass->GetName().Replace(TEXT("AnimGraphNode_"), TEXT(""))));
+
+	return Player;
+}
+
 UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeStatement& Statement, bool& bOutHandled)
 {
 	bOutHandled = true;
+
+	// Num grafo de animacao o vocabulario de anim vem primeiro: `Blend` la' e'
+	// um node de pose, nao a funcao de mesmo nome da biblioteca de matematica.
+	if (bAnimGraph)
+	{
+		bool bAnimHandled = false;
+		if (UEdGraphNode* AnimNode = TryCreateAnimNode(Statement, bAnimHandled))
+		{
+			return AnimNode;
+		}
+		if (bAnimHandled)
+		{
+			return nullptr;
+		}
+	}
 
 	const FString Expression = Statement.NodeExpression.TrimStartAndEnd();
 	const FString Normalized = FNodeScribeCatalog::Normalize(Expression);
@@ -2757,6 +3216,284 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 		TEXT("Nenhum node com esse nome foi encontrado.") + DelegateHint);
 }
 
+namespace
+{
+	/**
+	 * `estado Parado` -> "Parado". Sem o prefixo, nao e' declaracao de estado.
+	 *
+	 * O prefixo e' obrigatorio de proposito: dentro de uma maquina de estados
+	 * um rotulo solto seria indistinguivel de uma entrada de pose, e escolher
+	 * pelo formato do nome seria adivinhar.
+	 */
+	bool ParseStateLabel(const FString& Label, FString& OutName)
+	{
+		for (const TCHAR* Prefix : { TEXT("estado "), TEXT("state ") })
+		{
+			if (Label.StartsWith(Prefix, ESearchCase::IgnoreCase))
+			{
+				OutName = Label.Mid(FCString::Strlen(Prefix)).TrimStartAndEnd();
+				return !OutName.IsEmpty();
+			}
+		}
+		return false;
+	}
+
+	/** `Parado -> Correndo`, com ou sem `transicao` na frente. */
+	bool ParseTransitionLabel(const FString& Label, FString& OutFrom, FString& OutTo)
+	{
+		FString Rest = Label;
+		for (const TCHAR* Prefix : { TEXT("transicao "), TEXT("transi\u00e7\u00e3o "), TEXT("transition ") })
+		{
+			if (Rest.StartsWith(Prefix, ESearchCase::IgnoreCase))
+			{
+				Rest = Rest.Mid(FCString::Strlen(Prefix));
+				break;
+			}
+		}
+
+		if (!Rest.Split(TEXT("->"), &OutFrom, &OutTo))
+		{
+			return false;
+		}
+
+		OutFrom.TrimStartAndEndInline();
+		OutTo.TrimStartAndEndInline();
+		return !OutFrom.IsEmpty() && !OutTo.IsEmpty();
+	}
+
+	/** Onde os estados ficam no sub-grafo: uma fila, com folga para os fios. */
+	constexpr int32 StateColumnWidth = 320;
+}
+
+void FNodeScribeBuildContext::BuildSubGraph(UEdGraph* SubGraph, const TArray<FNodeScribeStatement>& Statements, int32 First, int32 End)
+{
+	if (!SubGraph || First >= End)
+	{
+		return;
+	}
+
+	TArray<FNodeScribeStatement> Body;
+	Body.Reserve(End - First);
+	for (int32 Index = First; Index < End; ++Index)
+	{
+		Body.Add(Statements[Index]);
+	}
+
+	// Contexto proprio: o sub-grafo tem outro schema, outro Output Pose e outra
+	// arvore de layout. Compartilhar o nosso faria os dois grafos disputarem o
+	// mesmo estado -- e as `$referencias` de um vazariam para o outro, onde os
+	// pinos nem existem.
+	FNodeScribeBuildContext Nested(SubGraph, Blueprint, FVector2D::ZeroVector);
+	Nested.Run(Body);
+
+	Result.Diagnostics.Append(Nested.Result.Diagnostics);
+	Result.ErrorCount += Nested.Result.ErrorCount;
+	Result.WarningCount += Nested.Result.WarningCount;
+	NestedNodes.Append(Nested.Result.CreatedNodes);
+}
+
+int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase* Machine, const TArray<FNodeScribeStatement>& Statements, int32 First)
+{
+	const int32 BlockIndent = Statements[First].Indent;
+
+	int32 End = First;
+	while (End < Statements.Num() && Statements[End].Indent >= BlockIndent)
+	{
+		++End;
+	}
+
+	UAnimationStateMachineGraph* MachineGraph = Machine->EditorStateMachineGraph;
+	if (!MachineGraph)
+	{
+		AddError(Statements[First].LineNumber,
+			TEXT("A maquina de estados entrou sem sub-grafo. Nao da' para criar estado dentro dela."));
+		return End;
+	}
+
+	// --- 1a passagem: os estados ------------------------------------------
+	//
+	// Todos antes de qualquer transicao. Assim `Parado -> Correndo` pode vir
+	// escrito antes de `estado Correndo`, e um nome errado numa transicao vira
+	// erro em vez de um estado vazio criado por engano.
+	TMap<FString, UAnimStateNode*> States;
+	TArray<FString> DeclaredOrder;
+
+	for (int32 Index = First; Index < End; ++Index)
+	{
+		const FNodeScribeStatement& Statement = Statements[Index];
+		if (!Statement.bIsLabel || Statement.Indent != BlockIndent)
+		{
+			continue;
+		}
+
+		FString Name;
+		if (!ParseStateLabel(Statement.Label, Name))
+		{
+			continue;
+		}
+
+		const FString Key = FNodeScribeCatalog::Normalize(Name);
+		if (States.Contains(Key))
+		{
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("O estado `%s` ja' foi declarado nesta maquina."), *Name));
+			continue;
+		}
+
+		UAnimStateNode* State = AllocateNode<UAnimStateNode>(MachineGraph);
+		FinalizeNode(State);
+
+		if (State->BoundGraph)
+		{
+			FBlueprintEditorUtils::RenameGraph(State->BoundGraph, Name);
+		}
+
+		State->NodePosX = States.Num() * StateColumnWidth;
+		State->NodePosY = 0;
+
+		States.Add(Key, State);
+		DeclaredOrder.Add(Key);
+		NestedNodes.Add(State);
+	}
+
+	if (States.Num() == 0)
+	{
+		AddWarning(Statements[First].LineNumber,
+			TEXT("Esta maquina de estados nao declarou nenhum estado. Use `estado Nome:`."));
+		return End;
+	}
+
+	// O primeiro declarado e' onde a maquina comeca. E' a unica leitura possivel
+	// sem inventar sintaxe: no grafo o Entry aponta para um estado so'.
+	if (MachineGraph->EntryNode)
+	{
+		if (UEdGraphPin* EntryPin = MachineGraph->EntryNode->GetOutputPin())
+		{
+			UAnimStateNode* FirstState = States[DeclaredOrder[0]];
+			if (UEdGraphPin* StatePin = FirstState->GetInputPin())
+			{
+				EntryPin->BreakAllPinLinks();
+				EntryPin->MakeLinkTo(StatePin);
+			}
+		}
+	}
+
+	// --- 2a passagem: o conteudo de cada estado e cada transicao ----------
+	for (int32 Index = First; Index < End; ++Index)
+	{
+		const FNodeScribeStatement& Statement = Statements[Index];
+		if (!Statement.bIsLabel || Statement.Indent != BlockIndent)
+		{
+			continue;
+		}
+
+		int32 BodyEnd = Index + 1;
+		while (BodyEnd < End && Statements[BodyEnd].Indent > BlockIndent)
+		{
+			++BodyEnd;
+		}
+
+		FString Name;
+		if (ParseStateLabel(Statement.Label, Name))
+		{
+			UAnimStateNode* State = States.FindRef(FNodeScribeCatalog::Normalize(Name));
+			if (State && State->BoundGraph)
+			{
+				BuildSubGraph(State->BoundGraph, Statements, Index + 1, BodyEnd);
+			}
+			continue;
+		}
+
+		FString From, To;
+		if (!ParseTransitionLabel(Statement.Label, From, To))
+		{
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("`%s:` nao e' estado nem transicao. Dentro de uma maquina de estados so' ha' ")
+				TEXT("`estado Nome:` e `Origem -> Destino:`."), *Statement.Label));
+			continue;
+		}
+
+		UAnimStateNode* FromState = States.FindRef(FNodeScribeCatalog::Normalize(From));
+		UAnimStateNode* ToState = States.FindRef(FNodeScribeCatalog::Normalize(To));
+
+		if (!FromState || !ToState)
+		{
+			TArray<FString> Known;
+			for (const FString& Key : DeclaredOrder)
+			{
+				Known.Add(States[Key]->GetStateName());
+			}
+
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("A transicao `%s` fala de um estado que nao existe (`%s`). Estados desta maquina: %s"),
+				*Statement.Label, *(FromState ? To : From), *FString::Join(Known, TEXT(", "))));
+			continue;
+		}
+
+		if (FromState == ToState)
+		{
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("A transicao `%s` sai e chega no mesmo estado."), *Statement.Label));
+			continue;
+		}
+
+		UAnimStateTransitionNode* Transition = AllocateNode<UAnimStateTransitionNode>(MachineGraph);
+		FinalizeNode(Transition);
+		Transition->CreateConnections(FromState, ToState);
+
+		// Em cima do fio, que e' onde o editor a desenha.
+		Transition->NodePosX = (FromState->NodePosX + ToState->NodePosX) / 2;
+		Transition->NodePosY = FromState->NodePosY - 120;
+
+		NestedNodes.Add(Transition);
+
+		if (!Transition->BoundGraph)
+		{
+			continue;
+		}
+
+		BuildSubGraph(Transition->BoundGraph, Statements, Index + 1, BodyEnd);
+
+		// A regra e' um grafo de dado que termina num bool. Ligar o resultado e'
+		// trabalho do plugin, como qualquer outra ligacao que o texto nao
+		// escreve -- e sem isso a transicao nunca dispara.
+		UAnimGraphNode_TransitionResult* ResultNode = nullptr;
+		for (UEdGraphNode* Node : Transition->BoundGraph->Nodes)
+		{
+			if (UAnimGraphNode_TransitionResult* Found = Cast<UAnimGraphNode_TransitionResult>(Node))
+			{
+				ResultNode = Found;
+				break;
+			}
+		}
+
+		UEdGraphPin* CanEnter = ResultNode ? ResultNode->FindPin(TEXT("bCanEnterTransition")) : nullptr;
+		if (!CanEnter || CanEnter->LinkedTo.Num() > 0 || BodyEnd == Index + 1)
+		{
+			continue;
+		}
+
+		// O ultimo node do bloco e' o resultado da regra, do mesmo jeito que o
+		// ultimo node de um galho de pose e' o resultado do galho.
+		for (int32 Back = Transition->BoundGraph->Nodes.Num() - 1; Back >= 0; --Back)
+		{
+			UEdGraphNode* Candidate = Transition->BoundGraph->Nodes[Back];
+			if (Candidate == ResultNode)
+			{
+				continue;
+			}
+
+			if (UEdGraphPin* Output = FindPrimaryOutput(Candidate))
+			{
+				Connect(Output, CanEnter, Statement.LineNumber);
+				break;
+			}
+		}
+	}
+
+	return End;
+}
+
 // ---------------------------------------------------------------------------
 // Percurso
 // ---------------------------------------------------------------------------
@@ -2771,8 +3508,12 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 	PreCreateCustomEvents(Statements);
 
-	for (const FNodeScribeStatement& Statement : Statements)
+	// Por indice, e nao por range-for, porque a maquina de estados nao le' o
+	// bloco dela linha a linha: pega o bloco inteiro e devolve onde parou.
+	for (int32 Index = 0; Index < Statements.Num(); ++Index)
 	{
+		const FNodeScribeStatement& Statement = Statements[Index];
+
 		// Declaracao nao cria node nem participa da cadeia: e' so' uma variavel
 		// passando a existir antes das linhas que a usam.
 		if (Statement.bIsVariable)
@@ -2808,7 +3549,24 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 				continue;
 			}
 
-			const TArray<UEdGraphPin*> ExecOutputs = GetExecOutputs(Owner);
+			// Debaixo de uma maquina de estados o rotulo nao nomeia pino nenhum:
+			// nomeia um estado ou uma transicao, e o corpo dele vive noutro
+			// grafo. O bloco sai inteiro do percurso aqui.
+			if (UAnimGraphNode_StateMachineBase* Machine = Cast<UAnimGraphNode_StateMachineBase>(Owner))
+			{
+				Index = BuildStateMachine(Machine, Statements, Index) - 1;
+				continue;
+			}
+
+			// No AnimGraph o rotulo nomeia uma *entrada* de pose: `True Pose:` de
+			// um blend abre o galho que alimenta aquele pino. A arvore de um
+			// AnimGraph e' de quem entra, nao de quem continua.
+			const bool bLabelsAreInputs = bAnimGraph && GetExecOutputs(Owner).Num() == 0;
+
+			const TArray<UEdGraphPin*> ExecOutputs = bLabelsAreInputs
+				? NodeScribeAnimGraph::GetPoseInputs(Owner)
+				: GetExecOutputs(Owner);
+
 			const FString Wanted = ResolveLabelAlias(Statement.Label);
 
 			UEdGraphPin* Chosen = nullptr;
@@ -2837,8 +3595,11 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 				}
 
 				AddError(Statement.LineNumber, FString::Printf(
-					TEXT("`%s:` nao e' uma saida deste node. Saidas: %s"),
-					*Statement.Label, *FString::Join(Available, TEXT(", "))));
+					TEXT("`%s:` nao e' %s deste node. %s: %s"),
+					*Statement.Label,
+					bLabelsAreInputs ? TEXT("uma entrada de pose") : TEXT("uma saida"),
+					bLabelsAreInputs ? TEXT("Entradas") : TEXT("Saidas"),
+					*FString::Join(Available, TEXT(", "))));
 				continue;
 			}
 
@@ -2850,8 +3611,23 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 			FFrame Branch;
 			Branch.Indent = Statement.Indent;
-			Branch.PendingExec = FPinRef(Chosen);
-			Branch.BaseX = Owner->NodePosX + ColumnWidth;
+
+			if (bLabelsAreInputs)
+			{
+				// O bloco comeca sem nada antes dele: o primeiro node do galho e'
+				// uma ponta da arvore, nao a continuacao do blend.
+				Branch.FlowSink = FPinRef(Chosen);
+			}
+			else
+			{
+				Branch.PendingExec = FPinRef(Chosen);
+			}
+
+			// O galho de pose desenha a' esquerda: ali o fluxo anda para o
+			// Output Pose, e o que alimenta um node fica antes dele.
+			Branch.BaseX = bLabelsAreInputs
+				? Owner->NodePosX - ColumnWidth
+				: Owner->NodePosX + ColumnWidth;
 			Branch.BaseY = Parent.BaseY + (Parent.BranchesOpened * BranchRowHeight);
 			++Parent.BranchesOpened;
 
@@ -2872,16 +3648,24 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 		FFrame& Frame = Frames.Top();
 
+		// Node adotado ja' estava no grafo -- o Output Pose e' o caso. Mover e'
+		// mexer no que o usuario arrumou, e contar seria dizer que criamos algo
+		// que sempre esteve la'.
+		const bool bAdopted = AdoptedNodes.Contains(Node);
+
 		// Nodes de dado nao ocupam coluna: eles descem em pilha embaixo de quem
 		// os consome, e quem cuida disso e' LayoutDataNodes(), no fim.
-		if (!IsPureDataNode(Node))
+		if (!bAdopted && !IsPureDataNode(Node))
 		{
 			Node->NodePosX = Frame.BaseX + (Frame.Column * ColumnWidth);
 			Node->NodePosY = Frame.BaseY;
 			++Frame.Column;
 		}
 
-		Result.CreatedNodes.Add(Node);
+		if (!bAdopted)
+		{
+			Result.CreatedNodes.Add(Node);
+		}
 
 		// Um comentario ocupa o lugar de uma linha que nao resolveu; aplicar os
 		// argumentos dela geraria uma segunda leva de erros sobre o mesmo problema.
@@ -2910,8 +3694,8 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 			}
 		}
 
-		UEdGraphPin* ExecIn = FindExecInput(Node);
-		const TArray<UEdGraphPin*> ExecOutputs = GetExecOutputs(Node);
+		UEdGraphPin* ExecIn = FindFlowInput(Node);
+		const TArray<UEdGraphPin*> ExecOutputs = GetFlowOutputs(Node);
 
 		if (ExecIn)
 		{
@@ -2929,6 +3713,21 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		}
 		// Sem entrada mas com saida = evento. Comeca uma cadeia nova em vez de
 		// continuar a anterior, entao nao ha nada a ligar antes dele.
+
+		// O bloco alimenta uma entrada de pose la' em cima. Cada node liga por
+		// cima do anterior; o pino so' aceita um fio, entao sobra o ultimo --
+		// que e' o resultado do bloco.
+		if (ExecOutputs.Num() == 1)
+		{
+			if (UEdGraphPin* Sink = Frame.FlowSink.Resolve())
+			{
+				// Quebrar antes de ligar, em vez de contar que o pino recuse o
+				// segundo fio: se a saida de pose aceitar varios destinos, o node
+				// anterior ficaria alimentando o blend *e* o node seguinte.
+				Sink->BreakAllPinLinks();
+				Connect(ExecOutputs[0], Sink, Statement.LineNumber);
+			}
+		}
 
 		if (ExecOutputs.Num() == 1)
 		{
@@ -2986,7 +3785,15 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		}
 	}
 
+	ConnectOutputPose();
+
+	LayoutAnimNodes();
 	LayoutDataNodes();
+	ReportEmptyPoseInputs();
+
+	// Depois do layout: eles vivem noutro grafo e nada aqui tem o que posicionar
+	// neles. Entram so' para a contagem e para o Ctrl+Z pegar tudo.
+	Result.CreatedNodes.Append(NestedNodes);
 }
 
 // ---------------------------------------------------------------------------

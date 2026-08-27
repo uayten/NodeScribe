@@ -73,6 +73,24 @@ UEdGraphPin* FindPoseInput(UEdGraphNode* Node)
 	return nullptr;
 }
 
+TArray<UEdGraphPin*> GetPoseInputs(UEdGraphNode* Node)
+{
+	TArray<UEdGraphPin*> Inputs;
+	if (!Node)
+	{
+		return Inputs;
+	}
+
+	for (UEdGraphPin* Pin : Node->Pins)
+	{
+		if (Pin && Pin->Direction == EGPD_Input && IsPosePin(Pin))
+		{
+			Inputs.Add(Pin);
+		}
+	}
+	return Inputs;
+}
+
 TArray<UEdGraphPin*> GetPoseOutputs(UEdGraphNode* Node)
 {
 	TArray<UEdGraphPin*> Outputs;
@@ -241,29 +259,20 @@ FLookup FindNodeClass(const FString& Query)
 	return Result;
 }
 
-void Invalidate()
-{
-	GEntries.Reset();
-	GBuilt = false;
-}
-
 // ---------------------------------------------------------------------------
 // Assets
 // ---------------------------------------------------------------------------
 
-UAnimationAsset* FindAnimationAsset(const FString& Query)
+namespace
 {
-	const FString Trimmed = Query.TrimStartAndEnd();
-	if (Trimmed.IsEmpty())
-	{
-		return nullptr;
-	}
 
-	// Caminho completo: carregar direto, sem consultar o registry.
-	if (Trimmed.StartsWith(TEXT("/")))
-	{
-		return LoadObject<UAnimationAsset>(nullptr, *Trimmed);
-	}
+/** Nome curto normalizado -> todos os assets que atendem por ele. */
+TMultiMap<FString, FSoftObjectPath> GAssetsByName;
+bool GAssetsBuilt = false;
+
+void BuildAssetIndex()
+{
+	GAssetsByName.Reset();
 
 	const FAssetRegistryModule& Registry =
 		FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
@@ -275,23 +284,55 @@ UAnimationAsset* FindAnimationAsset(const FString& Query)
 	TArray<FAssetData> Assets;
 	Registry.Get().GetAssets(Filter, Assets);
 
-	UAnimationAsset* Found = nullptr;
+	// Guardamos o caminho, nao o asset: varrer o registry ja' e' caro uma vez,
+	// e carregar toda animacao do projeto para montar um indice seria pior que
+	// o problema. Carrega-se so' a que a linha pedir.
 	for (const FAssetData& Data : Assets)
 	{
-		if (Data.AssetName.ToString().Equals(Trimmed, ESearchCase::IgnoreCase))
-		{
-			if (Found)
-			{
-				// Dois assets com o mesmo nome curto em pastas diferentes.
-				// Sem caminho nao da' para saber qual, e carregar o errado e' um
-				// bug que so' aparece rodando.
-				return nullptr;
-			}
-			Found = Cast<UAnimationAsset>(Data.GetAsset());
-		}
+		GAssetsByName.Add(FNodeScribeCatalog::Normalize(Data.AssetName.ToString()), Data.GetSoftObjectPath());
 	}
 
-	return Found;
+	GAssetsBuilt = true;
+}
+
+} // namespace
+
+FAssetLookup FindAnimationAsset(const FString& Query)
+{
+	FAssetLookup Result;
+
+	const FString Trimmed = Query.TrimStartAndEnd();
+	if (Trimmed.IsEmpty())
+	{
+		return Result;
+	}
+
+	// Caminho completo: carregar direto, sem consultar o registry.
+	if (Trimmed.StartsWith(TEXT("/")))
+	{
+		Result.Asset = LoadObject<UAnimationAsset>(nullptr, *Trimmed);
+		return Result;
+	}
+
+	if (!GAssetsBuilt)
+	{
+		BuildAssetIndex();
+	}
+
+	TArray<FSoftObjectPath> Matches;
+	GAssetsByName.MultiFind(FNodeScribeCatalog::Normalize(Trimmed), Matches);
+
+	if (Matches.Num() == 1)
+	{
+		Result.Asset = Cast<UAnimationAsset>(Matches[0].TryLoad());
+		return Result;
+	}
+
+	for (const FSoftObjectPath& Path : Matches)
+	{
+		Result.Candidates.Add(Path.ToString());
+	}
+	return Result;
 }
 
 UClass* NodeClassForAsset(const UAnimationAsset* Asset)
@@ -303,6 +344,13 @@ UClass* NodeClassForAsset(const UAnimationAsset* Asset)
 
 	// Mesmo mapeamento que arrastar o asset para o grafo usa.
 	return GetNodeClassForAsset(Asset->GetClass());
+}
+
+void Invalidate()
+{
+	GEntries.Reset();
+	GBuilt = false;
+	GAssetsBuilt = false;
 }
 
 } // namespace NodeScribeAnimGraph
