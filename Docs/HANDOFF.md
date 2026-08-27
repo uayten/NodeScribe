@@ -9,8 +9,9 @@ pose, node por asset, leitura de volta, criação de asset de animação e
 preenchimento de BlendSpace. A locomoção da MetaHuman Sophia está montada e
 compilando.
 
-Falta: **um crash ao fechar o editor**, e a **máquina de estados**, que foi
-escrita e nunca exercitada.
+Falta: exercitar a correção do **crash ao fechar o editor** (causa achada e
+corrigida, ainda não testada no editor), e a **máquina de estados**, que foi
+escrita e nunca rodou.
 
 ## Caminhos
 
@@ -47,7 +48,8 @@ escutar.
 
 ### Fechar
 
-`save_all_and_quit` pelo MCP — **mas veja a tarefa 1: ele está crashando.**
+`save_all_and_quit` pelo MCP. O crash ao fechar foi corrigido no commit
+`785a138` — veja a tarefa 1: falta exercitar.
 
 ### MCP
 
@@ -75,80 +77,68 @@ aparece — e nada avisa.
 
 ---
 
-## Tarefa 1 — Crash ao fechar pelo `save_all_and_quit`
+## Tarefa 1 — Crash ao fechar pelo `save_all_and_quit` (corrigido, falta testar)
 
-Recorrente. É a próxima coisa a consertar.
+**Causa achada, correcao no commit `785a138`. Falta exercitar no editor.**
 
-### O que o usuário observou
+### O que era
 
-Crash Reporter ao fechar pelo plugin; ao reabrir, o editor ofereceu **recuperar
-o Animation Blueprint**. A suspeita dele era que o editor fecha bruscamente sem
-conseguir salvar.
+`SaveAllAndQuit` enfileirava `QUIT_EDITOR`. Esse comando cai em
+`UUnrealEdEngine::CloseEditor` -> `RequestEngineExit` e **pula o desligamento do
+Slate inteiro**: nunca chama `FMainFrameHandler::ShutDownEditor`, logo nunca
+chama `GEditor->BroadcastEditorClose()`, que e' quem manda o
+`UAssetEditorSubsystem` fechar os editores de asset abertos.
 
-### O que o log mostra — a suspeita está errada
+Resultado: os editores de asset ficavam vivos ate' o engine loop sair, e so'
+eram desmontados **depois** que a janela principal ja' tinha morrido — com a
+cena de preview apontando para coisa destruida. Dai' o
+`EXCEPTION_ACCESS_VIOLATION` em `AnimationBlueprintEditor` no meio da destruicao
+recursiva de widgets do Slate.
 
-Crash em
-`C:\Unreal Projects\Metahuman\Saved\Crashes\UECC-Windows-CE8AFCBB4BE352324A21A8B5F71A517F_0000\`
-(tem `Metahuman.log`, `CrashContext.runtime-xml`, `UEMinidump.dmp`).
+A engine avisa disso ao lado do proprio comando, em `EditorServer.cpp`
+(`UEditorEngine::Exec`):
 
-**O save funcionou.** Sequência no log:
+> QUIT_EDITOR - Closes the wx main editor frame. We need to do this in slate but
+> it is routed differently. **Don't call quit_editor directly with slate**
 
-```
-21:23:41.865  Dispatching toolset tool: ...save_all_and_quit
-21:23:41.953  LogFileHelpers: Saving Package: /Game/Retarget/ABP_Sophia
-21:23:41.961  LogSavePackage: Moving '...tmp' to '.../Content/Retarget/ABP_Sophia.uasset'
-21:23:41.969  Cmd: QUIT_EDITOR
-```
+E em `MainFrameHandler.cpp`, ao enfileirar o `QUIT_EDITOR` no fim do
+`ShutDownEditor`: "Note this is the only place in slate that should be calling
+QUIT_EDITOR".
 
-O `.uasset` foi gravado. O convite a "recuperar" veio do autosave das 21:23:13,
-que a Unreal oferece depois de **qualquer** crash — não é prova de perda.
+### O que mudou
 
-### Onde ele quebra
+`SaveAllAndQuit` agora enfileira **`CLOSE_SLATE_MAINFRAME`**, que vai em
+`IMainFrameModule::RequestCloseEditor()` -> `CanCloseEditor()` ->
+`ShutDownEditor()`. Na ordem certa: fecha os editores de asset, desliga o
+arquivo de restauracao do autosave, salva a posicao da janela, destroi a janela
+raiz — e so' entao enfileira o `QUIT_EDITOR` ele mesmo.
 
-`EXCEPTION_ACCESS_VIOLATION reading address 0x0000000000000058`, e a pilha é
-`AnimationBlueprintEditor` (×5) → `UnrealEd` (×5) → **`Slate`/`SlateCore`** (dezenas).
+Dois efeitos colaterais bons:
 
-As últimas linhas do log, depois do `QUIT_EDITOR`:
+- `GetPackageAutoSaver().UpdateRestoreFile(false)` e' o que faltava para o editor
+  **parar de oferecer "recuperar"** na abertura seguinte. Aquele convite nao era
+  perda de dado, era o autosave nao ter sido descartado.
+- `SaveOpenAssetEditors(true)`: os editores de asset que estavam abertos voltam a
+  abrir na proxima sessao.
 
-```
-LogSlate: Window 'Metahuman - Unreal Editor' being destroyed
-LogBlueprint: Warning: Expected preview actor 'BP_ThirdPersonCharacter_C_0'
-              to be garbage collected, but it was not:
-LogReferenceChain: ... is not currently reachable.
-```
+Um preflight novo: `CLOSE_SLATE_MAINFRAME` abre um dialogo modal ("Are you sure
+you want to close the Unreal Editor?") quando `bConfirmEditorClose` esta'
+ligado. Quem chama isto e' um programa, entao o tool recusa antes, com a
+instrucao de desmarcar. Neste projeto ja' esta' `False`.
 
-Ou seja: **a janela principal morre primeiro, e só depois os editores de asset
-abertos são desmontados** — com o mundo de preview deles apontando para coisa
-já destruída. Havia dois abertos: o Animation Blueprint Editor (`ABP_Sophia`,
-que tem cena de preview própria) e o Blueprint Editor
-(`BP_ThirdPersonCharacter`, dono do preview actor da mensagem).
+### Como testar
 
-### Hipótese a testar primeiro
+1. Abrir `ABP_Sophia` e `BP_ThirdPersonCharacter` como editores de asset — foi
+   so' com eles abertos que quebrou.
+2. `save_all_and_quit`.
+3. Conferir que **nao** apareceu pasta nova em
+   `C:\Unreal Projects\Metahuman\Saved\Crashes\`.
+4. Reabrir e conferir que **nao** ha' convite a recuperar asset.
 
-Fechar os editores de asset **antes** de enfileirar o `QUIT_EDITOR`, em
-`UNodeScribeLibrary::SaveAllAndQuit`
-(`Source/NodeScribeEditor/Private/NodeScribeLibrary.cpp`):
-
-```cpp
-if (UAssetEditorSubsystem* Subsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>())
-{
-    Subsystem->CloseAllAssetEditors();
-}
-```
-
-O `QUIT_EDITOR` já vai por `GEngine->DeferredCommands`, que roda no tick
-seguinte — pode ser que um tick baste para os editores terminarem de morrer. Se
-não bastar, adiar o quit por mais um tick.
-
-**Reproduzir antes de consertar:** abra `ABP_Sophia` e
-`BP_ThirdPersonCharacter` no editor, chame `save_all_and_quit`. Sem janela de
-asset aberta o fechamento sempre funcionou nesta sessão — foi só com elas
-abertas que quebrou.
-
-Vale também rever se mexer num grafo que um editor de asset tem aberto (o
-`clear_graph`/`write_graph` foram usados assim) deixa o painel do editor com
-widget de node órfão. Não há evidência de que seja a causa, mas é o outro
-ponto onde os dois lados se tocam.
+Se ainda quebrar, o proximo suspeito e' mexer num grafo que um editor de asset
+tem aberto (`clear_graph`/`write_graph` foram usados assim), deixando widget de
+node orfao no painel. Nao ha' evidencia disso, mas e' o outro ponto onde os dois
+lados se tocam.
 
 ---
 
