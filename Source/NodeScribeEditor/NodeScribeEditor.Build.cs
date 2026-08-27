@@ -24,6 +24,11 @@ public class NodeScribeEditor : ModuleRules
 			"Projects",
 			"GraphEditor",
 			"BlueprintGraph",
+			// AnimGraph: nodes de AnimBlueprint (UAnimGraphNode_*), pose pins e
+			// maquina de estado. AnimGraphRuntime traz os FAnimNode_* que eles
+			// embrulham.
+			"AnimGraph",
+			"AnimGraphRuntime",
 			"KismetCompiler",
 			"Kismet",
 			"MessageLog",
