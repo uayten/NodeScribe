@@ -2,6 +2,7 @@
 
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
+#include "Misc/StringOutputDevice.h"
 #include "UObject/EnumProperty.h"
 #include "UObject/TextProperty.h"
 #include "UObject/UnrealType.h"
