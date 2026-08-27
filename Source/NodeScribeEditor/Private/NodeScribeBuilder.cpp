@@ -16,6 +16,7 @@
 #include "AnimStateNode.h"
 #include "AnimStateTransitionNode.h"
 #include "AnimationStateMachineGraph.h"
+#include "AnimationTransitionGraph.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
@@ -772,6 +773,11 @@ public:
 		// funcao o schema do grafo ja' e' o K2, entao nada muda la'.
 		, Schema(ResolveK2Schema(InGraph))
 		, bAnimGraph(NodeScribeAnimGraph::IsAnimationGraph(InGraph))
+		// Regra de transicao passa pelo mesmo schema, mas nao tem pose nenhuma:
+		// e' logica booleana. Sem esta distincao o vocabulario de anim
+		// competiria la' com o nome de uma funcao comum, e ganharia.
+		, bPoseGraph(NodeScribeAnimGraph::IsAnimationGraph(InGraph)
+			&& !(InGraph && InGraph->IsA<UAnimationTransitionGraph>()))
 	{
 	}
 
@@ -963,6 +969,9 @@ private:
 
 	/** Grafo de animacao: AnimGraph, interior de estado ou regra de transicao. */
 	bool bAnimGraph = false;
+
+	/** Dos tres acima, os dois que de fato tem pose. */
+	bool bPoseGraph = false;
 
 	TArray<FFrame> Frames;
 
@@ -2398,7 +2407,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 
 	// Num grafo de animacao o vocabulario de anim vem primeiro: `Blend` la' e'
 	// um node de pose, nao a funcao de mesmo nome da biblioteca de matematica.
-	if (bAnimGraph)
+	if (bPoseGraph)
 	{
 		bool bAnimHandled = false;
 		if (UEdGraphNode* AnimNode = TryCreateAnimNode(Statement, bAnimHandled))
