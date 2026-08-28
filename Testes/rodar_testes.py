@@ -33,6 +33,7 @@ do aviso reprova.
 
 import difflib
 import os
+import traceback
 
 import unreal
 
@@ -275,9 +276,167 @@ def substituir_recusa_grafo_com_perda():
     return True, []
 
 
+def qualquer_esqueleto():
+    """Um Skeleton do projeto, ou None.
+
+    Os casos de animacao precisam de um esqueleto de verdade -- um AnimBlueprint
+    nao se cria sem ele, e num asset pronto o campo e' somente-leitura. Pegar o
+    primeiro que o registry tiver mantem a suite rodavel em qualquer projeto:
+    o que se testa e' a ida e volta do texto, e para isso tanto faz de quem e' o
+    esqueleto.
+    """
+    registry = unreal.AssetRegistryHelpers.get_asset_registry()
+    achados = registry.get_assets_by_class(
+        unreal.TopLevelAssetPath('/Script/Engine', 'Skeleton'), False)
+
+    return str(achados[0].package_name) if achados else None
+
+
+def anim_grafo(nome, esqueleto):
+    """Um AnimGraph vazio num AnimBlueprint novo."""
+    caminho = '%s/%s' % (DESTINO, nome)
+
+    relato = unreal.NodeScribeLibrary.create_asset(
+        caminho, 'AnimBlueprint', 'TargetSkeleton = %s' % esqueleto)
+    if relato.startswith('[erro]'):
+        return None, relato
+
+    bp = unreal.load_asset(caminho)
+    if not bp:
+        return None, 'nao consegui carregar %s' % caminho
+
+    grafo = unreal.load_object(bp, 'AnimGraph')
+    if not grafo:
+        return None, 'nao achei o AnimGraph de %s' % caminho
+
+    return grafo, ''
+
+
+def maquina_de_estados_volta_igual():
+    """Estado, conduto, alias e opcao de transicao: ida e volta.
+
+    Sem asset nenhum de proposito. O que se testa aqui e' a estrutura -- quem
+    e' estado, quem e' conduto, quem e' alias, o que cada transicao guarda no
+    painel --, e por muito tempo nada disso cabia no texto: alias e conduto nao
+    eram declarados, e uma transicao com regra automatica voltava identica a uma
+    transicao morta.
+    """
+    esqueleto = qualquer_esqueleto()
+    if not esqueleto:
+        return True, ['pulado: este projeto nao tem nenhum Skeleton.']
+
+    texto = """
+variavel Ativo : Boolean
+
+Maquina = State Machine
+  estado Parado (Always Reset on Entry = true):
+  estado Andando:
+  alias Qualquer Um:
+    Andando
+    Parado
+  conduto Passagem:
+    Get Ativo
+  Parado -> Passagem (Crossfade Duration = 0.35, Blend Mode = Cubic):
+    Get Ativo
+  Passagem -> Andando (Priority Order = 2):
+    Get Ativo
+  Andando -> Parado (Automatic Rule Based on Sequence Player in State = true):
+"""
+
+    grafo_a, erro = anim_grafo('NS_maquina_a', esqueleto)
+    if not grafo_a:
+        return False, ['nao consegui preparar o primeiro AnimBlueprint: ' + erro]
+
+    escrita = unreal.NodeScribeLibrary.write_graph(grafo_a, texto)
+    if '[erro]' in escrita:
+        relato = ['a escrita reclamou:']
+        relato.extend('  ' + l for l in escrita.splitlines())
+        return False, relato
+
+    t1 = unreal.NodeScribeLibrary.read_graph(grafo_a)
+
+    # A transicao automatica nasce sem regra de proposito. Um aviso de "nunca
+    # dispara" aqui seria falso, e ensinaria a ignorar o aviso que existe para
+    # quando e' verdade.
+    if 'nunca dispara' in escrita:
+        relato = ['avisou que uma transicao nunca dispara, e a automatica dispara:']
+        relato.extend('  ' + l for l in escrita.splitlines())
+        return False, relato
+
+    grafo_b, erro = anim_grafo('NS_maquina_b', esqueleto)
+    if not grafo_b:
+        return False, ['nao consegui preparar o segundo AnimBlueprint: ' + erro]
+
+    unreal.NodeScribeLibrary.write_graph(grafo_b, t1)
+    t2 = unreal.NodeScribeLibrary.read_graph(grafo_b)
+
+    a, b = corpo(t1), corpo(t2)
+    if a == b:
+        return True, []
+
+    relato = ['a segunda leitura nao bateu com a primeira:']
+    relato.extend(difflib.unified_diff(a, b, 'T1', 'T2', lineterm='', n=2))
+    relato.append('')
+    relato.append('--- T1 inteiro ---')
+    relato.extend(t1.splitlines())
+    return False, relato
+
+
+def blendspace_ganha_malha():
+    """Preencher um BlendSpace tem que reconstruir a malha de interpolacao.
+
+    Regressao do bug mais silencioso que o plugin ja' teve: os samples entravam,
+    o asset abria, o editor desenhava os pontos -- e o BlendSpace Player devolvia
+    pose de referencia, porque quem interpola e' a malha, e ela ficava vazia. O
+    Blueprint compilava sem um aviso sequer.
+    """
+    registry = unreal.AssetRegistryHelpers.get_asset_registry()
+    achados = registry.get_assets_by_class(
+        unreal.TopLevelAssetPath('/Script/Engine', 'AnimSequence'), False)
+
+    if not achados:
+        return True, ['pulado: este projeto nao tem nenhuma AnimSequence.']
+
+    sequencia = unreal.load_asset(str(achados[0].package_name))
+    esqueleto = sequencia.get_editor_property('skeleton')
+    if not esqueleto:
+        return True, ['pulado: `%s` nao tem esqueleto.' % sequencia.get_name()]
+
+    caminho = '%s/NS_blendspace' % DESTINO
+    relato = unreal.NodeScribeLibrary.create_asset(
+        caminho, 'BlendSpace1D', 'TargetSkeleton = %s' % esqueleto.get_path_name())
+    if relato.startswith('[erro]'):
+        return False, [relato]
+
+    blendspace = unreal.load_asset(caminho)
+    if not blendspace:
+        return False, ['nao consegui carregar %s' % caminho]
+
+    linhas = [
+        'eixo X : Velocidade = 0 .. 600',
+        '%s = 0' % sequencia.get_path_name(),
+    ]
+    escrita = unreal.NodeScribeLibrary.write_blend_space(blendspace, chr(10).join(linhas))
+
+    if '[erro]' in escrita:
+        return False, ['a escrita reclamou:'] + escrita.splitlines()
+
+    texto = unreal.NodeScribeLibrary.read_object(blendspace, '')
+    if 'malha de interpolacao esta' in texto:
+        return False, [
+            'o sample entrou e a malha continuou vazia: este BlendSpace devolve',
+            'pose de referencia, e nada no grafo denuncia isso.',
+            '',
+        ] + texto.splitlines()
+
+    return True, []
+
+
 OUTROS = [
     ('substituir_troca_o_grafo', substituir_troca_o_grafo),
     ('substituir_recusa_grafo_com_perda', substituir_recusa_grafo_com_perda),
+    ('maquina_de_estados_volta_igual', maquina_de_estados_volta_igual),
+    ('blendspace_ganha_malha', blendspace_ganha_malha),
 ]
 
 
@@ -293,15 +452,30 @@ def main():
             falhas.append(caso['nome'])
             partes.extend('       ' + l for l in relato)
             partes.append('')
+        elif relato:
+            # Caso que passou e tem o que dizer so' diz uma coisa: que nao
+            # rodou. Um teste pulado impresso como `ok` e' o mesmo buraco que o
+            # plugin recusa em todo lugar -- parece cobertura e nao e'.
+            partes.extend('       ' + l for l in relato)
 
     for nome, funcao in OUTROS:
-        passou, relato = funcao()
+        # Uma excecao aqui derrubava o `main` inteiro, e o relatorio -- que so'
+        # e' escrito no fim -- nao saia: ficava no disco o de uma execucao
+        # anterior, com o resultado antigo e a contagem antiga. Ler aquilo
+        # depois de uma rodada que morreu e' pior do que nao ter relatorio.
+        try:
+            passou, relato = funcao()
+        except Exception:
+            passou, relato = False, traceback.format_exc().splitlines()
+
         partes.append('%s  %s' % ('ok   ' if passou else 'FALHA', nome))
 
         if not passou:
             falhas.append(nome)
             partes.extend('       ' + l for l in relato)
             partes.append('')
+        elif relato:
+            partes.extend('       ' + l for l in relato)
 
     resumo = '%d caso(s), %d falha(s)' % (len(CASOS) + len(OUTROS), len(falhas))
     partes.append('')
