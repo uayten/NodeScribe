@@ -89,6 +89,11 @@ Print String ("oi", 5.0)
 Os nomes são comparados de forma tolerante — `In String`, `instring` e
 `In_String` dão no mesmo. `Target` e `Alvo` apontam para o pino self.
 
+A comparação também ignora acento, e isso vale em todo o formato: rótulo
+(`então:`), nome de pino, nome de variável (`$Duração` acha `Duracao`, e o
+contrário também). Escrever em português não deve depender de lembrar em que
+palavra o plugin foi escrito sem acento.
+
 ## Quando dois nodes têm o mesmo nome
 
 `Apply Settings` existe em `GameUserSettings` e em `EnhancedInputUserSettings`.
@@ -245,9 +250,18 @@ args = Make MapPlayerKeyArgs (Mapping Name = $Nome, Slot = First)
 Break Vector ($posicao)
 ```
 
-No `Make`, cada pino tem o nome do campo. No `Break` há um pino de entrada só,
-e ele se chama como a struct (`Vector`) — por isso a forma sem nome, por
-posição, é a que se lê melhor.
+No `Make`, cada pino tem o nome do campo. No `Break` há um pino de entrada só —
+por isso a forma sem nome, por posição, é a que sempre funciona.
+
+**Algumas structs trazem a própria função de montar e quebrar**, e para elas o
+plugin usa essa função em vez do node genérico: `Vector`, `Rotator`,
+`Transform` e `Color` estão nesse caso. O node genérico ali compila com aviso da
+Engine — *"the structure cannot be broken using generic 'break' node"* —, e esse
+aviso não teria como ser evitado por quem escreve o texto, já que o formato não
+tem como escolher entre os dois nodes.
+
+Só muda o nome do pino de entrada, que passa a ser o do parâmetro da função
+(`In Vec`, e não `Vector`). A forma por posição atravessa as duas.
 
 Aceita o nome interno (`MapPlayerKeyArgs`) ou o de exibição
 (`Map Player Key Args`). Só vira node de struct se a struct existir — assim
@@ -362,6 +376,23 @@ Duas linhas, duas poses: o BlendSpace alimenta o Apply Additive, que alimenta o
 Output Pose. Consecutivas, elas se ligam na ordem em que aparecem, igual ao
 EventGraph.
 
+### O que não é pino
+
+Nem tudo que muda o que um node de anim faz é pino. `Loop Animation` e
+`Play Rate` de um asset player ficam no painel de detalhes, e entram como
+argumento igual:
+
+```
+MM_Jump (Loop Animation = false, Play Rate = 1.5)
+```
+
+Vale escrever `Loop Animation` sempre que a animação não for de loop: ela
+**nasce ligada**, então um `MM_Jump` que devia tocar uma vez fica repetindo sem
+nada no texto dizendo isso. A leitura escreve de volta toda opção que diferir do
+node recém-criado.
+
+Opção não aceita `$referência`: é valor fixo, porque não há fio para ligar.
+
 ### Indentação, aqui, abre uma entrada
 
 É o inverso do EventGraph. Lá o rótulo indentado abre uma **saída** — o que
@@ -435,6 +466,36 @@ Os estados são criados **antes** de qualquer transição, então a ordem no tex
 não importa — dá para escrever as transições primeiro. Em compensação, uma
 transição que fale de um estado que não existe é erro, com a lista dos que
 existem, em vez de um estado vazio criado por engano.
+
+Numa regra, uma variável sozinha basta. As três formas abaixo dão o mesmo node:
+
+```
+    $Esta no Ar
+    Get Esta no Ar
+    Esta no Ar
+```
+
+### Os getters de máquina de estado
+
+Dentro de uma regra de transição existe um vocabulário que só existe ali:
+
+```
+  Pulo -> Queda:
+    t = Get Relevant Anim Time Remaining
+    Less (A = $t, B = 0.1)
+```
+
+`Get Relevant Anim Time Remaining`, `Get Relevant Anim Time Remaining Fraction`,
+`Get Transition Time Elapsed` e os outros getters não são chamada de função,
+apesar de aparecerem como uma no menu do editor. O que os faz funcionar não está
+em pino nenhum: é o **estado de origem da transição**, que o plugin preenche
+sozinho, porque a transição sabe de onde sai e o texto não teria como dizer.
+
+Por isso eles só existem dentro de uma regra. Fora dali o nome cai no catálogo
+de funções e acha a função homônima de `UAnimationStateMachineLibrary` — que
+existe, é pública, entra no grafo, e pede dois pinos que uma regra de transição
+não tem de onde alimentar. Era um node plausível que não compila, que é
+exatamente o que o plugin promete não fazer.
 
 ### O caminho de volta
 

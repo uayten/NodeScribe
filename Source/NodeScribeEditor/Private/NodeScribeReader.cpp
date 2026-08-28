@@ -14,12 +14,14 @@
 #include "AnimationStateMachineGraph.h"
 #include "AnimationTransitionGraph.h"
 #include "Animation/AnimationAsset.h"
+#include "UObject/UnrealType.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphNode_Comment.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
+#include "K2Node_AnimGetter.h"
 #include "K2Node_AsyncAction.h"
 #include "K2Node_BaseAsyncTask.h"
 #include "K2Node_BreakStruct.h"
@@ -482,7 +484,7 @@ namespace
 	 * pinos diferentes. O builder testa a forma de struct antes do catalogo,
 	 * entao escrever o nome puro devolveria o outro node.
 	 */
-	bool IsShadowedByStructForm(const FString& DisplayName)
+	bool IsShadowedByStructForm(const FString& DisplayName, const UFunction* Function)
 	{
 		FString StructName;
 
@@ -505,13 +507,29 @@ namespace
 			return false;
 		}
 
+		const bool bWantsBreak = DisplayName.StartsWith(TEXT("Break "), ESearchCase::IgnoreCase);
+		const TCHAR* const MetaKey = bWantsBreak ? TEXT("HasNativeBreak") : TEXT("HasNativeMake");
+
 		for (TObjectIterator<UScriptStruct> StructIt; StructIt; ++StructIt)
 		{
-			if (FNodeScribeCatalog::Normalize(StructIt->GetName()) == Normalized
-				|| FNodeScribeCatalog::Normalize(StructIt->GetDisplayNameText().ToString()) == Normalized)
+			if (FNodeScribeCatalog::Normalize(StructIt->GetName()) != Normalized
+				&& FNodeScribeCatalog::Normalize(StructIt->GetDisplayNameText().ToString()) != Normalized)
 			{
-				return true;
+				continue;
 			}
+
+			// Sombra so' existe quando as duas formas dao nodes diferentes.
+			// `Vector` tem break nativo, e o builder, ao ler `Break Vector`,
+			// cria justamente esta funcao -- entao o nome de tela volta igual e
+			// e' o que se le' melhor. Escrever `KismetMathLibrary.BreakVector`
+			// aqui seria fugir de uma colisao que nao acontece mais.
+			if (Function && StructIt->HasMetaData(MetaKey)
+				&& FindObject<UFunction>(nullptr, *StructIt->GetMetaData(MetaKey)) == Function)
+			{
+				return false;
+			}
+
+			return true;
 		}
 
 		return false;
@@ -661,6 +679,17 @@ private:
 	/** Devolve vazio quando o node volta igual; senao, o motivo de nao voltar. */
 	FString DescribeNode(UEdGraphNode* Node, FString& OutRoundTripIssue);
 	FString BuildArgumentList(UEdGraphNode* Node, int32 Indent);
+
+	/**
+	 * As opcoes do painel de detalhes que diferem do node recem-criado.
+	 *
+	 * Sao argumentos como qualquer outro na linha -- o builder as reconhece pelo
+	 * mesmo nome de tela. Existem porque nem tudo que muda o que um node faz e'
+	 * pino: `Loop Animation` num Sequence Player nao tem fio, nasce ligado, e um
+	 * `MM_Jump` que devia tocar uma vez ficava em loop sem nada no texto.
+	 */
+	void AppendNodeSettings(UEdGraphNode* Node, TArray<FString>& Args);
+
 	FString DescribeLiteral(UEdGraphPin* Pin, bool& bOutRepresentable);
 
 	/** Rotulo de saida de execucao que volta como o mesmo pino ao ser lido. */
@@ -1106,6 +1135,22 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		return TEXT("Macro ?");
 	}
 
+	// Antes do CallFunction, de quem ele descende: o getter de maquina de estado
+	// nao volta pelo caminho de uma chamada. A funcao que ele embrulha e'
+	// `BlueprintInternalUseOnly` e por isso nao esta' no catalogo, entao o ramo
+	// de baixo cairia na forma qualificada (`AnimInstance.GetRelevantAnim...`),
+	// que ao colar nao acha nada. O nome de tela volta, porque o builder tem um
+	// caminho proprio para ele dentro de uma regra de transicao.
+	if (const UK2Node_AnimGetter* Getter = Cast<UK2Node_AnimGetter>(Node))
+	{
+		if (UFunction* Function = Getter->GetTargetFunction())
+		{
+			return Function->HasMetaData(TEXT("DisplayName"))
+				? Function->GetMetaData(TEXT("DisplayName"))
+				: FName::NameToDisplayString(Function->GetName(), false);
+		}
+	}
+
 	if (const UK2Node_CallFunction* Call = Cast<UK2Node_CallFunction>(Node))
 	{
 		if (UFunction* Function = Call->GetTargetFunction())
@@ -1135,7 +1180,7 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 			// O catalogo achar a funcao nao basta: o builder testa as formas
 			// especiais antes dele, e `Break Vector` cairia na struct.
 			if (Lookup.Function == Function
-				&& !IsShadowedByStructForm(DisplayName)
+				&& !IsShadowedByStructForm(DisplayName, Function)
 				&& !bNameBreaksParsing)
 			{
 				return DisplayName;
@@ -1337,12 +1382,92 @@ FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Inde
 		}
 	}
 
+	AppendNodeSettings(Node, Args);
+
 	if (Args.Num() == 0)
 	{
 		return FString();
 	}
 
 	return TEXT(" (") + FString::Join(Args, TEXT(", ")) + TEXT(")");
+}
+
+void FNodeScribeReadContext::AppendNodeSettings(UEdGraphNode* Node, TArray<FString>& Args)
+{
+	// O que o node ajusta fora dos pinos. `Loop Animation` de um Sequence
+	// Player e' o caso que doi: nasce ligado, e um `MM_Jump` que devia tocar uma
+	// vez fica em loop -- sem nada no texto dizendo isso, porque nao ha' pino.
+	//
+	// So' o que difere do node recem-criado, como faz a ficha: um asset player
+	// tem dezenas de campos, e escrever todos afogaria a linha.
+	const UEdGraphNode* Defaults = Node->GetClass()->GetDefaultObject<UEdGraphNode>();
+	if (!Defaults)
+	{
+		return;
+	}
+
+	auto Emit = [&](FProperty* Property, const void* ValuePtr, const void* DefaultPtr)
+	{
+		// O asset ja' e' a linha: `MM_Jump` *e'* o `Sequence` deste node.
+		// Escreve-lo de novo como argumento daria uma linha que se repete, e ao
+		// colar de volta o pino nem existe.
+		if (const FObjectPropertyBase* AsObject = CastField<FObjectPropertyBase>(Property))
+		{
+			if (AsObject->PropertyClass && AsObject->PropertyClass->IsChildOf(UAnimationAsset::StaticClass()))
+			{
+				return;
+			}
+		}
+
+		if (!DiffersFromDefault(Property, ValuePtr, DefaultPtr))
+		{
+			return;
+		}
+
+		FString Value;
+		if (!ValueToText(Property, ValuePtr, Value))
+		{
+			AddWarning(FString::Printf(
+				TEXT("A opcao `%s` de `%s` mudou, e nao sei escrever o valor dela. ")
+				TEXT("Confira no painel de detalhes."),
+				*DisplayName(Property), *ShortTitle(Node)));
+			return;
+		}
+
+		Args.Add(FString::Printf(TEXT("%s = %s"), *DisplayName(Property), *Value));
+	};
+
+	for (TFieldIterator<FProperty> It(Node->GetClass()); It; ++It)
+	{
+		FProperty* Property = *It;
+
+		if (!IsNodeSetting(Property))
+		{
+			continue;
+		}
+
+		if (FStructProperty* AsStruct = CastField<FStructProperty>(Property))
+		{
+			if (IsAnimNodeStruct(AsStruct))
+			{
+				const void* StructPtr = AsStruct->ContainerPtrToValuePtr<void>(Node);
+				const void* DefaultStructPtr = AsStruct->ContainerPtrToValuePtr<void>(Defaults);
+
+				for (TFieldIterator<FProperty> Inner(AsStruct->Struct); Inner; ++Inner)
+				{
+					if (IsNodeSetting(*Inner))
+					{
+						Emit(*Inner, Inner->ContainerPtrToValuePtr<void>(StructPtr),
+							Inner->ContainerPtrToValuePtr<void>(DefaultStructPtr));
+					}
+				}
+				continue;
+			}
+		}
+
+		Emit(Property, Property->ContainerPtrToValuePtr<void>(Node),
+			Property->ContainerPtrToValuePtr<void>(Defaults));
+	}
 }
 
 // ---------------------------------------------------------------------------

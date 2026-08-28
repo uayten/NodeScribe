@@ -6,6 +6,7 @@
 
 #include "Animation/AnimSequence.h"
 #include "Animation/BlendSpace.h"
+#include "Animation/BlendSpace1D.h"
 
 namespace NodeScribeBlendSpace
 {
@@ -130,7 +131,100 @@ bool ParseSampleLine(const FString& Line, FString& OutAsset, FVector& OutPositio
 	return true;
 }
 
+/** Quantos eixos este BlendSpace usa: 1 num BlendSpace1D, 2 nos outros. */
+int32 AxisCount(const UBlendSpace* BlendSpace)
+{
+	return BlendSpace && BlendSpace->IsA<UBlendSpace1D>() ? 1 : 2;
+}
+
+/** `X=0` ou `X=0, Y=300`, so' com os eixos que o BlendSpace tem. */
+FString DescribePosition(const FVector& Position)
+{
+	return FString::Printf(TEXT("X=%g Y=%g"), Position.X, Position.Y);
+}
+
+/**
+ * O sample que ja' ocupa esta posicao, se houver.
+ *
+ * A Engine tem `IsTooCloseToExistingSamplePoint`, que responde sim ou nao. Aqui
+ * queremos *qual*, para poder dizer o nome dele na mensagem -- saber que ha'
+ * algo no lugar sem saber o que e' deixa a pessoa exatamente onde estava.
+ */
+const FBlendSample* FindSampleAt(const UBlendSpace* BlendSpace, const FVector& Position)
+{
+	if (!BlendSpace || !BlendSpace->IsTooCloseToExistingSamplePoint(Position, INDEX_NONE))
+	{
+		return nullptr;
+	}
+
+	const TArray<FBlendSample>& Samples = BlendSpace->GetBlendSamples();
+
+	const FBlendSample* Closest = nullptr;
+	double BestDistance = TNumericLimits<double>::Max();
+
+	for (const FBlendSample& Sample : Samples)
+	{
+		const double Distance = FVector::DistSquared(Sample.SampleValue, Position);
+		if (Distance < BestDistance)
+		{
+			BestDistance = Distance;
+			Closest = &Sample;
+		}
+	}
+
+	return Closest;
+}
+
 } // namespace
+
+FString Read(const UBlendSpace* BlendSpace)
+{
+	if (!BlendSpace)
+	{
+		return FString();
+	}
+
+	TArray<FString> Lines;
+
+	static const TCHAR* const Letters[] = { TEXT("X"), TEXT("Y"), TEXT("Z") };
+
+	for (int32 Index = 0; Index < AxisCount(BlendSpace); ++Index)
+	{
+		const FBlendParameter& Axis = BlendSpace->GetBlendParameter(Index);
+
+		// Eixo sem nome e' eixo que ninguem configurou. Escrever `eixo Y : None`
+		// sugeriria que ha' um eixo Y para preencher num BlendSpace 1D.
+		if (Axis.DisplayName.IsEmpty() || Axis.DisplayName == TEXT("None"))
+		{
+			continue;
+		}
+
+		Lines.Add(FString::Printf(TEXT("eixo %s : %s = %g .. %g"),
+			Letters[Index], *Axis.DisplayName, Axis.Min, Axis.Max));
+	}
+
+	for (const FBlendSample& Sample : BlendSpace->GetBlendSamples())
+	{
+		if (!Sample.Animation)
+		{
+			continue;
+		}
+
+		// O caminho completo, e nao o nome curto: e' o que Write aceita sem
+		// perguntar, e um nome curto que hoje e' unico deixa de ser no dia em
+		// que alguem duplicar a animacao -- e ai o texto lido para de colar.
+		FString Position = FString::Printf(TEXT("%g"), Sample.SampleValue.X);
+		if (AxisCount(BlendSpace) > 1)
+		{
+			Position += FString::Printf(TEXT(", %g"), Sample.SampleValue.Y);
+		}
+
+		Lines.Add(FString::Printf(TEXT("%s = %s"),
+			*Sample.Animation->GetPathName(), *Position));
+	}
+
+	return FString::Join(Lines, TEXT("\n"));
+}
 
 FResult Write(UBlendSpace* BlendSpace, const FString& Text)
 {
@@ -255,12 +349,49 @@ FResult Write(UBlendSpace* BlendSpace, const FString& Text)
 			continue;
 		}
 
+		// A Engine recusa um sample por dois motivos, e devolve o mesmo
+		// INDEX_NONE nos dois. Perguntar antes e' o que separa "a posicao nao
+		// cabe no eixo" de "ja' tem um sample ai'" -- e a segunda, dita como se
+		// fosse a primeira, manda conferir um intervalo que esta' certo. Foi
+		// exatamente o que aconteceu: `MM_Idle = 0` recusado num BlendSpace cujo
+		// eixo ia de 0 a 600, porque o sample ja' estava la'.
+		if (!BlendSpace->IsSampleWithinBounds(Sample.Position))
+		{
+			const FBlendParameter& Axis = BlendSpace->GetBlendParameter(0);
+			Result.Diagnostics.Add(FString::Printf(
+				TEXT("[erro] linha %d: %s esta' fora do intervalo dos eixos (o X vai de %g a %g)."),
+				Sample.Line, *DescribePosition(Sample.Position), Axis.Min, Axis.Max));
+			continue;
+		}
+
+		if (const FBlendSample* Occupant = FindSampleAt(BlendSpace, Sample.Position))
+		{
+			// Mesma animacao, mesmo lugar: ja' esta' como o texto pede. Repetir a
+			// chamada nao deve virar erro, pelo mesmo motivo que `variavel X`
+			// duas vezes nao vira -- colar o mesmo texto de novo e' rotina.
+			if (Occupant->Animation == Sequence)
+			{
+				continue;
+			}
+
+			// Trocar por conta propria seria decidir. O sample que esta' la' foi
+			// posto por alguem, e substituir calado troca a animacao de um
+			// BlendSpace inteiro sem nada no retorno dizendo o que sumiu.
+			Result.Diagnostics.Add(FString::Printf(
+				TEXT("[erro] linha %d: %s ja' tem `%s`. Nao troco por `%s` sozinho -- ")
+				TEXT("apague o sample no editor, ou escreva outra posicao."),
+				Sample.Line, *DescribePosition(Sample.Position),
+				Occupant->Animation ? *Occupant->Animation->GetName() : TEXT("(sem animacao)"),
+				*Sample.Asset));
+			continue;
+		}
+
 		if (BlendSpace->AddSample(Sequence, Sample.Position) == INDEX_NONE)
 		{
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("[erro] linha %d: a Engine recusou `%s` em %s. ")
-				TEXT("Confira se a posicao cabe no intervalo dos eixos."),
-				Sample.Line, *Sample.Asset, *Sample.Position.ToString()));
+				TEXT("[erro] linha %d: a Engine recusou `%s` em %s, e nem a posicao nem o ")
+				TEXT("esqueleto explicam. Confira o tipo da animacao (aditiva x normal)."),
+				Sample.Line, *Sample.Asset, *DescribePosition(Sample.Position)));
 			continue;
 		}
 

@@ -154,7 +154,11 @@ def corpo(texto):
 
 def novo_blueprint(nome):
     caminho = '%s/%s' % (DESTINO, nome)
-    relato = unreal.NodeScribeLibrary.create_asset(caminho, 'Actor')
+    # `options` e' obrigatorio na assinatura da UFUNCTION -- Python nao tem o
+    # valor padrao que o C++ tem. Sem a string vazia aqui, a suite inteira morre
+    # na primeira linha com `TypeError: create_asset() required argument
+    # 'options' (pos 3) not found`, e nao roda desde que `options` foi criado.
+    relato = unreal.NodeScribeLibrary.create_asset(caminho, 'Actor', '')
     if relato.startswith('[erro]'):
         return None, relato
 

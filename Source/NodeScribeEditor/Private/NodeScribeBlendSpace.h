@@ -53,4 +53,18 @@ struct FResult
  */
 FResult Write(UBlendSpace* BlendSpace, const FString& Text);
 
+/**
+ * O caminho de volta: os eixos e os samples, no formato que Write aceita.
+ *
+ * Vive aqui, e nao numa ferramenta propria, porque a pergunta e' a mesma que a
+ * ficha responde -- `read_object` num BlendSpace chama isto e emenda o bloco no
+ * fim. Antes, a ficha dizia `nao sei escrever o valor de: Sample Data`, e nao
+ * havia como saber o que ja' estava no asset sem abrir o editor. Escrever as
+ * cegas num BlendSpace que ja' tem samples e' como o resto do plugin trata
+ * qualquer escrita sem leitura: adivinhacao.
+ *
+ * Vazio quando o BlendSpace nao tem nem eixo nomeado nem sample.
+ */
+FString Read(const UBlendSpace* BlendSpace);
+
 } // namespace NodeScribeBlendSpace

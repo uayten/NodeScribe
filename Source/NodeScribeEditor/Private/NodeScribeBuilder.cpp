@@ -17,6 +17,8 @@
 #include "AnimStateTransitionNode.h"
 #include "AnimationStateMachineGraph.h"
 #include "AnimationTransitionGraph.h"
+#include "Animation/AnimBlueprint.h"
+#include "K2Node_AnimGetter.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
@@ -57,6 +59,7 @@
 #include "Subsystems/LocalPlayerSubsystem.h"
 #include "Subsystems/Subsystem.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/UnrealType.h"
 
 using namespace NodeScribePropertyText;
 
@@ -778,6 +781,10 @@ public:
 		// competiria la' com o nome de uma funcao comum, e ganharia.
 		, bPoseGraph(NodeScribeAnimGraph::IsAnimationGraph(InGraph)
 			&& !(InGraph && InGraph->IsA<UAnimationTransitionGraph>()))
+		// A regra de transicao tem um vocabulario que so' existe ali: os
+		// getters de maquina de estado (`Time Remaining`, `Get Transition Time
+		// Elapsed`). Eles nao sao chamada de funcao -- veja TryCreateAnimGetter.
+		, bTransitionGraph(InGraph && InGraph->IsA<UAnimationTransitionGraph>())
 	{
 	}
 
@@ -928,6 +935,23 @@ private:
 	UEdGraphNode* TryCreateAnimNode(const FNodeScribeStatement& Statement, bool& bOutHandled);
 
 	/**
+	 * Os getters de maquina de estado, dentro de uma regra de transicao.
+	 *
+	 * `Time Remaining`, `Get Transition Time Elapsed`, `Get Relevant Anim Time
+	 * Remaining`: no menu do editor eles aparecem como funcao, mas nao sao
+	 * chamada de funcao. Sao `UK2Node_AnimGetter`, e o que os faz funcionar nao
+	 * esta' em pino nenhum -- e' o estado de origem, guardado numa propriedade
+	 * que o menu preenche ao criar o node.
+	 *
+	 * Sem este caminho, o nome caia no catalogo e achava a funcao homonima de
+	 * `UAnimationStateMachineLibrary`, que existe, e' publica, entra no grafo, e
+	 * pede dois pinos (`UpdateContext` e `Node`) que numa regra de transicao nao
+	 * tem de onde vir. O resultado era um node plausivel que nao compila --
+	 * exatamente o que o plugin promete nao fazer.
+	 */
+	UEdGraphNode* TryCreateAnimGetter(const FNodeScribeStatement& Statement, bool& bOutHandled);
+
+	/**
 	 * O bloco indentado debaixo de uma maquina de estados.
 	 *
 	 * Devolve o indice do primeiro statement que *nao* e' do bloco. Consome o
@@ -968,6 +992,22 @@ private:
 	/** Propriedade por nome tolerante: `Show Mouse Cursor` acha `bShowMouseCursor`. */
 	static FProperty* FindPropertyByFriendlyName(UClass* Class, const FString& Name);
 
+	/** Uma opcao do painel de detalhes de um node, e onde o valor dela mora. */
+	struct FNodeSetting
+	{
+		FProperty* Property = nullptr;
+		void* ValuePtr = nullptr;
+	};
+
+	/**
+	 * A opcao de nome `Name`, no node ou dentro da struct que ele embrulha.
+	 *
+	 * `OutAvailable` sai preenchida em qualquer caso, com os nomes de tela de
+	 * todas as opcoes -- e' o que a mensagem de erro precisa dizer quando o node
+	 * nao tem pino nenhum.
+	 */
+	static bool FindNodeSetting(UEdGraphNode* Node, const FString& Name, FNodeSetting& Out, TArray<FString>& OutAvailable);
+
 	UEdGraph* Graph = nullptr;
 	UBlueprint* Blueprint = nullptr;
 	FVector2D Origin = FVector2D::ZeroVector;
@@ -978,6 +1018,9 @@ private:
 
 	/** Dos tres acima, os dois que de fato tem pose. */
 	bool bPoseGraph = false;
+
+	/** O terceiro: a regra de transicao, que e' logica booleana. */
+	bool bTransitionGraph = false;
 
 	TArray<FFrame> Frames;
 
@@ -1662,19 +1705,23 @@ UEdGraphPin* FNodeScribeBuildContext::TrySplitToFindPin(UEdGraphNode* Node, cons
 	// Copia: dividir um pino mexe em Node->Pins durante a iteracao.
 	TArray<UEdGraphPin*> Candidates = Node->Pins;
 
+	auto IsSplittableStruct = [this](UEdGraphPin* Pin)
+	{
+		return Pin && Pin->Direction == EGPD_Output && !IsExecPin(Pin) && Pin->SubPins.Num() == 0
+			&& Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct
+			&& Schema->CanSplitStructPin(*Pin);
+	};
+
+	// --- 1a tentativa: o nome pedido comeca com o nome do pino ------------
+	//
+	// `Selected Key Key` comeca com `Selected Key`: e' parte dessa struct.
 	for (UEdGraphPin* Pin : Candidates)
 	{
-		if (!Pin || Pin->Direction != EGPD_Output || IsExecPin(Pin) || Pin->SubPins.Num() > 0)
+		if (!IsSplittableStruct(Pin))
 		{
 			continue;
 		}
 
-		if (Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Struct)
-		{
-			continue;
-		}
-
-		// `Selected Key Key` comeca com `Selected Key`: e' parte dessa struct.
 		const FString PinName = FNodeScribeCatalog::Normalize(Pin->PinName.ToString());
 		const FString FriendlyName = Pin->PinFriendlyName.IsEmpty()
 			? PinName
@@ -1685,16 +1732,86 @@ UEdGraphPin* FNodeScribeBuildContext::TrySplitToFindPin(UEdGraphNode* Node, cons
 			continue;
 		}
 
-		if (!Schema->CanSplitStructPin(*Pin))
-		{
-			continue;
-		}
-
 		Schema->SplitPin(Pin, false);
 
 		if (UEdGraphPin* Found = FindPinByFuzzyName(Node, PinPath, EGPD_Output))
 		{
 			return Found;
+		}
+	}
+
+	// --- 2a tentativa: o nome pedido e' um campo da struct ----------------
+	//
+	// `$velocidade.Z` com o pino chamado `ReturnValue`. O prefixo nao ajuda --
+	// "z" nao comeca com "returnvalue" --, e o `Get Velocity` de um ator e' o
+	// caso mais comum que existe: o pino de retorno de uma funcao quase nunca
+	// tem nome proprio.
+	//
+	// Perguntamos a struct antes de dividir. Dividir para descobrir mudaria o
+	// grafo procurando, e um pino dividido a toa fica visivelmente diferente do
+	// que o texto pediu.
+	TArray<UEdGraphPin*> WithField;
+	for (UEdGraphPin* Pin : Candidates)
+	{
+		if (!IsSplittableStruct(Pin))
+		{
+			continue;
+		}
+
+		const UScriptStruct* Struct = Cast<UScriptStruct>(Pin->PinType.PinSubCategoryObject.Get());
+		if (!Struct)
+		{
+			continue;
+		}
+
+		for (TFieldIterator<FProperty> It(Struct); It; ++It)
+		{
+			const FProperty* Field = *It;
+			if (FNodeScribeCatalog::Normalize(Field->GetName()) == Wanted
+				|| FNodeScribeCatalog::Normalize(Field->GetAuthoredName()) == Wanted)
+			{
+				WithField.Add(Pin);
+				break;
+			}
+		}
+	}
+
+	// Dois pinos de struct com um campo `Z` cada: dividir um deles seria
+	// escolher, e o node escolhido compila e roda com o valor do outro.
+	if (WithField.Num() > 1)
+	{
+		return nullptr;
+	}
+
+	if (WithField.Num() == 1)
+	{
+		UEdGraphPin* Parent = WithField[0];
+		const FString ParentName = FNodeScribeCatalog::Normalize(Parent->PinName.ToString());
+
+		Schema->SplitPin(Parent, false);
+
+		if (UEdGraphPin* Found = FindPinByFuzzyName(Node, PinPath, EGPD_Output))
+		{
+			return Found;
+		}
+
+		// O sub-pino nasce com o nome do pai colado no do campo: dividir
+		// `ReturnValue` da' `ReturnValue_X`, `ReturnValue_Y`, `ReturnValue_Z`.
+		// Procurar por `Z` puro nao acha nenhum deles -- e a busca parava aqui,
+		// depois de ja' ter dividido o pino, o que deixava o grafo mexido e a
+		// ligacao por fazer.
+		for (UEdGraphPin* Sub : Parent->SubPins)
+		{
+			if (!Sub)
+			{
+				continue;
+			}
+
+			const FString SubName = FNodeScribeCatalog::Normalize(Sub->PinName.ToString());
+			if (SubName == ParentName + Wanted || SubName.EndsWith(Wanted))
+			{
+				return Sub;
+			}
 		}
 	}
 
@@ -1983,6 +2100,67 @@ void FNodeScribeBuildContext::RegisterOutput(const FString& Name, UEdGraphNode* 
 	NamedOutputs.Add(Name, FPinRef(OutputPin));
 }
 
+bool FNodeScribeBuildContext::FindNodeSetting(UEdGraphNode* Node, const FString& Name, FNodeSetting& Out, TArray<FString>& OutAvailable)
+{
+	const FString Wanted = FNodeScribeCatalog::Normalize(Name);
+
+	// Duas camadas: as propriedades do node, e as de dentro da struct que ele
+	// embrulha. Num `UAnimGraphNode_SequencePlayer` o que interessa mora na
+	// segunda -- `bLoopAnimation` e `PlayRate` sao campos do `FAnimNode_*`, e o
+	// node so' a carrega.
+	TArray<FNodeSetting> Found;
+
+	auto Consider = [&](FProperty* Property, void* Container)
+	{
+		if (!IsNodeSetting(Property))
+		{
+			return;
+		}
+
+		const FString Display = DisplayName(Property);
+		OutAvailable.AddUnique(Display);
+
+		if (FNodeScribeCatalog::Normalize(Display) == Wanted
+			|| FNodeScribeCatalog::Normalize(Property->GetName()) == Wanted)
+		{
+			Found.Add({ Property, Property->ContainerPtrToValuePtr<void>(Container) });
+		}
+	};
+
+	for (TFieldIterator<FProperty> It(Node->GetClass()); It; ++It)
+	{
+		FProperty* Property = *It;
+
+		if (FStructProperty* AsStruct = CastField<FStructProperty>(Property))
+		{
+			// So' a struct de anim se abre -- e' onde `Loop Animation` mora. Ver
+			// IsAnimNodeStruct: abrir qualquer uma faria os campos de um `FGuid`
+			// virarem opcoes chamadas `A`, `B`, `C` e `D`.
+			if (IsNodeSetting(Property) && IsAnimNodeStruct(AsStruct))
+			{
+				void* StructPtr = AsStruct->ContainerPtrToValuePtr<void>(Node);
+				for (TFieldIterator<FProperty> Inner(AsStruct->Struct); Inner; ++Inner)
+				{
+					Consider(*Inner, StructPtr);
+				}
+				continue;
+			}
+		}
+
+		Consider(Property, Node);
+	}
+
+	// Duas propriedades com o mesmo nome de tela, em camadas diferentes: escolher
+	// uma acerta metade das vezes, e a metade errada grava valor em asset.
+	if (Found.Num() != 1)
+	{
+		return false;
+	}
+
+	Out = Found[0];
+	return true;
+}
+
 void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScribeStatement& Statement)
 {
 	// Pinos de entrada elegiveis, na ordem, para resolver argumentos posicionais.
@@ -2007,6 +2185,42 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 
 			if (!Pin)
 			{
+				// Nem tudo que se ajusta num node e' pino. `Loop Animation` e
+				// `Play Rate` de um asset player, `Blend Time` de uma transicao:
+				// ficam no painel de detalhes, e antes disto a resposta era "o
+				// node nao tem pino `Loop Animation`. Pinos de entrada:" -- com
+				// a lista vazia, porque um Sequence Player nao tem nenhum. Quem
+				// lesse aquilo concluiria que a Engine nao tem essa opcao.
+				FNodeSetting Setting;
+				TArray<FString> Settings;
+
+				if (FindNodeSetting(Node, Arg.PinName, Setting, Settings))
+				{
+					if (Arg.bIsReference)
+					{
+						AddError(Statement.LineNumber, FString::Printf(
+							TEXT("`%s` e' uma opcao do painel de detalhes, nao um pino: aceita valor fixo, ")
+							TEXT("nao `$%s`."), *Arg.PinName, *Arg.Value));
+						continue;
+					}
+
+					Node->Modify();
+
+					FString Error;
+					if (!TextToValue(Setting.Property, Setting.ValuePtr, Arg.Value, Error))
+					{
+						AddError(Statement.LineNumber, FString::Printf(
+							TEXT("`%s = %s` nao entrou: %s"), *Arg.PinName, *Arg.Value, *Error));
+						continue;
+					}
+
+					Node->PostEditChange();
+
+					AddInfo(Statement.LineNumber, FString::Printf(
+						TEXT("`%s` nao e' pino: entrou como opcao do node."), *Arg.PinName));
+					continue;
+				}
+
 				TArray<FString> Available;
 				for (UEdGraphPin* Candidate : PositionalPins)
 				{
@@ -2018,9 +2232,17 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 				// nunca funcionou -- o pino se chama como a struct.
 				AnotaNomeNaoResolvido(TEXT("pino"), Arg.PinName, Statement.NodeExpression);
 
+				// Sem pino nenhum, dizer "pinos de entrada: (nada)" nao ajuda.
+				// O que responde a pergunta seguinte e' a lista das opcoes.
+				const FString Onde = Available.Num() > 0
+					? FString::Printf(TEXT("Pinos de entrada: %s"), *FString::Join(Available, TEXT(", ")))
+					: (Settings.Num() > 0
+						? FString::Printf(TEXT("Este node nao tem pino de entrada. Opcoes do painel: %s"),
+							*FString::Join(Settings, TEXT(", ")))
+						: TEXT("Este node nao tem pino de entrada nem opcao ajustavel."));
+
 				AddError(Statement.LineNumber, FString::Printf(
-					TEXT("O node nao tem pino `%s`. Pinos de entrada: %s"),
-					*Arg.PinName, *FString::Join(Available, TEXT(", "))));
+					TEXT("O node nao tem pino `%s`. %s"), *Arg.PinName, *Onde));
 				continue;
 			}
 		}
@@ -2407,9 +2629,172 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimNode(const FNodeScribeStatem
 	return Player;
 }
 
+UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimGetter(const FNodeScribeStatement& Statement, bool& bOutHandled)
+{
+	bOutHandled = false;
+
+	// De quem esta regra e' a regra. O grafo mora dentro da transicao, e a
+	// transicao sabe de que estado ela sai -- que e' a resposta que o getter
+	// precisa e que o texto nao tem como dizer.
+	UAnimStateTransitionNode* Transition = Cast<UAnimStateTransitionNode>(Graph->GetOuter());
+	if (!Transition)
+	{
+		return nullptr;
+	}
+
+	UAnimBlueprint* AnimBlueprint = Cast<UAnimBlueprint>(Blueprint);
+	if (!AnimBlueprint)
+	{
+		return nullptr;
+	}
+
+	// A classe nativa mais proxima: os getters sao declarados em C++, e um
+	// AnimBlueprint que herda de outro AnimBlueprint nao os redeclara.
+	UClass* NativeClass = AnimBlueprint->ParentClass;
+	while (NativeClass && !NativeClass->HasAnyClassFlags(CLASS_Native))
+	{
+		NativeClass = NativeClass->GetSuperClass();
+	}
+
+	if (!NativeClass)
+	{
+		return nullptr;
+	}
+
+	const FString Wanted = FNodeScribeCatalog::Normalize(Statement.NodeExpression);
+
+	UFunction* Getter = nullptr;
+	TArray<FString> Available;
+
+	for (TFieldIterator<UFunction> It(NativeClass); It; ++It)
+	{
+		UFunction* Function = *It;
+		if (!Function->HasMetaData(TEXT("AnimGetter")) || !Function->HasAnyFunctionFlags(FUNC_Native))
+		{
+			continue;
+		}
+
+		// `GetterContext` diz onde o getter vale: `Transition`, `CustomBlend`.
+		// Sem contexto, vale em qualquer um. Um getter de contexto errado entra
+		// e nao funciona, e a Engine so' reclama muito depois.
+		const FString Context = Function->HasMetaData(TEXT("GetterContext"))
+			? Function->GetMetaData(TEXT("GetterContext")) : FString();
+		if (!Context.IsEmpty() && !Context.Contains(TEXT("Transition")))
+		{
+			continue;
+		}
+
+		const FString DisplayName = Function->HasMetaData(TEXT("DisplayName"))
+			? Function->GetMetaData(TEXT("DisplayName"))
+			: FName::NameToDisplayString(Function->GetName(), false);
+
+		Available.Add(DisplayName);
+
+		if (FNodeScribeCatalog::Normalize(Function->GetName()) == Wanted
+			|| FNodeScribeCatalog::Normalize(DisplayName) == Wanted)
+		{
+			Getter = Function;
+			break;
+		}
+	}
+
+	if (!Getter)
+	{
+		return nullptr;
+	}
+
+	bOutHandled = true;
+
+	UAnimStateNodeBase* PreviousState = Transition->GetPreviousState();
+	if (!PreviousState)
+	{
+		AddError(Statement.LineNumber, FString::Printf(
+			TEXT("`%s` precisa saber de que estado a transicao sai, e esta nao esta' ligada a um."),
+			*Statement.NodeExpression));
+
+		return CreateErrorComment(Statement,
+			TEXT("A transicao nao tem estado de origem, e este getter le' justamente o estado de origem."));
+	}
+
+	// A maquina dona do estado. E' o par obrigatorio do estado: sem ela o node
+	// compila com "contains invalid data. Please delete and recreate the node."
+	UAnimGraphNode_StateMachineBase* MachineNode = nullptr;
+	if (UAnimationStateMachineGraph* MachineGraph = Cast<UAnimationStateMachineGraph>(PreviousState->GetOuter()))
+	{
+		MachineNode = Cast<UAnimGraphNode_StateMachineBase>(MachineGraph->GetOuter());
+	}
+
+	UK2Node_AnimGetter* Node = AllocateNode<UK2Node_AnimGetter>();
+	Node->SetFromFunction(Getter);
+	Node->SourceStateNode = PreviousState;
+	Node->SourceNode = MachineNode;
+	Node->GetterClass = NativeClass;
+	Node->SourceAnimBlueprint = AnimBlueprint;
+
+	// O titulo e' guardado, nao calculado: `GetNodeTitle` devolve `CachedTitle` e
+	// mais nada, entao um node sem isto aparece sem nome nenhum no grafo.
+	const FString DisplayName = Getter->HasMetaData(TEXT("DisplayName"))
+		? Getter->GetMetaData(TEXT("DisplayName"))
+		: FName::NameToDisplayString(Getter->GetName(), false);
+
+	Node->CachedTitle = FText::FromString(FString::Printf(
+		TEXT("%s (%s)"), *DisplayName, *PreviousState->GetStateName()));
+
+	Node->Contexts.Add(TEXT("Transition"));
+
+	FinalizeNode(Node);
+
+	AddInfo(Statement.LineNumber, FString::Printf(
+		TEXT("`%s` le' o estado `%s`, que e' de onde esta transicao sai."),
+		*Statement.NodeExpression, *PreviousState->GetStateName()));
+
+	return Node;
+}
+
 UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeStatement& Statement, bool& bOutHandled)
 {
 	bOutHandled = true;
+
+	// --- `$Alguma Coisa` sozinho numa linha -------------------------------
+	//
+	// A linha inteira e' um valor. Aparece onde o bloco *e'* uma expressao: a
+	// regra de uma transicao, cujo resultado e' o ultimo node do bloco.
+	//
+	// `Get Is In Air` ja' funcionava ali, e `$Is In Air` -- a forma que se
+	// escreve em todo argumento -- respondia "nao achei nenhum node chamado
+	// `$Is In Air`". Sao a mesma coisa escrita de dois jeitos, e aceitar so' uma
+	// delas obriga quem escreve a descobrir qual, num lugar em que o erro nao
+	// diz que a diferenca era essa.
+	if (Statement.NodeExpression.StartsWith(TEXT("$")))
+	{
+		const FString Reference = Statement.NodeExpression.RightChop(1).TrimStartAndEnd();
+
+		// Sem pino consumidor: aqui nao ha' quem receba o valor, entao uma
+		// variavel que nao existe continua sendo erro -- e' o mesmo criterio de
+		// um `Get X` solto, e pelo mesmo motivo (nao ha' de onde tirar o tipo).
+		if (UEdGraphPin* Pin = ResolveReference(Reference, Statement.LineNumber, nullptr))
+		{
+			return Pin->GetOwningNodeUnchecked();
+		}
+
+		// ResolveReference ja' disse o que houve.
+		return nullptr;
+	}
+
+	// Numa regra de transicao, os getters de maquina de estado vem antes do
+	// catalogo: as funcoes de mesmo nome existem e sao para outro lugar.
+	if (bTransitionGraph)
+	{
+		bool bGetterHandled = false;
+		if (UEdGraphNode* Getter = TryCreateAnimGetter(Statement, bGetterHandled))
+		{
+			return Getter;
+		}
+		if (bGetterHandled)
+		{
+			return nullptr;
+		}
+	}
 
 	// Num grafo de animacao o vocabulario de anim vem primeiro: `Blend` la' e'
 	// um node de pose, nao a funcao de mesmo nome da biblioteca de matematica.
@@ -2997,6 +3382,28 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		// e afins continuam caindo no catalogo de funcoes, que e' onde moram.
 		if (UScriptStruct* Struct = FindStructByFriendlyName(StructName))
 		{
+			// Algumas structs trazem a propria funcao de quebrar ou montar, e a
+			// Engine avisa na compilacao quando o node generico e' usado numa
+			// delas: "The structure cannot be broken using generic 'break' node.
+			// Try use specialized 'break' function if available."
+			//
+			// O aviso e' de graca para quem escreve o texto -- nem da' para
+			// escolher o node especializado pelo formato --, entao a escolha e'
+			// aqui. `Vector`, `Rotator` e `Transform`, que sao os mais escritos,
+			// estao todos nesse caso.
+			const TCHAR* const MetaKey = bIsBreak ? TEXT("HasNativeBreak") : TEXT("HasNativeMake");
+			if (Struct->HasMetaData(MetaKey))
+			{
+				const FString FunctionPath = Struct->GetMetaData(MetaKey);
+				if (UFunction* Native = FindObject<UFunction>(nullptr, *FunctionPath))
+				{
+					UK2Node_CallFunction* Node = AllocateNode<UK2Node_CallFunction>();
+					Node->SetFromFunction(Native);
+					FinalizeNode(Node);
+					return Node;
+				}
+			}
+
 			if (bIsBreak)
 			{
 				UK2Node_BreakStruct* Node = AllocateNode<UK2Node_BreakStruct>();

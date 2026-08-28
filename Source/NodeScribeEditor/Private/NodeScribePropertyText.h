@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 class FProperty;
+class FStructProperty;
 class UEdGraphPin;
 struct FEdGraphPinType;
 
@@ -81,6 +82,30 @@ namespace NodeScribePropertyText
 	 * de execucao, nao configuracao, e numa ficha seria ruido que muda sozinho.
 	 */
 	bool IsVisible(const FProperty* Property);
+
+	// -- Opcoes de node ------------------------------------------------------
+
+	/**
+	 * true quando a propriedade e' uma opcao ajustavel de um node do grafo.
+	 *
+	 * Duas exclusoes, e as duas doeram. `CPF_Edit` sozinho deixa passar o que a
+	 * struct guarda por dentro: `NodeGuid` nao e' editavel, mas os campos `A`,
+	 * `B`, `C` e `D` de um `FGuid` sao -- e a leitura passou a escrever
+	 * `Print String (In String = "ok", A = 1033722443, B = ...)` em todo node do
+	 * grafo. E o que `UEdGraphNode` declara e' encanamento do editor -- posicao,
+	 * comentario, guid --, nao configuracao do que o node faz.
+	 */
+	bool IsNodeSetting(const FProperty* Property);
+
+	/**
+	 * true quando a struct e' um `FAnimNode_*`.
+	 *
+	 * E' a unica que se abre para achar opcao: `bLoopAnimation` e `PlayRate` sao
+	 * campos dela, e o `UAnimGraphNode_*` so' a carrega. Abrir qualquer struct
+	 * transformaria cada uma em varios argumentos soltos com nome de campo, sem
+	 * dizer de quem eram.
+	 */
+	bool IsAnimNodeStruct(const FStructProperty* Property);
 
 	// -- Valor ---------------------------------------------------------------
 

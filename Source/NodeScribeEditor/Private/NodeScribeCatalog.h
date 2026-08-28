@@ -45,8 +45,14 @@ public:
 	/** Forca a reconstrucao do indice (util depois de compilar Blueprints novos). */
 	void Invalidate();
 
-	/** Normaliza para comparacao: minusculas, so letras e numeros. */
+	/**
+	 * Normaliza para comparacao: minusculas, so letras e numeros, sem acento.
+	 * `Duração do Pulo`, `duracao_do_pulo` e `DURACAODOPULO` dao a mesma chave.
+	 */
 	static FString Normalize(const FString& In);
+
+	/** `ã` -> `a`. Um caractere; quem chama e' a Normalize. */
+	static TCHAR FoldAccent(TCHAR C);
 
 	/**
 	 * true quando a funcao nao vira uma chamada, e sim um node de acao

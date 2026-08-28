@@ -1,5 +1,8 @@
 #include "NodeScribePropertyText.h"
 
+#include "AnimGraphNode_Base.h"
+#include "Animation/AnimNodeBase.h"
+#include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
 #include "Misc/StringOutputDevice.h"
@@ -265,6 +268,55 @@ bool IsVisible(const FProperty* Property)
 	}
 
 	return Property->HasAnyPropertyFlags(CPF_Edit | CPF_BlueprintVisible);
+}
+
+// -- Opcoes de node ----------------------------------------------------------
+
+bool IsNodeSetting(const FProperty* Property)
+{
+	if (!Property)
+	{
+		return false;
+	}
+
+	if (!Property->HasAnyPropertyFlags(CPF_Edit)
+		|| Property->HasAnyPropertyFlags(CPF_EditConst | CPF_Transient | CPF_Deprecated))
+	{
+		return false;
+	}
+
+	// O que `UEdGraphNode` declara e' encanamento do editor: posicao, tamanho,
+	// comentario, guid. Nada disso diz o que o node faz, e o guid ainda por cima
+	// difere em todo node -- entao sairia em toda linha.
+	//
+	// `UAnimGraphNode_Base` e' a mesma coisa um andar acima: `Binding` e
+	// `Show Pin for Properties` decidem quais campos viram pino e como o node se
+	// desenha. A configuracao de verdade de um node de anim mora na struct
+	// `FAnimNode_*` que ele carrega, e e' de la' que sai `Loop Animation`. Sem
+	// esta linha, todo asset player lido saia com um `Binding = /Game/.../
+	// AnimGraphNodeBinding_Base_0` -- um caminho de subobjeto que nao volta ao
+	// colar -- e um aviso de que `Show Pin for Properties` mudou e nao cabe em
+	// texto, em cada node do grafo.
+	if (Property->GetOwnerClass() == UEdGraphNode::StaticClass()
+		|| Property->GetOwnerClass() == UAnimGraphNode_Base::StaticClass())
+	{
+		return false;
+	}
+
+	// Subobjeto instanciado nao volta por texto: o valor e' um caminho para um
+	// objeto que so' existe dentro deste node.
+	if (Property->HasAnyPropertyFlags(CPF_InstancedReference))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool IsAnimNodeStruct(const FStructProperty* Property)
+{
+	return Property && Property->Struct
+		&& Property->Struct->IsChildOf(FAnimNode_Base::StaticStruct());
 }
 
 // -- Valor -------------------------------------------------------------------
