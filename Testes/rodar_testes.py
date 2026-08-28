@@ -432,7 +432,48 @@ def blendspace_ganha_malha():
     return True, []
 
 
+def cadeia_chega_no_function_entry():
+    """Colar num grafo de funcao tem que ligar a cadeia na entrada.
+
+    O Construction Script e' o caso a mao: a entrada dele ja' existe e nao se
+    cria por linha, igual ao Output Pose de um AnimGraph. Sem a ligacao, a
+    cadeia entra inteira, compila sem um aviso, e nunca roda -- e a leitura de
+    volta so' denuncia isso pelo `Function Entry` aparecer sozinho no fim, em
+    vez de na frente da cadeia que ele dispara.
+    """
+    caminho = '%s/NS_function_entry' % DESTINO
+
+    relato = unreal.NodeScribeLibrary.create_asset(caminho, 'Actor', '')
+    if relato.startswith('[erro]'):
+        return False, [relato]
+
+    bp = unreal.load_asset(caminho)
+    grafo = unreal.load_object(bp, 'UserConstructionScript') if bp else None
+    if not grafo:
+        return False, ['nao achei o UserConstructionScript de %s' % caminho]
+
+    escrita = unreal.NodeScribeLibrary.write_graph(
+        grafo, 'Print String (In String = "do construction script")')
+
+    if '[erro]' in escrita:
+        return False, ['a escrita reclamou:'] + escrita.splitlines()
+
+    linhas = corpo(unreal.NodeScribeLibrary.read_graph(grafo))
+
+    # A leitura percorre a partir da entrada: com a cadeia ligada, o
+    # `Function Entry` abre o texto. Solto, ele sai depois, como orfao.
+    if not linhas or linhas[0].strip() != 'Function Entry':
+        return False, [
+            'o Function Entry nao abre a leitura: a cadeia entrou solta e',
+            'nunca roda.',
+            '',
+        ] + linhas
+
+    return True, []
+
+
 OUTROS = [
+    ('cadeia_chega_no_function_entry', cadeia_chega_no_function_entry),
     ('substituir_troca_o_grafo', substituir_troca_o_grafo),
     ('substituir_recusa_grafo_com_perda', substituir_recusa_grafo_com_perda),
     ('maquina_de_estados_volta_igual', maquina_de_estados_volta_igual),

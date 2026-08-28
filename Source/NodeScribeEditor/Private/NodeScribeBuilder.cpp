@@ -56,6 +56,7 @@
 #include "K2Node_SwitchName.h"
 #include "K2Node_SwitchString.h"
 #include "K2Node_VariableGet.h"
+#include "K2Node_FunctionEntry.h"
 #include "K2Node_VariableSet.h"
 #include "Subsystems/EngineSubsystem.h"
 #include "Subsystems/LocalPlayerSubsystem.h"
@@ -1139,6 +1140,20 @@ private:
 	 */
 	void ConnectOutputPose();
 
+	/**
+	 * Liga o inicio da cadeia no Function Entry, quando o texto nao o escreveu.
+	 *
+	 * E' o espelho do ConnectOutputPose. Num grafo de funcao -- e no Construction
+	 * Script -- a entrada ja' existe e nao se cria por linha, do mesmo jeito que
+	 * o Output Pose. Sem esta ligacao a cadeia entra inteira, compila sem um
+	 * aviso, e nunca roda: nada na tela distingue isso de um grafo certo, e a
+	 * leitura de volta so' mostra o `Function Entry` sozinho no fim.
+	 */
+	void ConnectFunctionEntry();
+
+	/** A propriedade aceita Set vindo de Blueprint? */
+	bool IsVariableWritable(const FString& Name) const;
+
 	/** Reclama de entrada de pose vazia: pose vazia nao quebra nada, so' fica parada. */
 	void ReportEmptyPoseInputs();
 };
@@ -1424,6 +1439,88 @@ void FNodeScribeBuildContext::ConnectOutputPose()
 	}
 }
 
+void FNodeScribeBuildContext::ConnectFunctionEntry()
+{
+	if (bAnimGraph || !Graph)
+	{
+		return;
+	}
+
+	UK2Node_FunctionEntry* Entry = nullptr;
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (UK2Node_FunctionEntry* Found = Cast<UK2Node_FunctionEntry>(Node))
+		{
+			Entry = Found;
+			break;
+		}
+	}
+
+	if (!Entry)
+	{
+		// EventGraph nao tem entrada: la' quem comeca a cadeia e' o evento, e o
+		// texto o escreve.
+		return;
+	}
+
+	UEdGraphPin* Saida = nullptr;
+	for (UEdGraphPin* Pin : Entry->Pins)
+	{
+		if (Pin->Direction == EGPD_Output && IsExecPin(Pin))
+		{
+			Saida = Pin;
+			break;
+		}
+	}
+
+	if (!Saida)
+	{
+		return;
+	}
+
+	// O primeiro node criado que ainda tem entrada de execucao livre e' o topo
+	// da cadeia: a ordem de criacao e' a ordem do texto, e tudo que vem depois
+	// dele ja' foi ligado por quem o precede.
+	UEdGraphNode* Primeiro = nullptr;
+	UEdGraphPin* Entrada = nullptr;
+
+	for (UEdGraphNode* Node : Result.CreatedNodes)
+	{
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin->Direction == EGPD_Input && IsExecPin(Pin) && Pin->LinkedTo.Num() == 0)
+			{
+				Primeiro = Node;
+				Entrada = Pin;
+				break;
+			}
+		}
+
+		if (Primeiro)
+		{
+			break;
+		}
+	}
+
+	if (!Primeiro)
+	{
+		return;
+	}
+
+	if (Saida->LinkedTo.Num() > 0)
+	{
+		// Acrescentar a uma funcao que ja' tem cadeia: sequestrar a entrada
+		// apagaria o que estava la'. A cadeia nova fica solta, e o aviso diz.
+		AddWarning(0, FString::Printf(
+			TEXT("`%s` entrou solto: o Function Entry ja' aponta para outra cadeia. ")
+			TEXT("Ligue na mao, ou reescreva o grafo com `substituir`."),
+			*Primeiro->GetNodeTitle(ENodeTitleType::ListView).ToString()));
+		return;
+	}
+
+	Connect(Saida, Entrada, 0);
+}
+
 void FNodeScribeBuildContext::ReportEmptyPoseInputs()
 {
 	if (!bAnimGraph)
@@ -1502,6 +1599,15 @@ UClass* FNodeScribeBuildContext::GetSelfClass() const
 	}
 
 	return Blueprint->GeneratedClass ? Blueprint->GeneratedClass.Get() : Blueprint->ParentClass.Get();
+}
+
+bool FNodeScribeBuildContext::IsVariableWritable(const FString& Name) const
+{
+	UClass* SelfClass = GetSelfClass();
+	const FProperty* Property = SelfClass ? SelfClass->FindPropertyByName(FName(*Name)) : nullptr;
+
+	return Property != nullptr
+		&& !Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly | CPF_EditConst);
 }
 
 bool FNodeScribeBuildContext::IsBlueprintVariable(const FString& Name) const
@@ -3510,7 +3616,15 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 
 		// So' trata como variavel se ela existir de fato. Assim `Get Player Controller`
 		// continua caindo no catalogo de funcoes, que e' onde ele mora.
-		if (IsBlueprintVariable(VariableName))
+		// Somente-leitura nao vira Set. `LeaderPoseComponent` e' `BlueprintReadOnly`
+		// e entrava como setter assim mesmo -- escondendo a funcao
+		// `SetLeaderPoseComponent`, que e' quem faz o trabalho de verdade (o mapa
+		// de ossos entre os dois meshes). O node entrava, e o que ele faz nao e' o
+		// que a linha pedia. Bloqueado aqui, a linha cai no catalogo e acha a
+		// funcao, que e' onde ela sempre deveria ter caido.
+		const bool bSetterBloqueado = bIsSetter && !IsVariableWritable(VariableName);
+
+		if (IsBlueprintVariable(VariableName) && !bSetterBloqueado)
 		{
 			if (bIsSetter)
 			{
@@ -3533,7 +3647,16 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		{
 			if (UClass* TargetClass = FindTargetClassFromArgs(Statement))
 			{
-				if (FProperty* Property = FindPropertyByFriendlyName(TargetClass, VariableName))
+				FProperty* Property = FindPropertyByFriendlyName(TargetClass, VariableName);
+
+				// Mesmo motivo do bloco acima, do outro lado do `Target`.
+				if (Property && bIsSetter
+					&& Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly | CPF_EditConst))
+				{
+					Property = nullptr;
+				}
+
+				if (Property)
 				{
 					if (bIsSetter)
 					{
@@ -4480,6 +4603,7 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 	}
 
 	ConnectOutputPose();
+	ConnectFunctionEntry();
 
 	LayoutAnimNodes();
 	LayoutDataNodes();
