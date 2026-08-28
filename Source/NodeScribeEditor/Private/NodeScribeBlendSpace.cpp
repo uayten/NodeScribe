@@ -398,10 +398,18 @@ FResult Write(UBlendSpace* BlendSpace, const FString& Text)
 		++Result.SamplesAdded;
 	}
 
-	// A malha de interpolacao e' recalculada aqui. Sem isto o asset guarda os
-	// samples, abre, mostra os pontos -- e nao interpola nada, porque quem
-	// interpola e' a malha, e ela ficou do tamanho antigo.
-	BlendSpace->ValidateSampleData();
+	// A malha de interpolacao e' reconstruida aqui, e quem reconstroi e'
+	// `ResampleData`. `ValidateSampleData` sozinho nao serve, e o nome engana:
+	// quando os samples mudam ele *apaga* a malha (`GridSamples.Empty()`) e para
+	// ali. Quem a preenche de novo -- a malha e o `BlendSpaceData` da
+	// triangulacao, que e' o que o BlendSpace Player le' ao rodar -- e'
+	// `ResampleData`, que ja' chama `ValidateSampleData` no caminho.
+	//
+	// Sem isto o asset guarda os samples, abre no editor, mostra os pontos, e
+	// nao interpola nada: o node entra no AnimGraph, o Blueprint compila sem um
+	// aviso sequer, e o personagem fica na pose de referencia. E' o buraco mais
+	// silencioso que este arquivo sabe abrir.
+	BlendSpace->ResampleData();
 	BlendSpace->PostEditChange();
 	BlendSpace->MarkPackageDirty();
 
