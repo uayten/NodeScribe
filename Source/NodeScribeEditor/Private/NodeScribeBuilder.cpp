@@ -12,6 +12,8 @@
 #include "AnimGraphNode_Base.h"
 #include "AnimGraphNode_StateMachineBase.h"
 #include "AnimGraphNode_TransitionResult.h"
+#include "AnimStateAliasNode.h"
+#include "AnimStateConduitNode.h"
 #include "AnimStateEntryNode.h"
 #include "AnimStateNode.h"
 #include "AnimStateTransitionNode.h"
@@ -1007,6 +1009,19 @@ private:
 	 * nao tem pino nenhum.
 	 */
 	static bool FindNodeSetting(UEdGraphNode* Node, const FString& Name, FNodeSetting& Out, TArray<FString>& OutAvailable);
+
+	/** Aplica os argumentos de um rotulo como opcoes do painel de detalhes. */
+	void ApplyLabelSettings(UEdGraphNode* Node, const FNodeScribeStatement& Statement);
+
+	/**
+	 * Liga o fim do bloco no `Can Enter Transition` do grafo de regra.
+	 *
+	 * Serve transicao e conduto: os dois carregam um `TransitionResult`, e nos
+	 * dois o texto so' escreve a condicao -- ligar nele e' do plugin, como toda
+	 * ligacao que o formato nao escreve.
+	 */
+	void WireRule(UEdGraph* RuleGraph, UEdGraphNode* RuleResult,
+		const FNodeScribeStatement& Statement, bool bHasBody, bool bRuleOptional);
 
 	UEdGraph* Graph = nullptr;
 	UBlueprint* Blueprint = nullptr;
@@ -2159,6 +2174,56 @@ bool FNodeScribeBuildContext::FindNodeSetting(UEdGraphNode* Node, const FString&
 
 	Out = Found[0];
 	return true;
+}
+
+void FNodeScribeBuildContext::ApplyLabelSettings(UEdGraphNode* Node, const FNodeScribeStatement& Statement)
+{
+	// Um rotulo nao tem pino: estado, conduto e transicao se ajustam so' pelo
+	// painel de detalhes. Por isso aqui e' so' a metade de opcao do
+	// ApplyArguments -- nao ha' para onde mandar um argumento posicional, e um
+	// `$referencia` nao teria fio para percorrer.
+	for (const FNodeScribeArg& Arg : Statement.Args)
+	{
+		if (Arg.PinName.IsEmpty())
+		{
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("`%s` em `%s:` nao tem nome. Um rotulo so' aceita opcao nomeada: ")
+				TEXT("`(Nome = valor)`."), *Arg.Value, *Statement.Label));
+			continue;
+		}
+
+		FNodeSetting Setting;
+		TArray<FString> Available;
+
+		if (!FindNodeSetting(Node, Arg.PinName, Setting, Available))
+		{
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("`%s` nao e' opcao de `%s:`. Opcoes: %s"),
+				*Arg.PinName, *Statement.Label,
+				Available.Num() > 0 ? *FString::Join(Available, TEXT(", ")) : TEXT("nenhuma")));
+			continue;
+		}
+
+		if (Arg.bIsReference)
+		{
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("`%s` e' opcao do painel de detalhes: aceita valor fixo, nao `$%s`."),
+				*Arg.PinName, *Arg.Value));
+			continue;
+		}
+
+		Node->Modify();
+
+		FString Error;
+		if (!TextToValue(Setting.Property, Setting.ValuePtr, Arg.Value, Error))
+		{
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("`%s = %s` nao entrou: %s"), *Arg.PinName, *Arg.Value, *Error));
+			continue;
+		}
+
+		Node->PostEditChange();
+	}
 }
 
 void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScribeStatement& Statement)
@@ -3660,6 +3725,47 @@ namespace
 		return false;
 	}
 
+	/**
+	 * `alias Para o Ar` -> "Para o Ar".
+	 *
+	 * O alias e' um apelido para varios estados de uma vez: uma transicao que
+	 * sai dele sai de todos, sem repetir a regra em cada um. Nao tem sub-grafo
+	 * -- o bloco dele e' a lista dos estados que ele apelida, uma por linha.
+	 */
+	bool ParseAliasLabel(const FString& Label, FString& OutName)
+	{
+		for (const TCHAR* Prefix : { TEXT("alias "), TEXT("apelido ") })
+		{
+			if (Label.StartsWith(Prefix, ESearchCase::IgnoreCase))
+			{
+				OutName = Label.Mid(FCString::Strlen(Prefix)).TrimStartAndEnd();
+				return !OutName.IsEmpty();
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * `conduto Para Queda` -> "Para Queda".
+	 *
+	 * Um conduto nao guarda pose: e' um cruzamento com uma regra so', por onde
+	 * varias transicoes passam em vez de cada uma repetir a mesma condicao. Sem
+	 * palavra propria, `conduto X:` seria indistinguivel de `estado X:` -- e a
+	 * diferenca importa, porque o bloco de um e' pose e o do outro e' regra.
+	 */
+	bool ParseConduitLabel(const FString& Label, FString& OutName)
+	{
+		for (const TCHAR* Prefix : { TEXT("conduto "), TEXT("conduit ") })
+		{
+			if (Label.StartsWith(Prefix, ESearchCase::IgnoreCase))
+			{
+				OutName = Label.Mid(FCString::Strlen(Prefix)).TrimStartAndEnd();
+				return !OutName.IsEmpty();
+			}
+		}
+		return false;
+	}
+
 	/** `Parado -> Correndo`, com ou sem `transicao` na frente. */
 	bool ParseTransitionLabel(const FString& Label, FString& OutFrom, FString& OutTo)
 	{
@@ -3742,7 +3848,7 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 	// Todos antes de qualquer transicao. Assim `Parado -> Correndo` pode vir
 	// escrito antes de `estado Correndo`, e um nome errado numa transicao vira
 	// erro em vez de um estado vazio criado por engano.
-	TMap<FString, UAnimStateNode*> States;
+	TMap<FString, UAnimStateNodeBase*> States;
 	TArray<FString> DeclaredOrder;
 
 	for (int32 Index = First; Index < End; ++Index)
@@ -3754,7 +3860,11 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 		}
 
 		FString Name;
-		if (!ParseStateLabel(Statement.Label, Name))
+		const bool bIsState = ParseStateLabel(Statement.Label, Name);
+		const bool bIsConduit = !bIsState && ParseConduitLabel(Statement.Label, Name);
+		const bool bIsAlias = !bIsState && !bIsConduit && ParseAliasLabel(Statement.Label, Name);
+
+		if (!bIsState && !bIsConduit && !bIsAlias)
 		{
 			continue;
 		}
@@ -3767,12 +3877,37 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 			continue;
 		}
 
-		UAnimStateNode* State = AllocateNode<UAnimStateNode>(MachineGraph);
-		FinalizeNode(State);
-
-		if (State->BoundGraph)
+		// Estado, conduto e alias nascem na mesma lista: os tres sao ponta de
+		// transicao. O que muda e' o que vive dentro -- pose no estado, regra no
+		// conduto, uma lista de nomes no alias --, e quem decide isso e' a
+		// classe do node.
+		UAnimStateNodeBase* State = nullptr;
+		if (bIsAlias)
 		{
-			FBlueprintEditorUtils::RenameGraph(State->BoundGraph, Name);
+			State = AllocateNode<UAnimStateAliasNode>(MachineGraph);
+		}
+		else if (bIsConduit)
+		{
+			State = AllocateNode<UAnimStateConduitNode>(MachineGraph);
+		}
+		else
+		{
+			State = AllocateNode<UAnimStateNode>(MachineGraph);
+		}
+
+		FinalizeNode(State);
+		ApplyLabelSettings(State, Statement);
+
+		// O nome de um estado e' o do sub-grafo dele; o de um alias e' um campo,
+		// porque alias nao tem sub-grafo. Pelo virtual, e nao pelo campo:
+		// `BoundGraph` e' declarado em cada subclasse, nao na base.
+		if (UEdGraph* Bound = State->GetBoundGraph())
+		{
+			FBlueprintEditorUtils::RenameGraph(Bound, Name);
+		}
+		else
+		{
+			State->OnRenameNode(Name);
 		}
 
 		State->NodePosX = States.Num() * StateColumnWidth;
@@ -3796,7 +3931,7 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 	{
 		if (UEdGraphPin* EntryPin = MachineGraph->EntryNode->GetOutputPin())
 		{
-			UAnimStateNode* FirstState = States[DeclaredOrder[0]];
+			UAnimStateNodeBase* FirstState = States[DeclaredOrder[0]];
 			if (UEdGraphPin* StatePin = FirstState->GetInputPin())
 			{
 				EntryPin->BreakAllPinLinks();
@@ -3821,13 +3956,66 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 		}
 
 		FString Name;
-		if (ParseStateLabel(Statement.Label, Name))
+		const bool bIsState = ParseStateLabel(Statement.Label, Name);
+		const bool bIsConduit = !bIsState && ParseConduitLabel(Statement.Label, Name);
+		const bool bIsAlias = !bIsState && !bIsConduit && ParseAliasLabel(Statement.Label, Name);
+
+		if (bIsAlias)
 		{
-			UAnimStateNode* State = States.FindRef(FNodeScribeCatalog::Normalize(Name));
-			if (State && State->BoundGraph)
+			UAnimStateAliasNode* Alias =
+				Cast<UAnimStateAliasNode>(States.FindRef(FNodeScribeCatalog::Normalize(Name)));
+
+			if (!Alias)
 			{
-				BuildSubGraph(State->BoundGraph, Statements, Index + 1, BodyEnd);
+				continue;
 			}
+
+			for (int32 Body = Index + 1; Body < BodyEnd; ++Body)
+			{
+				const FNodeScribeStatement& Line = Statements[Body];
+				const FString Wanted = Line.bIsLabel ? Line.Label : Line.NodeExpression.TrimStartAndEnd();
+
+				UAnimStateNodeBase* Target = States.FindRef(FNodeScribeCatalog::Normalize(Wanted));
+
+				// So' estado de verdade. A Engine varre o grafo por
+				// `UAnimStateNode` ao reconstruir as referencias do alias, entao
+				// um conduto ou outro alias na lista some no proximo save -- sem
+				// erro, sem aviso, e a transicao que saia dali para de existir.
+				if (!Target || !Target->IsA<UAnimStateNode>())
+				{
+					AddError(Line.LineNumber, FString::Printf(
+						TEXT("`%s` nao e' um estado desta maquina, entao nao entra no alias `%s`. ")
+						TEXT("Alias so' aponta para `estado`, nao para conduto nem para outro alias."),
+						*Wanted, *Name));
+					continue;
+				}
+
+				Alias->GetAliasedStates().Add(Target);
+			}
+
+			continue;
+		}
+
+		if (bIsState || bIsConduit)
+		{
+			UAnimStateNodeBase* State = States.FindRef(FNodeScribeCatalog::Normalize(Name));
+			UEdGraph* Bound = State ? State->GetBoundGraph() : nullptr;
+			if (!Bound)
+			{
+				continue;
+			}
+
+			UEdGraphNode* Last = BuildSubGraph(Bound, Statements, Index + 1, BodyEnd);
+
+			// Num estado o bloco e' pose, e ela se liga no Output Pose de dentro
+			// do proprio sub-grafo. Num conduto o bloco e' regra: termina num
+			// bool que precisa chegar no Can Enter Transition, igual ao de uma
+			// transicao. Sem isso o conduto compila e nunca deixa passar.
+			if (bIsConduit)
+			{
+				WireRule(Bound, Last, Statement, BodyEnd > Index + 1, false);
+			}
+
 			continue;
 		}
 
@@ -3835,13 +4023,14 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 		if (!ParseTransitionLabel(Statement.Label, From, To))
 		{
 			AddError(Statement.LineNumber, FString::Printf(
-				TEXT("`%s:` nao e' estado nem transicao. Dentro de uma maquina de estados so' ha' ")
-				TEXT("`estado Nome:` e `Origem -> Destino:`."), *Statement.Label));
+				TEXT("`%s:` nao e' estado, conduto, alias nem transicao. Dentro de uma maquina de ")
+				TEXT("estados so' ha' `estado Nome:`, `conduto Nome:`, `alias Nome:` e ")
+				TEXT("`Origem -> Destino:`."), *Statement.Label));
 			continue;
 		}
 
-		UAnimStateNode* FromState = States.FindRef(FNodeScribeCatalog::Normalize(From));
-		UAnimStateNode* ToState = States.FindRef(FNodeScribeCatalog::Normalize(To));
+		UAnimStateNodeBase* FromState = States.FindRef(FNodeScribeCatalog::Normalize(From));
+		UAnimStateNodeBase* ToState = States.FindRef(FNodeScribeCatalog::Normalize(To));
 
 		if (!FromState || !ToState)
 		{
@@ -3866,6 +4055,7 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 
 		UAnimStateTransitionNode* Transition = AllocateNode<UAnimStateTransitionNode>(MachineGraph);
 		FinalizeNode(Transition);
+		ApplyLabelSettings(Transition, Statement);
 		Transition->CreateConnections(FromState, ToState);
 
 		// Em cima do fio, que e' onde o editor a desenha.
@@ -3874,100 +4064,128 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 
 		NestedNodes.Add(Transition);
 
-		if (!Transition->BoundGraph)
-		{
-			continue;
-		}
+		UEdGraphNode* RuleResult = Transition->BoundGraph
+			? BuildSubGraph(Transition->BoundGraph, Statements, Index + 1, BodyEnd)
+			: nullptr;
 
-		UEdGraphNode* RuleResult = BuildSubGraph(Transition->BoundGraph, Statements, Index + 1, BodyEnd);
-
-		// A regra e' um grafo de dado que termina num bool. Ligar o resultado e'
-		// trabalho do plugin, como qualquer outra ligacao que o texto nao
-		// escreve -- e sem isso a transicao nunca dispara.
-		UAnimGraphNode_TransitionResult* ResultNode = nullptr;
-		for (UEdGraphNode* Node : Transition->BoundGraph->Nodes)
-		{
-			if (UAnimGraphNode_TransitionResult* Found = Cast<UAnimGraphNode_TransitionResult>(Node))
-			{
-				ResultNode = Found;
-				break;
-			}
-		}
-
-		// Estes dois calavam. Uma transicao sem regra compila, roda, e nunca
-		// dispara -- o pino vazio parece um `false` deliberado, e nada na tela
-		// distingue "o texto nao pediu regra" de "o plugin nao conseguiu ligar".
-		if (!ResultNode)
-		{
-			AddWarning(Statement.LineNumber, FString::Printf(
-				TEXT("A transicao `%s` nasceu sem node de resultado. A regra nao foi ligada."),
-				*Statement.Label));
-			continue;
-		}
-
-		UEdGraphPin* CanEnter = ResultNode->FindPin(TEXT("bCanEnterTransition"));
-		if (!CanEnter)
-		{
-			TArray<FString> Pinos;
-			for (const UEdGraphPin* Pin : ResultNode->Pins)
-			{
-				Pinos.Add(Pin->PinName.ToString());
-			}
-
-			AddWarning(Statement.LineNumber, FString::Printf(
-				TEXT("O resultado de `%s` nao tem pino `bCanEnterTransition`. Tem: %s"),
-				*Statement.Label,
-				Pinos.Num() > 0 ? *FString::Join(Pinos, TEXT(", ")) : TEXT("nenhum")));
-			continue;
-		}
-
-		if (CanEnter->LinkedTo.Num() > 0 || BodyEnd == Index + 1)
-		{
-			continue;
-		}
-
-		// O ultimo node do bloco e' o resultado da regra, do mesmo jeito que o
-		// ultimo node de um galho de pose e' o resultado do galho.
-		//
-		// Quem diz qual e' esse node e' o percurso do bloco, nao a ordem em que
-		// os nodes cairam no grafo: o argumento de um node nasce *depois* dele,
-		// entao varrer `BoundGraph->Nodes` de tras para frente pega o
-		// `$Ground Speed` da regra em vez da comparacao que o consome -- e ai a
-		// transicao fica sem regra, com um aviso de tipo trocado no lugar.
-		UEdGraphPin* Output = RuleResult ? FindPrimaryOutput(RuleResult) : nullptr;
-		if (!Output)
-		{
-			// Transicao sem regra nunca dispara, e nada na tela diz isso: o pino
-			// vazio parece um `false` deliberado.
-			AddWarning(Statement.LineNumber, FString::Printf(
-				TEXT("A regra de `%s` nao terminou num valor. A transicao nunca dispara."),
-				*Statement.Label));
-			continue;
-		}
-
-		// Os dois pinos vivem no grafo da regra, nao neste. Ligar pelo schema
-		// daqui produz um fio que o grafo de la' nao reconhece: ele aparece, e
-		// some no primeiro refresh do Blueprint -- que e' logo ali, no
-		// MarkBlueprintAsStructurallyModified. Quem valida a ligacao tem que ser
-		// o schema do grafo onde os pinos moram.
-		const UEdGraphSchema* RuleSchema = Transition->BoundGraph->GetSchema();
-		if (RuleSchema)
-		{
-			RuleSchema->TryCreateConnection(Output, CanEnter);
-		}
-
-		// Conferir em vez de confiar: sem regra a transicao nunca dispara, e o
-		// pino vazio nao se distingue de um `false` deliberado.
-		if (CanEnter->LinkedTo.Num() == 0)
-		{
-			AddWarning(Statement.LineNumber, FString::Printf(
-				TEXT("A regra de `%s` (`%s`) nao entrou no Can Enter Transition. A transicao nunca dispara."),
-				*Statement.Label,
-				*RuleResult->GetNodeTitle(ENodeTitleType::ListView).ToString()));
-		}
+		// Com a regra automatica ligada a transicao dispara quando a animacao do
+		// estado de origem esta' acabando, e por isso nasce sem condicao
+		// nenhuma. Sem essa ressalva, toda transicao automatica lida da Epic
+		// voltava com um aviso de que nunca dispararia -- o que era falso, e
+		// ensinava a ignorar justamente o aviso que existe para o caso em que e'
+		// verdade.
+		WireRule(Transition->BoundGraph, RuleResult, Statement,
+			BodyEnd > Index + 1, Transition->bAutomaticRuleBasedOnSequencePlayerInState);
 	}
 
 	return End;
+}
+
+void FNodeScribeBuildContext::WireRule(UEdGraph* RuleGraph, UEdGraphNode* RuleResult,
+	const FNodeScribeStatement& Statement, bool bHasBody, bool bRuleOptional)
+{
+	if (!RuleGraph)
+	{
+		AddWarning(Statement.LineNumber, FString::Printf(
+			TEXT("`%s` nasceu sem sub-grafo. A regra nao foi ligada."), *Statement.Label));
+		return;
+	}
+
+	// A regra e' um grafo de dado que termina num bool. Ligar o resultado e'
+	// trabalho do plugin, como qualquer outra ligacao que o texto nao escreve --
+	// e sem isso a transicao nunca dispara.
+	UAnimGraphNode_TransitionResult* ResultNode = nullptr;
+	for (UEdGraphNode* Node : RuleGraph->Nodes)
+	{
+		if (UAnimGraphNode_TransitionResult* Found = Cast<UAnimGraphNode_TransitionResult>(Node))
+		{
+			ResultNode = Found;
+			break;
+		}
+	}
+
+	// Estes calavam. Uma transicao sem regra compila, roda, e nunca dispara --
+	// o pino vazio parece um `false` deliberado, e nada na tela distingue "o
+	// texto nao pediu regra" de "o plugin nao conseguiu ligar".
+	if (!ResultNode)
+	{
+		AddWarning(Statement.LineNumber, FString::Printf(
+			TEXT("`%s` nasceu sem node de resultado. A regra nao foi ligada."), *Statement.Label));
+		return;
+	}
+
+	UEdGraphPin* CanEnter = ResultNode->FindPin(TEXT("bCanEnterTransition"));
+	if (!CanEnter)
+	{
+		TArray<FString> Pinos;
+		for (const UEdGraphPin* Pin : ResultNode->Pins)
+		{
+			Pinos.Add(Pin->PinName.ToString());
+		}
+
+		AddWarning(Statement.LineNumber, FString::Printf(
+			TEXT("O resultado de `%s` nao tem pino `bCanEnterTransition`. Tem: %s"),
+			*Statement.Label,
+			Pinos.Num() > 0 ? *FString::Join(Pinos, TEXT(", ")) : TEXT("nenhum")));
+		return;
+	}
+
+	if (CanEnter->LinkedTo.Num() > 0)
+	{
+		return;
+	}
+
+	if (!bHasBody)
+	{
+		// Bloco vazio. Com a regra automatica isso e' o certo: a transicao
+		// dispara pelo fim da animacao do estado de origem, e uma condicao
+		// escrita ali seria ignorada. Sem ela, e' uma transicao que nunca
+		// dispara -- e nada na tela diz isso.
+		if (!bRuleOptional)
+		{
+			AddWarning(Statement.LineNumber, FString::Printf(
+				TEXT("`%s` ficou sem regra. Ela compila e nunca dispara -- se a intencao era ")
+				TEXT("disparar no fim da animacao, escreva ")
+				TEXT("`(Automatic Rule Based on Sequence Player in State = true)`."),
+				*Statement.Label));
+		}
+		return;
+	}
+
+	// O ultimo node do bloco e' o resultado da regra, do mesmo jeito que o
+	// ultimo node de um galho de pose e' o resultado do galho.
+	//
+	// Quem diz qual e' esse node e' o percurso do bloco, nao a ordem em que os
+	// nodes cairam no grafo: o argumento de um node nasce *depois* dele, entao
+	// varrer `Nodes` de tras para frente pega o `$Ground Speed` da regra em vez
+	// da comparacao que o consome -- e ai a transicao fica sem regra, com um
+	// aviso de tipo trocado no lugar.
+	UEdGraphPin* Output = RuleResult ? FindPrimaryOutput(RuleResult) : nullptr;
+	if (!Output)
+	{
+		AddWarning(Statement.LineNumber, FString::Printf(
+			TEXT("A regra de `%s` nao terminou num valor. Ela nunca dispara."), *Statement.Label));
+		return;
+	}
+
+	// Os dois pinos vivem no grafo da regra, nao no da maquina. Ligar pelo
+	// schema de fora produz um fio que o grafo de la' nao reconhece: ele
+	// aparece, e some no primeiro refresh do Blueprint -- que e' logo ali, no
+	// MarkBlueprintAsStructurallyModified. Quem valida a ligacao tem que ser o
+	// schema do grafo onde os pinos moram.
+	if (const UEdGraphSchema* RuleSchema = RuleGraph->GetSchema())
+	{
+		RuleSchema->TryCreateConnection(Output, CanEnter);
+	}
+
+	// Conferir em vez de confiar.
+	if (CanEnter->LinkedTo.Num() == 0)
+	{
+		AddWarning(Statement.LineNumber, FString::Printf(
+			TEXT("A regra de `%s` (`%s`) nao entrou no Can Enter Transition. Ela nunca dispara."),
+			*Statement.Label,
+			*RuleResult->GetNodeTitle(ENodeTitleType::ListView).ToString()));
+	}
 }
 
 // ---------------------------------------------------------------------------

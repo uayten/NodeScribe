@@ -475,6 +475,76 @@ Numa regra, uma variável sozinha basta. As três formas abaixo dão o mesmo nod
     Esta no Ar
 ```
 
+### Opção de estado e de transição
+
+O que fica no painel de detalhes entra entre parênteses, **antes** dos dois
+pontos — a mesma sintaxe de `MM_Jump (Loop Animation = false)`:
+
+```
+  Aterrissagem -> Terra (Automatic Rule Based on Sequence Player in State = true):
+```
+
+Essa é a que mais importa. Com ela ligada, a transição dispara sozinha quando a
+animação do estado de origem está acabando — e por isso **nasce sem regra
+nenhuma**. É como a Epic escreve o `Land -> Locomotion` do `ABP_Unarmed`.
+
+Sem ela, uma transição de bloco vazio é uma transição que compila e nunca
+dispara, e sai aviso dizendo isso. As duas são idênticas na tela; a diferença
+mora na opção, e é por isso que ela precisa caber no texto.
+
+Entram aqui todas as opções do painel: `Duration` (o tempo de blend),
+`Priority Order`, `Blend Mode`, `Min Time Before Re-entry`. A leitura escreve o
+que difere de uma transição recém-criada. Um estado aceita as dele do mesmo
+jeito, e um conduto também.
+
+Opção não aceita `$referência`: é valor fixo, porque não há fio para ligar.
+
+### Conduto
+
+Um conduto é um cruzamento: **uma regra só**, por onde várias transições passam,
+em vez de cada uma repetir a mesma condição.
+
+```
+  conduto Para o Ar:
+    Get Esta no Ar
+  Terra -> Para o Ar:
+  Para o Ar -> Pulo:
+    Greater (A = $Velocidade Z, B = 100.0)
+  Para o Ar -> Queda:
+    Less Equal (A = $Velocidade Z, B = 100.0)
+```
+
+O bloco de um conduto é **regra**, não pose. É a diferença que obriga a palavra
+própria: `conduto X:` e `estado X:` seriam indistinguíveis no texto, e o plugin
+criaria o node errado — um estado sem pose, que é a pose de referência.
+
+Nas transições ele é uma ponta como qualquer outra, e vale `conduit` em inglês.
+
+### Alias
+
+Um alias é um apelido para vários estados de uma vez: uma transição que sai dele
+sai de todos, sem repetir a regra em cada um. O bloco é a lista dos estados, uma
+por linha.
+
+```
+  alias Para o Ar:
+    Pulo
+    Queda
+  Para o Ar -> Aterrissagem:
+    NOT Boolean (A = $Esta no Ar)
+```
+
+É o que a Epic usa no `ABP_Unarmed`: `To Falling` e `To Land` são alias, não
+estados.
+
+Alias só aponta para `estado`. Um conduto ou outro alias na lista é recusado —
+a Engine varre o grafo por estados ao reconstruir as referências, e o que não
+for estado **some no próximo save**, sem erro e sem aviso, levando junto a
+transição que saía dali.
+
+`alias Nome (Global Alias = true):` vale por todos os estados da máquina, e aí
+o bloco fica vazio.
+
 ### Os getters de máquina de estado
 
 Dentro de uma regra de transição existe um vocabulário que só existe ali:

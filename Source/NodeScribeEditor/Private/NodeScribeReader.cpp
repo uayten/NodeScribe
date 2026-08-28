@@ -9,6 +9,8 @@
 #include "AnimGraphNode_StateMachineBase.h"
 #include "AnimGraphNode_TransitionResult.h"
 #include "AnimStateEntryNode.h"
+#include "AnimStateAliasNode.h"
+#include "AnimStateConduitNode.h"
 #include "AnimStateNode.h"
 #include "AnimStateTransitionNode.h"
 #include "AnimationStateMachineGraph.h"
@@ -690,6 +692,9 @@ private:
 	 */
 	void AppendNodeSettings(UEdGraphNode* Node, TArray<FString>& Args);
 
+	/** ` (A = 1, B = 2)` com o que difere do node novo, ou vazio. */
+	FString DescribeSettings(UEdGraphNode* Node);
+
 	FString DescribeLiteral(UEdGraphPin* Pin, bool& bOutRepresentable);
 
 	/** Rotulo de saida de execucao que volta como o mesmo pino ao ser lido. */
@@ -811,7 +816,16 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		// que e' outro node -- entao ali o nome do asset nao serve.
 		if (Asset && NodeScribeAnimGraph::NodeClassForAsset(Asset) == Node->GetClass())
 		{
-			return Asset->GetName();
+			// Nome curto so' se ele bastar para achar este asset, e nao outro.
+			// Num projeto que retargeta ha' duas `MM_Jump` -- a do Manny e a
+			// nova --, e o leitor escrevia o nome curto que o escritor recusa na
+			// linha seguinte: "ha' mais de uma animacao chamada MM_Jump". O
+			// texto de ida e volta precisa colar de volta, e quem sabe se o nome
+			// basta e' a mesma busca que o builder faz.
+			const NodeScribeAnimGraph::FAssetLookup Lookup =
+				NodeScribeAnimGraph::FindAnimationAsset(Asset->GetName());
+
+			return (Lookup.Asset == Asset) ? Asset->GetName() : Asset->GetPathName();
 		}
 
 		const UAnimGraphNode_Base* CDO = Cast<UAnimGraphNode_Base>(Node->GetClass()->GetDefaultObject(false));
@@ -1392,6 +1406,16 @@ FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Inde
 	return TEXT(" (") + FString::Join(Args, TEXT(", ")) + TEXT(")");
 }
 
+FString FNodeScribeReadContext::DescribeSettings(UEdGraphNode* Node)
+{
+	TArray<FString> Args;
+	AppendNodeSettings(Node, Args);
+
+	return Args.Num() > 0
+		? TEXT(" (") + FString::Join(Args, TEXT(", ")) + TEXT(")")
+		: FString();
+}
+
 void FNodeScribeReadContext::AppendNodeSettings(UEdGraphNode* Node, TArray<FString>& Args)
 {
 	// O que o node ajusta fora dos pinos. `Loop Animation` de um Sequence
@@ -1901,7 +1925,28 @@ void FNodeScribeReadContext::EmitStateMachine(UAnimGraphNode_StateMachineBase* M
 	// O estado de entrada primeiro, porque e' assim que o texto o declara: o
 	// builder liga o Entry no primeiro `estado` que aparece. Sair fora de ordem
 	// mudaria por onde a maquina comeca -- e isso so' apareceria rodando.
-	TArray<UAnimStateNode*> States;
+	// Estado e conduto na mesma lista. Os dois sao no' de onde uma transicao sai
+	// e onde ela chega, e ler so' o estado deixava toda transicao que passa por
+	// um conduto falando de um nome que o texto nunca declarava -- o
+	// `To Falling -> Jump` do ABP_Unarmed da Epic e' exatamente isso. Ao colar,
+	// aquilo virava erro de "estado que nao existe", com a lista dos que
+	// existem, e a maquina saia sem metade das transicoes.
+	TArray<UAnimStateNodeBase*> States;
+
+	auto IsStateOrConduit = [](UEdGraphNode* Node) -> UAnimStateNodeBase*
+	{
+		// `UAnimStateNodeBase` tambem e' pai da transicao e do Entry. Um Cast
+		// direto para ele traria os dois para dentro da lista de estados.
+		if (UAnimStateNode* State = Cast<UAnimStateNode>(Node))
+		{
+			return State;
+		}
+		if (UAnimStateConduitNode* Conduit = Cast<UAnimStateConduitNode>(Node))
+		{
+			return Conduit;
+		}
+		return Cast<UAnimStateAliasNode>(Node);
+	};
 
 	if (MachineGraph->EntryNode)
 	{
@@ -1909,7 +1954,7 @@ void FNodeScribeReadContext::EmitStateMachine(UAnimGraphNode_StateMachineBase* M
 		{
 			for (UEdGraphPin* Linked : EntryPin->LinkedTo)
 			{
-				if (UAnimStateNode* Entry = Cast<UAnimStateNode>(Linked ? Linked->GetOwningNodeUnchecked() : nullptr))
+				if (UAnimStateNodeBase* Entry = IsStateOrConduit(Linked ? Linked->GetOwningNodeUnchecked() : nullptr))
 				{
 					States.AddUnique(Entry);
 				}
@@ -1925,16 +1970,50 @@ void FNodeScribeReadContext::EmitStateMachine(UAnimGraphNode_StateMachineBase* M
 
 	for (UEdGraphNode* Node : MachineGraph->Nodes)
 	{
-		if (UAnimStateNode* State = Cast<UAnimStateNode>(Node))
+		if (UAnimStateNodeBase* State = IsStateOrConduit(Node))
 		{
 			States.AddUnique(State);
 		}
 	}
 
-	for (UAnimStateNode* State : States)
+	for (UAnimStateNodeBase* State : States)
 	{
-		EmitLine(Indent + 1, FString::Printf(TEXT("estado %s:"), *State->GetStateName()));
-		EmitSubGraph(State->BoundGraph, Indent + 2);
+		// O alias nao tem sub-grafo: ele e' um apelido para um punhado de
+		// estados, e existe para uma transicao sair de todos eles de uma vez sem
+		// repetir a regra. O bloco dele e' a lista desses estados.
+		if (UAnimStateAliasNode* Alias = Cast<UAnimStateAliasNode>(State))
+		{
+			EmitLine(Indent + 1, FString::Printf(TEXT("alias %s%s:"),
+				*Alias->GetStateName(), *DescribeSettings(Alias)));
+
+			// Ordenado pelo nome: um TSet nao tem ordem estavel, e sem isto duas
+			// leituras do mesmo grafo dariam textos diferentes -- o suficiente
+			// para uma comparacao de ida e volta acusar diferenca que nao existe.
+			TArray<FString> Aliased;
+			for (const TWeakObjectPtr<UAnimStateNodeBase>& Target : Alias->GetAliasedStates())
+			{
+				if (const UAnimStateNodeBase* Node = Target.Get())
+				{
+					Aliased.Add(Node->GetStateName());
+				}
+			}
+			Aliased.Sort();
+
+			for (const FString& Apelidado : Aliased)
+			{
+				EmitLine(Indent + 2, Apelidado);
+			}
+
+			continue;
+		}
+
+		const TCHAR* Palavra = State->IsA<UAnimStateConduitNode>() ? TEXT("conduto") : TEXT("estado");
+
+		EmitLine(Indent + 1, FString::Printf(TEXT("%s %s%s:"),
+			Palavra, *State->GetStateName(), *DescribeSettings(State)));
+
+		// Pelo virtual: `BoundGraph` e' campo de cada subclasse, nao da base.
+		EmitSubGraph(State->GetBoundGraph(), Indent + 2);
 	}
 
 	for (UEdGraphNode* Node : MachineGraph->Nodes)
@@ -1954,8 +2033,15 @@ void FNodeScribeReadContext::EmitStateMachine(UAnimGraphNode_StateMachineBase* M
 			continue;
 		}
 
-		EmitLine(Indent + 1, FString::Printf(TEXT("%s -> %s:"),
-			*From->GetStateName(), *To->GetStateName()));
+		// As opcoes da transicao saem na linha, e a que mais importa e'
+		// `Automatic Rule Based on Sequence Player in State`. Com ela ligada a
+		// transicao dispara quando a animacao do estado de origem acaba, e por
+		// isso nasce sem regra nenhuma -- que e' visualmente identico a uma
+		// transicao que ninguem terminou de escrever. Sem esta linha, o
+		// `Land -> Locomotion` da Epic voltava como transicao vazia, e colar
+		// aquilo dava uma transicao morta com aviso da Engine.
+		EmitLine(Indent + 1, FString::Printf(TEXT("%s -> %s%s:"),
+			*From->GetStateName(), *To->GetStateName(), *DescribeSettings(Transition)));
 
 		EmitSubGraph(Transition->BoundGraph, Indent + 2);
 	}

@@ -326,6 +326,19 @@ FAssetLookup FindAnimationAsset(const FString& Query)
 	TArray<FSoftObjectPath> Matches;
 	GAssetsByName.MultiFind(FNodeScribeCatalog::Normalize(Trimmed), Matches);
 
+	// Zero resultados quer dizer duas coisas diferentes: o asset nao existe, ou
+	// existe e e' mais novo que o indice. O indice e' montado uma vez por
+	// sessao, entao um BlendSpace recem-criado -- por `create_asset`, ou por
+	// alguem clicando no editor -- ficava de fora ate' o editor reabrir, e a
+	// resposta era "nao achei nenhum node chamado X" para um asset que estava
+	// ali na tela. Refazer o indice custa uma varredura do registry, e so' no
+	// caminho que ja' ia dar erro.
+	if (Matches.Num() == 0)
+	{
+		BuildAssetIndex();
+		GAssetsByName.MultiFind(FNodeScribeCatalog::Normalize(Trimmed), Matches);
+	}
+
 	if (Matches.Num() == 1)
 	{
 		Result.Asset = Cast<UAnimationAsset>(Matches[0].TryLoad());

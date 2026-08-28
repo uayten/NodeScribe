@@ -6,6 +6,7 @@
 #include "NodeScribeObjectTarget.h"
 #include "NodeScribePropertyText.h"
 
+#include "Animation/AnimBlueprint.h"
 #include "Animation/BlendSpace.h"
 #include "Components/ActorComponent.h"
 #include "EdGraph/EdGraph.h"
@@ -538,6 +539,22 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 		{
 			Lines.Add(TEXT("# grafos: ") + FString::Join(GraphNames, TEXT(", ")));
 		}
+	}
+
+	// O esqueleto de um AnimBlueprint nao aparece na ficha por si so': ela le' o
+	// CDO da classe, e `TargetSkeleton` mora no asset, um nivel acima. Sem esta
+	// linha, `read_object` num AnimBlueprint filtrando por "Skeleton" devolve
+	// zero propriedades -- o que se le como "nao tem", e nao como "esta' noutro
+	// objeto". E' a primeira coisa que se quer conferir quando um personagem
+	// aparece na pose de referencia, porque esqueleto trocado da' exatamente
+	// isso.
+	if (const UAnimBlueprint* AnimBlueprint = Cast<UAnimBlueprint>(Blueprint))
+	{
+		const USkeleton* Skeleton = AnimBlueprint->TargetSkeleton;
+
+		Lines.Add(FString::Printf(TEXT("# esqueleto: %s"),
+			Skeleton ? *Skeleton->GetPathName()
+				: (AnimBlueprint->bIsTemplate ? TEXT("nenhum (e' um template)") : TEXT("nenhum"))));
 	}
 
 	const int32 HeaderIndex = 0;

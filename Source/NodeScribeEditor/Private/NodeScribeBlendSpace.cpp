@@ -203,6 +203,20 @@ FString Read(const UBlendSpace* BlendSpace)
 			Letters[Index], *Axis.DisplayName, Axis.Min, Axis.Max));
 	}
 
+	// A malha vazia e' o buraco silencioso deste asset: os samples estao todos
+	// la', o editor desenha os pontos nos lugares certos, e o BlendSpace Player
+	// devolve pose de referencia porque quem interpola e' a malha, nao a lista.
+	// Nada mais na leitura denuncia isso -- e sem esta linha o texto de um
+	// BlendSpace morto e' identico ao de um vivo.
+	if (BlendSpace->GetBlendSamples().Num() > 0
+		&& BlendSpace->GetBlendSpaceData().IsEmpty()
+		&& BlendSpace->GetGridSamples().Num() == 0)
+	{
+		Lines.Add(TEXT("# [aviso]: a malha de interpolacao esta' vazia. Os samples abaixo existem, ")
+			TEXT("mas este BlendSpace devolve pose de referencia. Chame write_blendspace com este ")
+			TEXT("mesmo texto para reconstrui-la."));
+	}
+
 	for (const FBlendSample& Sample : BlendSpace->GetBlendSamples())
 	{
 		if (!Sample.Animation)
