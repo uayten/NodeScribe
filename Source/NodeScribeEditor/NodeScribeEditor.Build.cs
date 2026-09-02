@@ -32,6 +32,9 @@ public class NodeScribeEditor : ModuleRules
 			"KismetCompiler",
 			"Kismet",
 			"MessageLog",
+			// O .mcp.json que o assistente le. Aditivo: entrada de terceiro
+			// tem que sobreviver, entao e parse e reescrita, nao template.
+			"Json",
 			// Criar asset: o nativo nao tem criacao, so' duplicate.
 			"AssetTools",
 			// Tag: ler pelo Manager, escrever no ini pelo modulo de editor.

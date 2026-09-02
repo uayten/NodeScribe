@@ -3,6 +3,7 @@
 #include "NodeScribeCatalog.h"
 #include "NodeScribeCommandFile.h"
 #include "NodeScribeGraphActions.h"
+#include "NodeScribeMcpSetup.h"
 #include "NodeScribeTypes.h"
 
 #include "Editor.h"
@@ -23,6 +24,13 @@ void FNodeScribeEditorModule::StartupModule()
 {
 	FNodeScribeGraphActions::RegisterStartupHook();
 	FNodeScribeCommandFile::Start();
+
+	// As duas configuracoes sem as quais o plugin fica instalado e mudo. Ver o
+	// cabecalho do NodeScribeMcpSetup: as duas falham em silencio, e a conta de
+	// nao conferir e uma sessao inteira achando que o assistente esta vendo o
+	// projeto quando ele nao esta vendo nada.
+	FNodeScribeMcpSetup::RegisterStartupHook();
+	FNodeScribeMcpSetup::Start();
 
 	// O catalogo e' montado uma vez e guardado em memoria, e sem isto ele nunca
 	// sabia do que nasceu depois: criar uma funcao num Blueprint e chama-la de
@@ -59,6 +67,9 @@ void FNodeScribeEditorModule::ShutdownModule()
 	{
 		FCoreDelegates::OnPostEngineInit.Remove(PostEngineInitHandle);
 	}
+
+	FNodeScribeMcpSetup::Stop();
+	FNodeScribeMcpSetup::Unregister();
 
 	FNodeScribeCommandFile::Stop();
 	FNodeScribeGraphActions::Unregister();

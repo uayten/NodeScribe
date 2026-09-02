@@ -74,7 +74,7 @@ escreve no grafo direto, em vez de te mandar texto para colar.
 
 ### Ligando num projeto novo
 
-A cadeia tem quatro elos, e o assistente não avisa quando um falta: as
+A cadeia tem cinco elos, e o assistente não avisa quando um falta: as
 ferramentas simplesmente não aparecem.
 
 | elo | o que é | quem liga |
@@ -82,24 +82,43 @@ ferramentas simplesmente não aparecem.
 | **Python Script Plugin** | roda o `init_unreal.py` do plugin | o `.uplugin` do NodeScribe, sozinho |
 | **ToolsetRegistry** | onde o toolset se registra | idem |
 | **ModelContextProtocol** | o servidor MCP da Engine, que expõe o registro | idem |
-| **`.mcp.json`** | diz ao assistente onde o servidor está | **você**, uma vez por projeto |
+| **`bAutoStartServer`** | o servidor da Engine nasce desligado | o `NodeScribeMcpSetup`, na abertura |
+| **`.mcp.json`** | diz ao assistente onde o servidor está | idem |
 
 Os três primeiros são dependências declaradas no `NodeScribe.uplugin` e entram
 sozinhos ao instalar o plugin. Estão marcados como `Optional`: quem só quer os
 botões **Colar** e **Copiar** não é obrigado a subir servidor nenhum.
 
-O quarto é do projeto, não do plugin — um `.mcp.json` na raiz:
+Os dois últimos eram trabalho manual, e são a parte que mais deu prejuízo: as
+duas falham em silêncio. O servidor desligado faz o assistente conectar e
+receber lista vazia; o `.mcp.json` ausente faz ele nem tentar. Nos dois casos
+ninguém é avisado — uma sessão inteira já se passou aqui com o servidor fora do
+ar antes de alguém notar.
 
-```json
-{
-  "mcpServers": {
-    "unreal-mcp": {
-      "type": "http",
-      "url": "http://127.0.0.1:8000/mcp"
-    }
-  }
-}
+Hoje o `NodeScribeMcpSetup` cuida dos dois, um segundo depois da abertura, e diz
+no Output Log o que fez:
+
 ```
+LogNodeScribe: MCP: auto-start estava desligado; liguei e subi o servidor em http://127.0.0.1:8000/mcp
+LogNodeScribe: MCP: escrevi a entrada "unreal-mcp" -> http://127.0.0.1:8000/mcp em .../.mcp.json
+```
+
+Nada disso linka com o plugin da Epic: a settings é lida por reflexão pelo nome
+da classe e o servidor sobe por comando de console, então sem o
+ModelContextProtocol os dois falham quietos — que é o que `Optional` promete.
+
+**O `.mcp.json` é tratado como arquivo de outra pessoa.** Ele é lido, alterado e
+regravado preservando o que houver: entrada de outro servidor não é tocada, e
+uma entrada que já aponte para o endereço certo vale, tenha o nome que tiver.
+Duas situações fazem o plugin recuar sem escrever — JSON inválido, e uma entrada
+já chamada `unreal-mcp` apontando para outro lugar (pode ser um túnel, ou outro
+editor). Nesse caso o Output Log explica, e **Tools → NodeScribe → Configurar
+MCP do projeto** corrige, se for isso mesmo que você quer.
+
+Não dava para resolver por ini de plugin. A Unreal injeta `<Plugin>/Config` na
+hierarquia do projeto, mas casando o nome do arquivo com um branch que ela já
+conheça, e o resultado não chega no `EditorPerProjectUserSettings`. Foi medido
+com os dois nomes possíveis, não deduzido.
 
 Depois disso, **reinicie o assistente**: as ferramentas MCP só entram no
 contexto na inicialização.
