@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "0.1",
 	"FriendlyName": "NodeScribe",
-	"Description": "Transcreve uma lista de nodes escrita em texto simples para nodes reais no grafo do Blueprint, ja posicionados e ligados. Pensado para colar a resposta de um assistente de IA sem gastar tokens com o formato interno da Unreal.",
+	"Description": "Transcribes a list of nodes written as plain text into real nodes in the Blueprint graph, already positioned and linked, and reads graphs back into the same text. Built for pasting an AI assistant's answer without spending tokens on Unreal's internal format.",
 	"Category": "Blueprint",
 	"CreatedBy": "Antonio Froz",
 	"CreatedByURL": "",

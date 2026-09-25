@@ -9,7 +9,7 @@
 
 namespace
 {
-	/** Prefixos que a Engine usa por convencao e que ninguem escreve num chat. */
+	/** Prefixes the Engine uses by convention and nobody writes in a chat. */
 	const TCHAR* const IgnoredPrefixes[] = { TEXT("K2_"), TEXT("BP_"), TEXT("Receive") };
 
 	FString StripEnginePrefix(const FString& In)
@@ -42,11 +42,11 @@ namespace
 			return false;
 		}
 
-		// `BlueprintInternalUseOnly` marca o que nao se chama direto -- e a fabrica
-		// de uma acao assincrona e' exatamente isso: quem a expoe no grafo e' o
-		// `UK2Node_AsyncAction`, nao um node de chamada. Descartar todas fazia um
-		// plugin inteiro construido sobre `UBlueprintAsyncActionBase` ficar fora do
-		// catalogo, e nenhum grafo dele voltava colavel.
+		// `BlueprintInternalUseOnly` marks what is not called directly -- and an
+		// async action's factory is exactly that: what exposes it in the graph is
+		// `UK2Node_AsyncAction`, not a call node. Discarding all of them left a
+		// whole plugin built on `UBlueprintAsyncActionBase` out of the catalog,
+		// and none of its graphs came back pasteable.
 		if (Function->HasMetaData(TEXT("BlueprintInternalUseOnly"))
 			&& !FNodeScribeCatalog::IsAsyncActionFactory(Function))
 		{
@@ -73,7 +73,7 @@ namespace
 			return false;
 		}
 
-		// Classes SKEL_/REINST_ sao artefatos de compilacao de Blueprint.
+		// SKEL_/REINST_ classes are Blueprint compilation artifacts.
 		const FString Name = Class->GetName();
 		if (Name.StartsWith(TEXT("SKEL_")) || Name.StartsWith(TEXT("REINST_")) || Name.StartsWith(TEXT("TRASHCLASS_")))
 		{
@@ -108,40 +108,36 @@ FString FNodeScribeCatalog::Normalize(const FString& In)
 
 TCHAR FNodeScribeCatalog::FoldAccent(TCHAR C)
 {
-	// `entao` escrito com til e `entao` sem til sao a mesma palavra, e quem
-	// escreve em portugues escreve a primeira. Sem dobrar o acento, todo apelido
-	// da tabela de rotulos precisaria estar escrito duas vezes -- e o par que
-	// faltasse falharia dizendo que a saida nao existe, que e' o pior tipo de
-	// mensagem: verdadeira, e sobre outra coisa. Foi assim que um rotulo `entao:`
-	// acentuado num Cast respondeu "nao e' uma saida deste node", enquanto
-	// `verdadeiro:`, que nao tem acento, funcionava.
+	// Names are written by people, and people write accents: a variable called
+	// `Duração` is found by `$Duracao`, and the other way round. The keywords of
+	// the format are plain English and need none of this -- it is for the names
+	// that come from the project: variables, pins, assets, events.
 	//
-	// Vale para todo o plugin, inclusive nome de variavel e de asset, e a
-	// tolerancia a mais e' da mesma familia da que ja' existe para maiuscula e
-	// espaco: quem escreve `$Duracao` sem acento acha a variavel escrita com
-	// ele. O risco teorico -- duas variaveis que so' diferem pelo acento virarem
-	// a mesma chave -- e' o mesmo que ja' se corre com `MinhaVar` e `minha var`.
+	// It is the same kind of tolerance that already exists for case and
+	// spacing. The theoretical risk -- two variables that only differ by an
+	// accent becoming the same key -- is the same one already taken with
+	// `MyVar` and `my var`.
 	//
-	// Os codigos entram como numero, nao como literal: o arquivo e' ASCII puro
-	// como o resto do plugin, e literal acentuado depende de o compilador
-	// adivinhar a codificacao do arquivo.
+	// The codes go in as numbers, not literals: the file is pure ASCII like the
+	// rest of the plugin, and an accented literal depends on the compiler
+	// guessing the file's encoding.
 	switch (static_cast<uint32>(C))
 	{
-	case 0xE0: case 0xE1: case 0xE2: case 0xE3: case 0xE4: case 0xE5: // a com acento
+	case 0xE0: case 0xE1: case 0xE2: case 0xE3: case 0xE4: case 0xE5: // accented a
 		return TEXT('a');
-	case 0xE7:                                                       // c cedilha
+	case 0xE7:                                                       // c cedilla
 		return TEXT('c');
-	case 0xE8: case 0xE9: case 0xEA: case 0xEB:                      // e com acento
+	case 0xE8: case 0xE9: case 0xEA: case 0xEB:                      // accented e
 		return TEXT('e');
-	case 0xEC: case 0xED: case 0xEE: case 0xEF:                      // i com acento
+	case 0xEC: case 0xED: case 0xEE: case 0xEF:                      // accented i
 		return TEXT('i');
-	case 0xF1:                                                       // n com til
+	case 0xF1:                                                       // n with tilde
 		return TEXT('n');
-	case 0xF2: case 0xF3: case 0xF4: case 0xF5: case 0xF6:           // o com acento
+	case 0xF2: case 0xF3: case 0xF4: case 0xF5: case 0xF6:           // accented o
 		return TEXT('o');
-	case 0xF9: case 0xFA: case 0xFB: case 0xFC:                      // u com acento
+	case 0xF9: case 0xFA: case 0xFB: case 0xFC:                      // accented u
 		return TEXT('u');
-	case 0xFD: case 0xFF:                                            // y com acento
+	case 0xFD: case 0xFF:                                            // accented y
 		return TEXT('y');
 	default:
 		return C;
@@ -166,10 +162,10 @@ bool FNodeScribeCatalog::IsAsyncActionFactory(const UFunction* Function)
 		return false;
 	}
 
-	// A classe que pede node proprio (as tasks de GAS, por exemplo) fica de fora:
-	// ali o node certo nao e' o `UK2Node_AsyncAction`, e criar esse daria um node
-	// parecido e errado. E' a mesma checagem que `UK2Node_AsyncAction` faz ao se
-	// oferecer no menu.
+	// A class that asks for a node of its own (the GAS tasks, for example) stays
+	// out: there the right node is not `UK2Node_AsyncAction`, and creating that
+	// one would give a similar, wrong node. It is the same check
+	// `UK2Node_AsyncAction` makes when offering itself in the menu.
 	const UClass* Owner = Function->GetOwnerClass();
 	if (Owner && Owner->HasMetaData(TEXT("HasDedicatedAsyncNode")))
 	{
@@ -225,7 +221,7 @@ void FNodeScribeCatalog::Build() const
 
 		const bool bIsLibrary = Class->IsChildOf(UBlueprintFunctionLibrary::StaticClass());
 
-		// ExcludeSuper: cada funcao e' indexada uma vez, na classe que a declara.
+		// ExcludeSuper: each function is indexed once, in the class that declares it.
 		for (TFieldIterator<UFunction> FuncIt(Class, EFieldIteratorFlags::ExcludeSuper); FuncIt; ++FuncIt)
 		{
 			UFunction* Function = *FuncIt;
@@ -255,7 +251,7 @@ void FNodeScribeCatalog::Build() const
 
 	bBuilt = true;
 
-	UE_LOG(LogNodeScribe, Log, TEXT("Catalogo montado: %d funcoes em %.2fs"),
+	UE_LOG(LogNodeScribe, Log, TEXT("Catalog built: %d functions in %.2fs"),
 		Entries.Num(), FPlatformTime::Seconds() - StartTime);
 }
 
@@ -295,8 +291,8 @@ int32 FNodeScribeCatalog::ScoreEntry(const FEntry& Entry, const FString& Normali
 		return 0;
 	}
 
-	// A classe que o usuario esta editando ganha de qualquer coisa da Engine:
-	// se ele escreveu o nome de uma funcao propria, e' essa que ele quer.
+	// The class the user is editing beats anything from the Engine: if they
+	// wrote the name of one of their own functions, that is the one they want.
 	if (SelfClass && SelfClass->IsChildOf(Owner))
 	{
 		Score += 300;
@@ -307,15 +303,15 @@ int32 FNodeScribeCatalog::ScoreEntry(const FEntry& Entry, const FString& Normali
 		Score += 250;
 	}
 
-	// Bibliotecas estaticas sao o destino da maioria dos nodes "soltos"
-	// (Print String, Get Player Controller, matematica...).
+	// Static libraries are the destination of most "loose" nodes
+	// (Print String, Get Player Controller, math...).
 	if (Entry.bIsLibrary)
 	{
 		Score += 60;
 	}
 
-	// Nomes curtos casam melhor: entre "Get Player Controller" e
-	// "Get Player Controller From Platform User Id", o primeiro e' o esperado.
+	// Short names match better: between "Get Player Controller" and
+	// "Get Player Controller From Platform User Id", the first is the expected one.
 	const int32 LengthPenalty = FMath::Min(Entry.NormalizedDisplay.Len(), 200) / 4;
 	Score -= LengthPenalty;
 
@@ -325,12 +321,12 @@ int32 FNodeScribeCatalog::ScoreEntry(const FEntry& Entry, const FString& Normali
 namespace
 {
 	/**
-	 * Funcao ou Custom Event declarado no proprio Blueprint.
+	 * A function or Custom Event declared in the Blueprint itself.
 	 *
-	 * O catalogo e' montado uma vez por sessao e nao conhece o que nasceu
-	 * depois -- e criar um Custom Event e usar na linha seguinte e' o fluxo
-	 * normal de quem esta' montando um grafo. Olhar a propria classe custa
-	 * quase nada e cobre exatamente esse caso.
+	 * The catalog is built once per session and does not know what was born
+	 * afterwards -- and creating a Custom Event and using it on the next line is
+	 * the normal flow of someone building a graph. Looking at the class itself
+	 * costs almost nothing and covers exactly that case.
 	 */
 	UFunction* FindOwnFunction(UClass* SelfClass, const FString& NormalizedQuery)
 	{
@@ -361,9 +357,9 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 
 	FNodeScribeLookup Result;
 
-	// `Classe.Funcao` restringe a busca a uma classe. O separador nao pode ser
-	// parenteses: aquilo ja' e' a lista de argumentos, e a forma antiga sugerida
-	// nos candidatos (`ApplySettings (GameUserSettings)`) nunca funcionou.
+	// `Class.Function` restricts the lookup to one class. The separator cannot
+	// be parentheses: those already are the argument list, and the old form
+	// suggested in the candidates (`ApplySettings (GameUserSettings)`) never worked.
 	FString OwnerQuery;
 	FString NameQuery = Query;
 	{
@@ -371,6 +367,9 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 		FString NamePart;
 		if (Query.Split(TEXT("."), &OwnerPart, &NamePart, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
 		{
+			// `BP_Golem.Jump` and `BP_Golem_C.Jump` are the same class: nobody
+			// types the generated suffix, the same rule as everywhere else.
+			OwnerPart.RemoveFromEnd(TEXT("_C"));
 			OwnerQuery = Normalize(OwnerPart);
 			NameQuery = NamePart;
 		}
@@ -400,7 +399,14 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 		if (!OwnerQuery.IsEmpty())
 		{
 			const UClass* Owner = Entry.OwnerClass.Get();
-			if (!Owner || Normalize(Owner->GetName()) != OwnerQuery)
+			if (!Owner)
+			{
+				continue;
+			}
+
+			FString OwnerName = Owner->GetName();
+			OwnerName.RemoveFromEnd(TEXT("_C"));
+			if (Normalize(OwnerName) != OwnerQuery)
 			{
 				continue;
 			}
@@ -423,8 +429,8 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 
 	const int32 BestScore = Scored[0].Score;
 
-	// Um empate no topo significa que o texto nao foi suficiente para decidir.
-	// Preferimos devolver a lista e deixar o usuario escolher.
+	// A tie at the top means the text was not enough to decide. We prefer to
+	// return the list and let the user choose.
 	int32 TiedCount = 0;
 	for (const FScored& Candidate : Scored)
 	{
@@ -446,8 +452,8 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 		return Result;
 	}
 
-	// Empate entre funcoes da Engine nao e' ambiguidade quando o proprio
-	// Blueprint tem uma com esse nome: ali a intencao esta' clara.
+	// A tie between Engine functions is not ambiguity when the Blueprint itself
+	// has one with that name: there the intent is clear.
 	if (UFunction* Own = FindOwnFunction(SelfClass, NormalizedQuery))
 	{
 		Result.Function = Own;
@@ -463,7 +469,7 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 
 		if (Owner && Function)
 		{
-			// Formato copiavel: e' exatamente o que o usuario pode digitar de volta.
+			// A copyable form: it is exactly what the user can type back.
 			Result.Candidates.Add(FString::Printf(TEXT("%s.%s"), *Owner->GetName(), *Function->GetName()));
 		}
 	}

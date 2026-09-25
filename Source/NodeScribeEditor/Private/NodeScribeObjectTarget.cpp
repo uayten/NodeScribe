@@ -49,7 +49,7 @@ TMap<FString, UObject*> CollectComponents(UObject* Target, UBlueprint* Blueprint
 		}
 	}
 
-	// Sobe a cadeia: componente que o Blueprint pai criou tambem e' do filho.
+	// Walks up the chain: a component the parent Blueprint created belongs to the child too.
 	for (const UBlueprint* Current = Blueprint; Current; )
 	{
 		if (const USimpleConstructionScript* SCS = Current->SimpleConstructionScript)

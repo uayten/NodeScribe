@@ -35,13 +35,13 @@ namespace
 	const FName MenuOwner("NodeScribe");
 
 	/**
-	 * A barra que todo editor de asset herda.
+	 * The toolbar every asset editor inherits.
 	 *
-	 * Listar os editores um a um nao escala: cada tipo de Blueprint tem a
-	 * propria barra -- Widget, Animation, Gameplay Ability, e os que ainda vao
-	 * existir. Registrando no pai, a secao chega em todos; a secao e' dinamica
-	 * e nao aparece onde o contexto nao tem um editor de Blueprint, entao um
-	 * editor de textura continua sem botao nenhum.
+	 * Listing the editors one by one does not scale: each kind of Blueprint has
+	 * its own toolbar -- Widget, Animation, Gameplay Ability, and the ones yet to
+	 * exist. Registering on the parent, the section reaches all of them; the
+	 * section is dynamic and does not show up where the context has no
+	 * Blueprint editor, so a texture editor stays without any button.
 	 */
 	const TCHAR* const SharedToolbarName = TEXT("AssetEditor.DefaultToolBar");
 
@@ -68,13 +68,13 @@ namespace
 		Info.ExpireDuration = 5.0f;
 		Info.bFireAndForget = true;
 
-		// Link em vez de abrir sozinho: `FMessageLog::Open` traz para a frente a
-		// aba onde o log foi ancorado da primeira vez, que costuma ser dentro de
-		// OUTRO editor de asset. O efeito era o editor pular de Blueprint no meio
-		// do trabalho -- barulho que nao vale o atalho.
+		// A link instead of opening it directly: `FMessageLog::Open` brings to the
+		// front the tab where the log was docked the first time, which is usually
+		// inside ANOTHER asset editor. The effect was the editor jumping to another
+		// Blueprint in the middle of the work -- noise not worth the shortcut.
 		if (bOfferLog)
 		{
-			Info.HyperlinkText = LOCTEXT("OpenLog", "Ver detalhes no Message Log");
+			Info.HyperlinkText = LOCTEXT("OpenLog", "See details in the Message Log");
 			Info.Hyperlink = FSimpleDelegate::CreateLambda([]()
 			{
 				FMessageLog(FNodeScribeGraphActions::LogListingName).Open(EMessageSeverity::Info, true);
@@ -99,11 +99,11 @@ namespace
 	}
 
 	/**
-	 * Diagnosticos vao para o Message Log, e nao para um toast so'.
+	 * Diagnostics go to the Message Log, not only to a toast.
 	 *
-	 * Um toast some em cinco segundos; se o aviso importava, ele tinha que
-	 * continuar acessivel depois. O log abre sozinho quando algo pede atencao e
-	 * fica quieto quando esta' tudo certo.
+	 * A toast vanishes in five seconds; if the warning mattered, it had to stay
+	 * reachable afterwards. The log is offered when something needs attention
+	 * and stays quiet when everything is fine.
 	 */
 	void Report(
 		const TArray<FNodeScribeDiagnostic>& Diagnostics,
@@ -114,9 +114,9 @@ namespace
 	{
 		FMessageLog Log(FNodeScribeGraphActions::LogListingName);
 
-		// O canal do Message Log e' um so' para o editor inteiro, e a aba dele
-		// fica ancorada onde foi aberta pela primeira vez -- pode ser outro
-		// asset. Nao da' para mover a aba, entao a pagina diz de onde veio.
+		// The Message Log channel is a single one for the whole editor, and its
+		// tab stays docked where it was first opened -- which may be another
+		// asset. The tab cannot be moved, so the page says where it came from.
 		Log.NewPage(SourceLabel.IsEmpty()
 			? Summary
 			: FText::Format(NSLOCTEXT("NodeScribe", "LogPage", "{0}  -  {1}"),
@@ -125,7 +125,7 @@ namespace
 		for (const FNodeScribeDiagnostic& Diagnostic : Diagnostics)
 		{
 			const FString Prefix = (Diagnostic.Line > 0)
-				? FString::Printf(TEXT("linha %d: "), Diagnostic.Line)
+				? FString::Printf(TEXT("line %d: "), Diagnostic.Line)
 				: FString();
 
 			Log.Message(ToMessageSeverity(Diagnostic.Severity), FText::FromString(Prefix + Diagnostic.Message));
@@ -134,21 +134,21 @@ namespace
 		ShowToast(Summary, ErrorCount == 0, Diagnostics.Num() > 0);
 	}
 
-	// --- Acoes -----------------------------------------------------------
+	// --- Actions ---------------------------------------------------------
 
 	void CopyToClipboard(const FNodeScribeReader::FResult& Result, const FText& SourceDescription)
 	{
 		if (Result.NodeCount == 0)
 		{
 			Report(Result.Diagnostics, Result.ErrorCount, Result.WarningCount,
-				LOCTEXT("ReadNothing", "Nada para copiar."));
+				LOCTEXT("ReadNothing", "Nothing to copy."));
 			return;
 		}
 
 		FPlatformApplicationMisc::ClipboardCopy(*Result.Text);
 
 		const FText Summary = FText::Format(
-			LOCTEXT("ReadDone", "{0} node(s) de {1} copiados como texto. Cole onde quiser."),
+			LOCTEXT("ReadDone", "{0} node(s) from {1} copied as text. Paste them anywhere."),
 			FText::AsNumber(Result.NodeCount), SourceDescription);
 
 		Report(Result.Diagnostics, Result.ErrorCount, Result.WarningCount, Summary);
@@ -173,13 +173,13 @@ namespace
 
 		if (Selected.Num() == 0)
 		{
-			ShowToast(LOCTEXT("NoSelection", "Nenhum node selecionado."), false);
+			ShowToast(LOCTEXT("NoSelection", "No node selected."), false);
 			return;
 		}
 
 		CopyToClipboard(
 			FNodeScribeReader::Read(Selected, Editor->GetBlueprintObj()),
-			LOCTEXT("SourceSelection", "seleção"));
+			LOCTEXT("SourceSelection", "the selection"));
 	}
 
 	void ExecuteCopyGraph(const FToolMenuContext& Context)
@@ -193,7 +193,7 @@ namespace
 		UEdGraph* Graph = Editor->GetFocusedGraph();
 		if (!Graph)
 		{
-			ShowToast(LOCTEXT("NoGraph", "Nenhum grafo aberto."), false);
+			ShowToast(LOCTEXT("NoGraph", "No graph open."), false);
 			return;
 		}
 
@@ -215,7 +215,7 @@ namespace
 
 		if (!Graph || !Blueprint)
 		{
-			ShowToast(LOCTEXT("NoGraph", "Nenhum grafo aberto."), false);
+			ShowToast(LOCTEXT("NoGraph", "No graph open."), false);
 			return;
 		}
 
@@ -224,24 +224,24 @@ namespace
 
 		if (ClipboardText.TrimStartAndEnd().IsEmpty())
 		{
-			ShowToast(LOCTEXT("EmptyClipboard", "O clipboard esta' vazio."), false);
+			ShowToast(LOCTEXT("EmptyClipboard", "The clipboard is empty."), false);
 			return;
 		}
 
-		// O formato interno da Unreal comeca assim. Mandar isso para o parser do
-		// NodeScribe daria um monte de erro sem sentido; o Ctrl+V normal do
-		// grafo ja' resolve esse caso melhor do que nos.
+		// Unreal's internal format starts like this. Sending it to the NodeScribe
+		// parser would give a pile of meaningless errors; the graph's regular
+		// Ctrl+V already handles that case better than we do.
 		if (ClipboardText.StartsWith(TEXT("BEGIN OBJECT")))
 		{
 			ShowToast(LOCTEXT("UnrealClipboard",
-				"Isso e' o formato interno da Unreal, nao texto do NodeScribe. Use Ctrl+V normal no grafo."), false);
+				"That is Unreal's internal format, not NodeScribe text. Use the regular Ctrl+V in the graph."), false);
 			return;
 		}
 
 		TArray<FNodeScribeDiagnostic> ParseDiagnostics;
 		const TArray<FNodeScribeStatement> Statements = FNodeScribeParser::Parse(ClipboardText, ParseDiagnostics);
 
-		const FScopedTransaction Transaction(LOCTEXT("PasteTransaction", "NodeScribe: colar nodes"));
+		const FScopedTransaction Transaction(LOCTEXT("PasteTransaction", "NodeScribe: paste nodes"));
 		Blueprint->Modify();
 		Graph->Modify();
 
@@ -259,34 +259,39 @@ namespace
 
 		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
-		// Os nodes entram abaixo de tudo que ja' existe, o que costuma ser fora
-		// da tela. Sem pular ate' la', clicar em Colar parece nao ter feito nada.
+		// The nodes go in below everything that already exists, which is usually
+		// off screen. Without jumping there, clicking Paste looks like it did
+		// nothing.
 		if (Result.CreatedNodes.Num() > 0)
 		{
 			Editor->JumpToNode(Result.CreatedNodes[0], false);
 		}
 
-		// O aviso de pino vazio ficava so' no log, e o log e' onde ninguem olha
-		// antes de apertar Play. Um `?` esquecido num pino de objeto compila e
-		// so' explode em runtime, entao ele precisa aparecer aqui.
+		// The empty-pin warning used to stay only in the log, and the log is
+		// where nobody looks before pressing Play. A forgotten `?` on an object
+		// pin compiles and only blows up at runtime, so it needs to show up here.
+		//
+		// The count is of warnings, not of pins: an empty pin is one kind among
+		// several (a link of the wrong type is another), and calling them all
+		// "pins waiting for your choice" said something that was not true.
 		FText Summary;
 
 		if (Result.ErrorCount > 0)
 		{
 			Summary = FText::Format(
-				LOCTEXT("PasteWithErrors", "{0} node(s) colados, mas {1} linha(s) nao resolveram."),
+				LOCTEXT("PasteWithErrors", "{0} node(s) pasted, but {1} line(s) did not resolve."),
 				FText::AsNumber(Result.CreatedNodes.Num()), FText::AsNumber(Result.ErrorCount));
 		}
 		else if (Result.WarningCount > 0)
 		{
 			Summary = FText::Format(
-				LOCTEXT("PasteWithWarnings", "{0} node(s) colados. {1} pino(s) esperam uma escolha sua antes de rodar."),
+				LOCTEXT("PasteWithWarnings", "{0} node(s) pasted, with {1} warning(s) to check before pressing Play."),
 				FText::AsNumber(Result.CreatedNodes.Num()), FText::AsNumber(Result.WarningCount));
 		}
 		else
 		{
 			Summary = FText::Format(
-				LOCTEXT("PasteDone", "{0} node(s) colados. Ctrl+Z desfaz."),
+				LOCTEXT("PasteDone", "{0} node(s) pasted. Ctrl+Z undoes it."),
 				FText::AsNumber(Result.CreatedNodes.Num()));
 		}
 
@@ -337,9 +342,9 @@ void FNodeScribeGraphActions::RegisterToolbar()
 		return;
 	}
 
-	// Dinamica: monta na hora de desenhar, quando ja' da' para perguntar se o
-	// contexto e' um editor de Blueprint. Sem isso a secao apareceria vazia em
-	// editor de textura, de som, de tudo.
+	// Dynamic: built at draw time, when it is already possible to ask whether
+	// the context is a Blueprint editor. Without this the section would show up
+	// empty in the texture editor, the sound editor, everywhere.
 	Toolbar->AddDynamicSection(
 		"NodeScribe",
 		FNewSectionConstructChoice(FNewToolMenuDelegate::CreateLambda([](UToolMenu* InMenu)
@@ -357,25 +362,25 @@ void FNodeScribeGraphActions::RegisterToolbar()
 		Section.AddEntry(FToolMenuEntry::InitToolBarButton(
 			"NodeScribePaste",
 			FToolUIActionChoice(MakeAction(&ExecutePaste)),
-			LOCTEXT("PasteLabel", "Colar"),
+			LOCTEXT("PasteLabel", "Paste"),
 			LOCTEXT("PasteTooltip",
-				"Le' o texto do NodeScribe que esta' no clipboard e cria os nodes neste grafo. Ctrl+Z desfaz."),
+				"Reads the NodeScribe text in the clipboard and creates the nodes in this graph. Ctrl+Z undoes it."),
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "GenericCommands.Paste")));
 
 		Section.AddEntry(FToolMenuEntry::InitToolBarButton(
 			"NodeScribeCopySelected",
 			FToolUIActionChoice(MakeAction(&ExecuteCopySelected)),
-			LOCTEXT("CopySelectedLabel", "Copiar selecionado"),
+			LOCTEXT("CopySelectedLabel", "Copy Selected"),
 			LOCTEXT("CopySelectedTooltip",
-				"Transcreve os nodes selecionados para texto e poe no clipboard. Nao altera o grafo."),
+				"Transcribes the selected nodes to text and puts it in the clipboard. Does not change the graph."),
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "GenericCommands.Copy")));
 
 		Section.AddEntry(FToolMenuEntry::InitToolBarButton(
 			"NodeScribeCopyGraph",
 			FToolUIActionChoice(MakeAction(&ExecuteCopyGraph)),
-			LOCTEXT("CopyGraphLabel", "Copiar grafo inteiro"),
+			LOCTEXT("CopyGraphLabel", "Copy Whole Graph"),
 			LOCTEXT("CopyGraphTooltip",
-				"Transcreve o grafo aberto inteiro para texto e poe no clipboard. Nao altera o grafo."),
+				"Transcribes the whole open graph to text and puts it in the clipboard. Does not change the graph."),
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "GenericCommands.SelectAll")));
 	})));
 }

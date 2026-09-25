@@ -8,13 +8,13 @@ class UBlendSpace;
 class UEdGraph;
 
 /**
- * A superficie do NodeScribe para quem chama de fora: Python, MCP, automacao.
+ * NodeScribe's surface for outside callers: Python, MCP, automation.
  *
- * Existe por causa de custo, nao de capacidade. Um agente que monta grafo pelo
- * MCP convencional gasta a maior parte dos tokens *descobrindo* nomes de node
- * -- uma chamada por tipo, cada uma devolvendo dezenas de identificadores.
- * O catalogo do NodeScribe resolve `Print String` localmente, entao um grafo
- * inteiro cabe em duas chamadas e algumas centenas de tokens.
+ * It exists because of cost, not capability. An agent that builds a graph
+ * through the conventional MCP spends most of its tokens *discovering* node
+ * names -- one call per type, each returning dozens of identifiers.
+ * NodeScribe's catalog resolves `Print String` locally, so a whole graph fits
+ * in two calls and a few hundred tokens.
  */
 UCLASS()
 class NODESCRIBEEDITOR_API UNodeScribeLibrary : public UBlueprintFunctionLibrary
@@ -23,157 +23,163 @@ class NODESCRIBEEDITOR_API UNodeScribeLibrary : public UBlueprintFunctionLibrary
 
 public:
 	/**
-	 * Transcreve texto do formato NodeScribe para nodes reais no grafo.
+	 * Transcribes text in the NodeScribe format into real nodes in the graph.
 	 *
-	 * @param bReplace  true apaga o que ja' esta' no grafo antes de escrever, em
-	 *                  vez de acrescentar. **So' se o grafo atual voltar limpo
-	 *                  na leitura** -- se houver qualquer aviso de "isso nao
-	 *                  volta igual", ou node de dado que ninguem consome, a
-	 *                  substituicao e' recusada e nada e' alterado. Apagar a
-	 *                  partir de um texto que perdeu alguma coisa destruiria
-	 *                  justamente o que o texto nao soube dizer.
+	 * @param bReplace  true erases what is already in the graph before writing,
+	 *                  instead of appending. **Only if the current graph comes
+	 *                  back clean when read** -- if there is any "this does not
+	 *                  come back the same" warning, or a data node nobody
+	 *                  consumes, the replacement is refused and nothing changes.
+	 *                  Erasing from a text that lost something would destroy
+	 *                  precisely what the text could not say.
 	 *
-	 * @return Diagnosticos em texto, uma linha por mensagem. Vazio = tudo certo.
-	 *         Nunca lanca: linha que nao resolve vira comentario vermelho no
-	 *         grafo e uma linha aqui, e o resto do texto continua sendo criado.
+	 * @return Diagnostics as text, one line per message. Empty = all good.
+	 *         Never throws: a line that does not resolve becomes a red comment
+	 *         in the graph and a line here, and the rest of the text keeps being
+	 *         created.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString WriteGraph(UEdGraph* Graph, const FString& Text, bool bReplace = false);
 
-	/** Le' o grafo inteiro de volta como texto no mesmo formato. */
+	/** Reads the whole graph back as text in the same format. */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString ReadGraph(UEdGraph* Graph);
 
 	/**
-	 * Esvazia o grafo, e **devolve como texto o que estava nele**.
+	 * Empties the graph, and **returns as text what was in it**.
 	 *
-	 * E' o gesto que faltava. A substituicao do `WriteGraph` se recusa a apagar
-	 * um grafo que o texto nao sabe descrever, e essa recusa esta' certa: o que
-	 * some nao aparece no que sobrou. Mas ha' caso em que a intencao e'
-	 * justamente jogar fora -- os stubs que um Blueprint novo traz de fabrica,
-	 * uma tentativa que falhou --, e ali a recusa so' obriga alguem a fazer na
-	 * mao o que a chamada faria.
+	 * It is the missing gesture. `WriteGraph`'s replacement refuses to erase a
+	 * graph the text cannot describe, and that refusal is right: what vanishes
+	 * does not show up in what is left. But there are cases where the intent is
+	 * precisely to throw it away -- the stubs a new Blueprint brings from the
+	 * factory, an attempt that failed --, and there the refusal only forces
+	 * someone to do by hand what the call would do.
 	 *
-	 * O que muda em relacao a um modo forcado, que este plugin nao tem: nada
-	 * some calado. O grafo volta transcrito na resposta, com os avisos da
-	 * leitura junto -- inclusive o aviso de que uma parte nao coube em texto.
-	 * Quem apagou fica com o que apagou na mao.
+	 * What changes compared to a forced mode, which this plugin does not have:
+	 * nothing vanishes silently. The graph comes back transcribed in the
+	 * response, together with the reading's warnings -- including the warning
+	 * that part of it did not fit in text. Whoever erased keeps what they erased.
 	 *
-	 * Node que a Engine marca como indelevel fica: o Output Pose de um
-	 * AnimGraph, o Result de uma transicao, a entrada de uma funcao. Sao os
-	 * mesmos que o Ctrl+A + Delete do editor preserva.
+	 * Nodes the Engine marks as undeletable stay: an AnimGraph's Output Pose, a
+	 * transition's Result, a function's entry. They are the same ones the
+	 * editor's Ctrl+A + Delete keeps.
 	 *
-	 * Uma transacao so': o Ctrl+Z devolve o grafo inteiro.
+	 * A single transaction: Ctrl+Z brings the whole graph back.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString ClearGraph(UEdGraph* Graph);
 
 	/**
-	 * Um objeto como ficha: uma linha por propriedade, so' o que difere do
-	 * padrao.
+	 * An object as a sheet: one line per property, only what differs from the
+	 * default.
 	 *
-	 * Existe pelo mesmo motivo do resto. Listar as propriedades de um Character
-	 * pelo caminho convencional devolve o esquema JSON inteiro da classe --
-	 * ordem de 10.000 tokens, e so' o formato, sem nenhum valor; os valores
-	 * pedem uma segunda chamada. A ficha responde as duas coisas de uma vez,
-	 * porque 95% das propriedades estao no valor de fabrica e o valor de
-	 * fabrica se resolve deste lado.
+	 * It exists for the same reason as the rest. Listing a Character's
+	 * properties the conventional way returns the class's whole JSON schema --
+	 * around 10,000 tokens, and only the shape, without any value; the values
+	 * need a second call. The sheet answers both at once, because 95% of the
+	 * properties are at their factory value and the factory value is resolved
+	 * on this side.
 	 *
-	 * @param Filter  vazio devolve o que mudou. Com texto, devolve as
-	 *                propriedades cujo nome casa, com tipo e valor -- e' o que
-	 *                dispensa o passo separado de listar o esquema.
+	 * @param Filter  empty returns what changed. With text, it returns the
+	 *                properties whose name matches, with type and value -- which
+	 *                is what makes the separate step of listing the schema
+	 *                unnecessary.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString ReadObject(UObject* Object, const FString& Filter);
 
 	/**
-	 * O espelho: aplica uma ficha.
+	 * The mirror: applies a sheet.
 	 *
-	 * O texto e' uma lista de mudancas, nao o estado final -- colar de volta uma
-	 * ficha inteira nao mexe em nada alem do que as linhas dizem, e nada e'
-	 * apagado. `= padrao` devolve a propriedade ao valor de fabrica.
+	 * The text is a list of changes, not the final state -- pasting a whole sheet
+	 * back touches nothing beyond what the lines say. `= default` returns the
+	 * property to its factory value. `variable Name : Type` creates a Blueprint
+	 * variable, and only `delete variable Name` removes one.
 	 *
-	 * Nao levanta excecao: linha que nao resolve vira diagnostico com os nomes
-	 * parecidos, e as outras continuam sendo aplicadas.
+	 * It does not raise: a line that does not resolve becomes a diagnostic with
+	 * the similar names, and the others keep being applied.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString WriteObject(UObject* Object, const FString& Text);
 
 	/**
-	 * Cria um asset vazio.
+	 * Creates an empty asset.
 	 *
-	 * Existe por capacidade, nao por economia: o toolset nativo da Engine tem
-	 * duplicate, move e delete, e nao tem criacao. Sem isto, todo asset novo e'
-	 * um pedido de clique para uma pessoa, e o resto do trabalho para'.
+	 * It exists for capability, not savings: the Engine's native toolset has
+	 * duplicate, move and delete, and has no creation. Without this, every new
+	 * asset is a request for a person to click, and the rest of the work stops.
 	 *
-	 * @param Path     onde criar, com nome: `/Game/BossRush/Testes/BTTask_Foo`.
-	 * @param Parent   o tipo, pelo nome de tela: `BTTask_BlueprintBase`,
+	 * @param Path     where to create it, with its name: `/Game/MyGame/Tests/BTTask_Foo`.
+	 * @param Parent   the type, by display name: `BTTask_BlueprintBase`,
 	 *                 `GameplayEffect`, `BlackboardData`, `BehaviorTree`.
-	 * @param Options  propriedades da factory, no formato da ficha, aplicadas
-	 *                 antes de criar. Ha' asset que nao se cria so' com o tipo:
-	 *                 um AnimBlueprint precisa saber o esqueleto, e um
-	 *                 BlendSpace tambem. Consertar depois nao serve -- no asset
-	 *                 pronto o esqueleto e' somente-leitura, de proposito.
+	 * @param Options  factory properties, in sheet format, applied before
+	 *                 creating. Some assets cannot be created from the type
+	 *                 alone: an AnimBlueprint needs to know the skeleton, and so
+	 *                 does a BlendSpace. Fixing it afterwards does not work -- on
+	 *                 the finished asset the skeleton is read-only, on purpose.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString CreateAsset(const FString& Path, const FString& Parent, const FString& Options);
 
 	/**
-	 * Preenche um BlendSpace: os eixos e os samples, por texto.
+	 * Fills a BlendSpace: the axes and the samples, from text.
 	 *
-	 * Existe porque a ficha nao alcanca. `SampleData` e `BlendParameters` sao
-	 * arrays de struct, e escrever neles a mao pularia a validacao da Engine --
-	 * que e' quem recalcula a malha de interpolacao. Sem a malha o BlendSpace
-	 * existe, abre, mostra os pontos e nao interpola nada.
+	 * It exists because the sheet does not reach. `SampleData` and
+	 * `BlendParameters` are struct arrays, and writing into them by hand would
+	 * skip the Engine's validation -- which is what rebuilds the interpolation
+	 * grid. Without the grid the BlendSpace exists, opens, shows the points and
+	 * interpolates nothing.
 	 *
-	 *     eixo X : Speed = 0 .. 600
+	 *     axis X : Speed = 0 .. 600
 	 *     MM_Idle = 0
 	 *     MF_Unarmed_Walk_Fwd = 300
 	 *
-	 * Nao apaga o que ja' esta' la': o texto e' uma lista de mudancas.
+	 * It does not erase what is already there: the text is a list of changes.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString WriteBlendSpace(UBlendSpace* BlendSpace, const FString& Text);
 
 	/**
-	 * As Gameplay Tags declaradas, uma por linha.
+	 * The declared Gameplay Tags, one per line.
 	 *
-	 * @param Filter  vazio traz todas; com texto, so' as que contem esse trecho.
+	 * @param Filter  empty brings them all; with text, only the ones containing it.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString ReadTags(const FString& Filter);
 
 	/**
-	 * O espelho: cria as tags do texto, uma por linha.
+	 * The mirror: creates the text's tags, one per line.
 	 *
-	 * Existe por capacidade, nao por economia -- tag nao e' asset nem
-	 * propriedade, vive num ini, e sem isto ela so' nasce por alguem abrir a
-	 * janela de configuracao. Um cooldown novo precisa da tag existir antes de o
-	 * Gameplay Effect poder concede-la.
+	 * It exists for capability, not savings -- a tag is neither an asset nor a
+	 * property, it lives in an ini, and without this it is only born when
+	 * someone opens the settings window. A new cooldown needs the tag to exist
+	 * before the Gameplay Effect can grant it.
 	 *
-	 * Tag ja' declarada e' pulada sem erro. Nao apaga nem renomeia.
+	 * An already declared tag is skipped without error. It neither deletes nor
+	 * renames.
 	 *
-	 * @param Source  o ini de destino, pelo nome de tela (`BossRush.ini`).
-	 *                Vazio deixa a Engine escolher, que da' o
-	 *                `DefaultGameplayTags.ini`. Fonte que nao existe e' recusada
-	 *                com a lista das que existem.
+	 * @param Source  the target ini, by display name (`BossRush.ini`). Empty
+	 *                lets the Engine choose, which gives
+	 *                `DefaultGameplayTags.ini`. A source that does not exist is
+	 *                refused with the list of the ones that do.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString WriteTags(const FString& Text, const FString& Source);
 
-	/** A especificacao do formato, para quem nunca a viu. */
+	/** The format's specification, for whoever has never seen it. */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString GetFormatDocs();
 
 	/**
-	 * Salva tudo e fecha o editor.
+	 * Saves everything and closes the editor.
 	 *
-	 * Existe porque recompilar o plugin exige o editor fechado, e sem isto cada
-	 * ciclo de correcao para' esperando alguem clicar no X.
+	 * It exists because recompiling the plugin requires the editor closed, and
+	 * without this every fix cycle stops waiting for someone to click the X.
 	 *
-	 * Recusa enquanto houver Play In Editor rodando: fechar no meio de um teste
-	 * surpreende, e o ganho de tempo nao paga isso. O fechamento e' adiado um
-	 * instante para esta resposta conseguir sair antes de a conexao cair.
+	 * It refuses while Play In Editor is running: closing in the middle of a
+	 * test is a surprise, and the time saved does not pay for it. The shutdown is
+	 * deferred for a moment so this response can get out before the connection
+	 * drops.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString SaveAllAndQuit();

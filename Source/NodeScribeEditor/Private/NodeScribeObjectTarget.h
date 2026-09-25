@@ -7,35 +7,36 @@ class UClass;
 class UObject;
 
 /**
- * De onde a ficha le' e onde ela escreve.
+ * Where the sheet reads from and where it writes.
  *
- * Existe pelo mesmo motivo que `NodeScribePropertyText`: leitor e escritor de
- * ficha sao espelhos. Se cada um decidisse sozinho qual objeto carrega os
- * valores, ou quais componentes existem, a ficha sairia falando de um objeto e
- * voltaria mexendo em outro -- e isso grava valor errado num asset, que compila,
- * roda e so' da' as caras em playtest.
+ * It exists for the same reason as `NodeScribePropertyText`: the sheet's
+ * reader and writer are mirrors. If each decided on its own which object
+ * carries the values, or which components exist, the sheet would come out
+ * talking about one object and come back changing another -- and that saves a
+ * wrong value into an asset, which compiles, runs and only shows itself in
+ * playtest.
  */
 namespace NodeScribeObjectTarget
 {
 	/**
-	 * O objeto que carrega os valores.
+	 * The object that carries the values.
 	 *
-	 * Blueprint e classe nao tem valor nenhum em si: quem guarda e' o CDO da
-	 * classe compilada. E' de la' que o painel de detalhes le', entao e' de la'
-	 * que a ficha tem que ler para dizer a mesma coisa que a tela.
+	 * Blueprints and classes hold no value themselves: what keeps them is the
+	 * compiled class's CDO. That is where the details panel reads from, so that
+	 * is where the sheet has to read from to say the same thing as the screen.
 	 */
 	UObject* ResolveTarget(UObject* Object);
 
-	/** O Blueprint por tras do alvo, quando ha' um. */
+	/** The Blueprint behind the target, when there is one. */
 	UBlueprint* FindBlueprint(const UObject* Requested, const UClass* Class);
 
 	/**
-	 * Os componentes do alvo, pelo nome com que a ficha os escreve.
+	 * The target's components, by the name the sheet writes them with.
 	 *
-	 * Duas origens, porque um Blueprint guarda em dois lugares: o que veio do
-	 * construtor em C++ vive no proprio CDO, e o que foi arrastado no editor
-	 * vive como template no SimpleConstructionScript. Ler so' um deles esconde
-	 * metade dos componentes sem avisar.
+	 * Two sources, because a Blueprint keeps them in two places: what came from
+	 * the C++ constructor lives in the CDO itself, and what was dragged in the
+	 * editor lives as a template in the SimpleConstructionScript. Reading only
+	 * one of them hides half the components without warning.
 	 */
 	TMap<FString, UObject*> CollectComponents(UObject* Target, UBlueprint* Blueprint);
 }

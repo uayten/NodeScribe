@@ -11,9 +11,9 @@ public class NodeScribeEditor : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
-			// Blackboard e Behavior Tree. Os tipos concretos de chave nao entram
-			// por include: sao lidos por reflexao, para que chave criada pelo
-			// projeto seja lida igual as da Engine.
+			// Blackboard and Behavior Tree. The concrete key types do not come in
+			// by include: they are read through reflection, so that a key type
+			// created by the project is read the same as the Engine's.
 			"AIModule",
 			"ApplicationCore",
 			"InputCore",
@@ -24,20 +24,19 @@ public class NodeScribeEditor : ModuleRules
 			"Projects",
 			"GraphEditor",
 			"BlueprintGraph",
-			// AnimGraph: nodes de AnimBlueprint (UAnimGraphNode_*), pose pins e
-			// maquina de estado. AnimGraphRuntime traz os FAnimNode_* que eles
-			// embrulham.
+			// AnimGraph: AnimBlueprint nodes (UAnimGraphNode_*), pose pins and
+			// state machines. AnimGraphRuntime brings the FAnimNode_* they wrap.
 			"AnimGraph",
 			"AnimGraphRuntime",
 			"KismetCompiler",
 			"Kismet",
 			"MessageLog",
-			// O .mcp.json que o assistente le. Aditivo: entrada de terceiro
-			// tem que sobreviver, entao e parse e reescrita, nao template.
+			// The .mcp.json the assistant reads. Additive: third-party entries
+			// have to survive, so it is parse and rewrite, not a template.
 			"Json",
-			// Criar asset: o nativo nao tem criacao, so' duplicate.
+			// Asset creation: the native toolset has no creation, only duplicate.
 			"AssetTools",
-			// Tag: ler pelo Manager, escrever no ini pelo modulo de editor.
+			// Tags: read through the Manager, written to the ini by the editor module.
 			"GameplayTags",
 			"GameplayTagsEditor"
 		});

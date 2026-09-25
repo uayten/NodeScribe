@@ -3,39 +3,40 @@
 #include "CoreMinimal.h"
 
 /**
- * Criar asset.
+ * Asset creation.
  *
- * Existe por **capacidade, nao por economia**: o toolset nativo da Engine tem
- * `duplicate`, `move` e `delete`, e nao tem criacao. Sem isto, todo asset novo
- * -- um Gameplay Effect de cooldown, uma BTTask, um BTService -- e' um pedido
- * de clique para uma pessoa, e o resto do trabalho para' esperando.
+ * It exists for **capability, not savings**: the Engine's native toolset has
+ * `duplicate`, `move` and `delete`, and has no creation. Without this, every
+ * new asset -- a cooldown Gameplay Effect, a BTTask, a BTService -- is a
+ * request for a person to click, and the rest of the work stops waiting.
  *
- * Nao economiza token nenhum, e o README diz isso com todas as letras.
+ * It saves no tokens at all, and the README says so plainly.
  */
 class FNodeScribeAssetMaker
 {
 public:
 	/**
-	 * @param Path     onde criar, com nome: `/Game/BossRush/Testes/BTTask_Foo`.
-	 * @param Parent   o tipo, pelo nome que aparece na tela: `BTTask_BlueprintBase`,
+	 * @param Path     where to create it, with its name: `/Game/MyGame/Tests/BTTask_Foo`.
+	 * @param Parent   the type, by the name shown on screen: `BTTask_BlueprintBase`,
 	 *                 `GameplayEffect`, `BlackboardData`, `BehaviorTree`.
-	 * @param Options  propriedades da *factory*, no formato da ficha, aplicadas
-	 *                 antes de criar.
+	 * @param Options  *factory* properties, in sheet format, applied before
+	 *                 creating.
 	 *
-	 * Options existe porque ha' asset que nao se cria so' com o tipo. Um
-	 * AnimBlueprint precisa saber o esqueleto, e um BlendSpace tambem; sem isso
-	 * a Engine abre um dialogo modal pedindo -- que ninguem clica do outro lado
-	 * de uma chamada -- ou cria um asset quebrado. Consertar depois nao serve:
-	 * `Skeleton` e' somente-leitura no asset pronto, de proposito.
+	 * Options exists because some assets cannot be created from the type
+	 * alone. An AnimBlueprint needs to know the skeleton, and so does a
+	 * BlendSpace; without it the Engine opens a modal dialog asking for it --
+	 * which nobody clicks on the other side of a call -- or creates a broken
+	 * asset. Fixing it afterwards does not work: `Skeleton` is read-only on the
+	 * finished asset, on purpose.
 	 *
-	 * A factory e' um UObject como outro qualquer, entao quem escreve nela e' o
-	 * mesmo `FNodeScribeObjectWriter` da ficha:
+	 * The factory is a UObject like any other, so what writes into it is the
+	 * same `FNodeScribeObjectWriter` as the sheet:
 	 *
 	 *     CreateAsset("/Game/Anims/ABP_Sophia", "AnimBlueprint",
 	 *                 "TargetSkeleton = /Game/MetaHumans/.../metahuman_base_skel")
 	 *
-	 * @return o caminho do que foi criado, ou o motivo de nao ter dado.
-	 *         Nunca sobrescreve: caminho ocupado e' erro, nao substituicao.
+	 * @return the path of what was created, or why it failed.
+	 *         Never overwrites: a taken path is an error, not a replacement.
 	 */
 	static FString CreateAsset(const FString& Path, const FString& Parent, const FString& Options = FString());
 };

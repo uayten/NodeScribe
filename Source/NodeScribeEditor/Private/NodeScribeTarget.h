@@ -4,12 +4,12 @@
 
 class UEdGraph;
 
-/** Onde os nodes novos entram no grafo. */
+/** Where the new nodes go into the graph. */
 struct FNodeScribeTarget
 {
 	/**
-	 * Um ponto livre abaixo do que ja' existe no grafo, para os nodes novos
-	 * nao caírem em cima do que voce ja' montou.
+	 * A free spot below what already exists in the graph, so the new nodes do
+	 * not land on top of what you already built.
 	 */
 	static FVector2D FindFreeOrigin(const UEdGraph* Graph);
 };

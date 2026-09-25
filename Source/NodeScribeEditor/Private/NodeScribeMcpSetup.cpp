@@ -22,39 +22,39 @@ FDelegateHandle FNodeScribeMcpSetup::StartupCallbackHandle;
 
 namespace
 {
-	/** A classe de settings do plugin da Epic, por caminho -- nao por include. */
-	const TCHAR* CaminhoDaSettings =
+	/** Epic's plugin settings class, by path -- not by include. */
+	const TCHAR* SettingsClassPath =
 		TEXT("/Script/ModelContextProtocolEngine.ModelContextProtocolSettings");
 
 	const TCHAR* PropAutoStart = TEXT("bAutoStartServer");
-	const TCHAR* PropPorta     = TEXT("ServerPortNumber");
-	const TCHAR* PropCaminho   = TEXT("ServerUrlPath");
+	const TCHAR* PropPort      = TEXT("ServerPortNumber");
+	const TCHAR* PropPath      = TEXT("ServerUrlPath");
 
 	/**
-	 * O nome da entrada no `.mcp.json`.
+	 * The entry's name in `.mcp.json`.
 	 *
-	 * E' o servidor da Engine que esta' sendo apontado, nao o NodeScribe -- ele
-	 * serve todos os toolsets do projeto, e o nosso e' um deles. Chamar de
-	 * "nodescribe" faria parecer que ha' um servidor por plugin.
+	 * It is the Engine's server being pointed at, not NodeScribe -- it serves
+	 * every toolset in the project, and ours is one of them. Calling it
+	 * "nodescribe" would make it look like there is one server per plugin.
 	 */
-	const TCHAR* NomeDaEntrada = TEXT("unreal-mcp");
+	const TCHAR* EntryName = TEXT("unreal-mcp");
 
 	/**
-	 * Um segundo.
+	 * One second.
 	 *
-	 * A ordem importa: o proprio ModelContextProtocol decide se sobe o servidor
-	 * no PostEngineInit dele. Se a gente ligasse o `bAutoStartServer` no meio
-	 * dessa mesma leva, o resultado dependeria de qual modulo carregou primeiro
-	 * -- e nos dois desfechos ruins ou ninguem sobe, ou os dois sobem e um
-	 * derruba o outro. Esperar o primeiro quadro tira a duvida: se o servidor
-	 * fosse subir sozinho, ja' subiu.
+	 * The order matters: ModelContextProtocol itself decides whether to start
+	 * the server in its own PostEngineInit. If we turned `bAutoStartServer` on in
+	 * the middle of that same batch, the result would depend on which module
+	 * loaded first -- and in both bad outcomes either nobody starts it, or both
+	 * do and one brings the other down. Waiting for the first frame settles it:
+	 * if the server was going to start by itself, it already has.
 	 */
-	const float EsperaSegundos = 1.0f;
+	const float WaitSeconds = 1.0f;
 
-	/** A classe de settings, ou nulo se o plugin da Epic nao estiver aqui. */
-	UClass* AcharSettings()
+	/** The settings class, or null if Epic's plugin is not here. */
+	UClass* FindSettingsClass()
 	{
-		return FindObject<UClass>(nullptr, CaminhoDaSettings);
+		return FindObject<UClass>(nullptr, SettingsClassPath);
 	}
 }
 
@@ -66,7 +66,7 @@ FString FNodeScribeMcpSetup::GetMcpJsonPath()
 void FNodeScribeMcpSetup::Start()
 {
 	TickHandle = FTSTicker::GetCoreTicker().AddTicker(
-		FTickerDelegate::CreateStatic(&FNodeScribeMcpSetup::Conferir), EsperaSegundos);
+		FTickerDelegate::CreateStatic(&FNodeScribeMcpSetup::Check), WaitSeconds);
 }
 
 void FNodeScribeMcpSetup::Stop()
@@ -78,183 +78,183 @@ void FNodeScribeMcpSetup::Stop()
 	}
 }
 
-bool FNodeScribeMcpSetup::Conferir(float)
+bool FNodeScribeMcpSetup::Check(float)
 {
-	UE_LOG(LogNodeScribe, Log, TEXT("MCP: %s"), *GarantirServidor());
+	UE_LOG(LogNodeScribe, Log, TEXT("MCP: %s"), *EnsureServer());
 
-	// Sem forcar: na partida, entrada que a pessoa escreveu manda mais que a
-	// nossa. Corrigir e' o que o item de menu faz, quando ela pede.
-	UE_LOG(LogNodeScribe, Log, TEXT("MCP: %s"), *GarantirEntradaNoMcpJson(/*bForcar*/ false));
+	// Without forcing: at startup, an entry the person wrote outranks ours.
+	// Fixing it is what the menu item does, when they ask.
+	UE_LOG(LogNodeScribe, Log, TEXT("MCP: %s"), *EnsureMcpJsonEntry(/*bForce*/ false));
 
-	// Uma vez so'.
+	// Only once.
 	return false;
 }
 
-bool FNodeScribeMcpSetup::LerEnderecoDoServidor(int32& OutPorta, FString& OutCaminho)
+bool FNodeScribeMcpSetup::ReadServerAddress(int32& OutPort, FString& OutPath)
 {
-	UClass* Classe = AcharSettings();
-	if (Classe == nullptr)
+	UClass* SettingsClass = FindSettingsClass();
+	if (SettingsClass == nullptr)
 	{
 		return false;
 	}
 
-	const UObject* Cdo = Classe->GetDefaultObject();
-	const FNumericProperty* Porta = FindFProperty<FNumericProperty>(Classe, PropPorta);
-	const FStrProperty* Caminho = FindFProperty<FStrProperty>(Classe, PropCaminho);
+	const UObject* Cdo = SettingsClass->GetDefaultObject();
+	const FNumericProperty* Port = FindFProperty<FNumericProperty>(SettingsClass, PropPort);
+	const FStrProperty* Path = FindFProperty<FStrProperty>(SettingsClass, PropPath);
 
-	if (Cdo == nullptr || Porta == nullptr || Caminho == nullptr)
+	if (Cdo == nullptr || Port == nullptr || Path == nullptr)
 	{
 		return false;
 	}
 
-	OutPorta = static_cast<int32>(Porta->GetUnsignedIntPropertyValue(Porta->ContainerPtrToValuePtr<void>(Cdo)));
-	OutCaminho = Caminho->GetPropertyValue_InContainer(Cdo);
+	OutPort = static_cast<int32>(Port->GetUnsignedIntPropertyValue(Port->ContainerPtrToValuePtr<void>(Cdo)));
+	OutPath = Path->GetPropertyValue_InContainer(Cdo);
 
 	return true;
 }
 
-FString FNodeScribeMcpSetup::GarantirServidor()
+FString FNodeScribeMcpSetup::EnsureServer()
 {
-	UClass* Classe = AcharSettings();
-	if (Classe == nullptr)
+	UClass* SettingsClass = FindSettingsClass();
+	if (SettingsClass == nullptr)
 	{
-		// Nao e' erro: a dependencia e' opcional, e todo o resto do plugin --
-		// botoes, Message Log, comando.txt -- funciona sem ela.
-		return TEXT("o plugin ModelContextProtocol nao esta neste projeto, entao nao ha servidor para ligar.");
+		// Not an error: the dependency is optional, and all the rest of the
+		// plugin -- buttons, Message Log, command.txt -- works without it.
+		return TEXT("the ModelContextProtocol plugin is not in this project, so there is no server to start.");
 	}
 
-	UObject* Cdo = Classe->GetDefaultObject();
-	const FBoolProperty* AutoStart = FindFProperty<FBoolProperty>(Classe, PropAutoStart);
+	UObject* Cdo = SettingsClass->GetDefaultObject();
+	const FBoolProperty* AutoStart = FindFProperty<FBoolProperty>(SettingsClass, PropAutoStart);
 
 	if (Cdo == nullptr || AutoStart == nullptr)
 	{
 		return FString::Printf(
-			TEXT("[erro]: achei a settings do MCP mas nao a propriedade `%s`. A Engine renomeou, e o auto-start ")
-			TEXT("tem que voltar a ser ligado na mao em Project Settings -> Plugins -> Model Context Protocol."),
+			TEXT("[error]: found the MCP settings but not the `%s` property. The Engine renamed it, and auto-start ")
+			TEXT("has to be turned back on by hand in Project Settings -> Plugins -> Model Context Protocol."),
 			PropAutoStart);
 	}
 
 	if (AutoStart->GetPropertyValue_InContainer(Cdo))
 	{
-		return TEXT("servidor ja estava configurado para subir sozinho.");
+		return TEXT("the server was already set to start by itself.");
 	}
 
 	AutoStart->SetPropertyValue_InContainer(Cdo, true);
 
-	// SaveConfig, e nao TryUpdateDefaultConfigFile: isto grava no ini por
-	// usuario, dentro de Saved/. Escrever no `Config/` do projeto sujaria um
-	// arquivo versionado sem ninguem ter pedido, e nao e' preciso -- se o valor
-	// sumir, a proxima abertura passa por aqui de novo e liga outra vez.
+	// SaveConfig, not TryUpdateDefaultConfigFile: this writes to the per-user
+	// ini, inside Saved/. Writing to the project's `Config/` would dirty a
+	// versioned file nobody asked for, and it is not needed -- if the value
+	// vanishes, the next launch comes through here again and turns it back on.
 	Cdo->SaveConfig();
 
-	// Ligar a settings so' vale para a proxima abertura: o momento em que o
-	// plugin da Epic olha para ela ja' passou. Para esta sessao, o comando de
-	// console -- que so' existe se o plugin estiver carregado, e some junto com
-	// ele se nao estiver.
-	bool bSubiu = false;
+	// Turning the setting on only counts for the next launch: the moment Epic's
+	// plugin looks at it has already passed. For this session, the console
+	// command -- which only exists if the plugin is loaded, and goes away with
+	// it if it is not.
+	bool bStarted = false;
 	if (GEngine != nullptr)
 	{
-		bSubiu = GEngine->Exec(nullptr, TEXT("ModelContextProtocol.StartServer"));
+		bStarted = GEngine->Exec(nullptr, TEXT("ModelContextProtocol.StartServer"));
 	}
 
-	int32 Porta = 0;
-	FString Caminho;
-	const bool bTemEndereco = LerEnderecoDoServidor(Porta, Caminho);
+	int32 Port = 0;
+	FString Path;
+	const bool bHasAddress = ReadServerAddress(Port, Path);
 
-	if (!bSubiu)
+	if (!bStarted)
 	{
-		return TEXT("liguei o auto-start para as proximas aberturas, mas o comando ")
-			TEXT("`ModelContextProtocol.StartServer` nao respondeu -- nesta sessao o servidor continua fora do ar.");
+		return TEXT("turned auto-start on for the next launches, but the ")
+			TEXT("`ModelContextProtocol.StartServer` command did not answer -- in this session the server stays down.");
 	}
 
-	return bTemEndereco
-		? FString::Printf(TEXT("auto-start estava desligado; liguei e subi o servidor em http://127.0.0.1:%d%s"), Porta, *Caminho)
-		: TEXT("auto-start estava desligado; liguei e subi o servidor.");
+	return bHasAddress
+		? FString::Printf(TEXT("auto-start was off; turned it on and started the server at http://127.0.0.1:%d%s"), Port, *Path)
+		: TEXT("auto-start was off; turned it on and started the server.");
 }
 
-FString FNodeScribeMcpSetup::GarantirEntradaNoMcpJson(bool bForcar)
+FString FNodeScribeMcpSetup::EnsureMcpJsonEntry(bool bForce)
 {
-	int32 Porta = 0;
-	FString CaminhoDaUrl;
-	if (!LerEnderecoDoServidor(Porta, CaminhoDaUrl))
+	int32 Port = 0;
+	FString UrlPath;
+	if (!ReadServerAddress(Port, UrlPath))
 	{
-		return TEXT("sem o ModelContextProtocol nao ha endereco para escrever no .mcp.json.");
+		return TEXT("without ModelContextProtocol there is no address to write into .mcp.json.");
 	}
 
-	const FString Url = FString::Printf(TEXT("http://127.0.0.1:%d%s"), Porta, *CaminhoDaUrl);
-	const FString Arquivo = GetMcpJsonPath();
+	const FString Url = FString::Printf(TEXT("http://127.0.0.1:%d%s"), Port, *UrlPath);
+	const FString FilePath = GetMcpJsonPath();
 
-	TSharedPtr<FJsonObject> Raiz;
-	FString Texto;
+	TSharedPtr<FJsonObject> Root;
+	FString Text;
 
-	if (FFileHelper::LoadFileToString(Texto, *Arquivo))
+	if (FFileHelper::LoadFileToString(Text, *FilePath))
 	{
-		const TSharedRef<TJsonReader<>> Leitor = TJsonReaderFactory<>::Create(Texto);
-		if (!FJsonSerializer::Deserialize(Leitor, Raiz) || !Raiz.IsValid())
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Text);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
 		{
-			// Reescrever por cima apagaria a configuracao de outros servidores
-			// -- e o arquivo pode estar quebrado justamente por estar sendo
-			// editado agora.
-			return FString::Printf(TEXT("[erro]: %s existe mas nao e JSON valido. Nao mexo nele."), *Arquivo);
+			// Writing over it would erase the configuration of other servers --
+			// and the file may be broken precisely because it is being edited
+			// right now.
+			return FString::Printf(TEXT("[error]: %s exists but is not valid JSON. Leaving it alone."), *FilePath);
 		}
 	}
 	else
 	{
-		Raiz = MakeShared<FJsonObject>();
+		Root = MakeShared<FJsonObject>();
 	}
 
-	TSharedPtr<FJsonObject> Servidores;
-	if (Raiz->HasTypedField<EJson::Object>(TEXT("mcpServers")))
+	TSharedPtr<FJsonObject> Servers;
+	if (Root->HasTypedField<EJson::Object>(TEXT("mcpServers")))
 	{
-		Servidores = Raiz->GetObjectField(TEXT("mcpServers"));
+		Servers = Root->GetObjectField(TEXT("mcpServers"));
 	}
 	else
 	{
-		Servidores = MakeShared<FJsonObject>();
-		Raiz->SetObjectField(TEXT("mcpServers"), Servidores);
+		Servers = MakeShared<FJsonObject>();
+		Root->SetObjectField(TEXT("mcpServers"), Servers);
 	}
 
-	// Qualquer entrada que ja' aponte para este endereco serve, tenha o nome que
-	// tiver: quem configurou na mao escolheu o nome dela, e um segundo apelido
-	// para o mesmo servidor faria o assistente listar tudo em dobro.
-	for (const TPair<FString, TSharedPtr<FJsonValue>>& Par : Servidores->Values)
+	// Any entry already pointing at this address will do, whatever its name:
+	// whoever configured it by hand chose its name, and a second alias for the
+	// same server would make the assistant list everything twice.
+	for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Servers->Values)
 	{
-		const TSharedPtr<FJsonObject>* Entrada = nullptr;
-		FString UrlDaEntrada;
+		const TSharedPtr<FJsonObject>* Entry = nullptr;
+		FString EntryUrl;
 
-		if (Par.Value.IsValid()
-			&& Par.Value->TryGetObject(Entrada)
-			&& (*Entrada)->TryGetStringField(TEXT("url"), UrlDaEntrada)
-			&& UrlDaEntrada.Equals(Url, ESearchCase::IgnoreCase))
+		if (Pair.Value.IsValid()
+			&& Pair.Value->TryGetObject(Entry)
+			&& (*Entry)->TryGetStringField(TEXT("url"), EntryUrl)
+			&& EntryUrl.Equals(Url, ESearchCase::IgnoreCase))
 		{
-			return FString::Printf(TEXT(".mcp.json ja aponta para %s, como \"%s\"."), *Url, *Par.Key);
+			return FString::Printf(TEXT(".mcp.json already points at %s, as \"%s\"."), *Url, *Pair.Key);
 		}
 	}
 
-	if (Servidores->HasField(NomeDaEntrada) && !bForcar)
+	if (Servers->HasField(EntryName) && !bForce)
 	{
 		return FString::Printf(
-			TEXT(".mcp.json ja tem uma entrada \"%s\", apontando para outro lugar. Deixei como esta -- ")
-			TEXT("pode ser um tunel ou outro editor. Tools -> NodeScribe -> Configurar MCP do projeto corrige para %s."),
-			NomeDaEntrada, *Url);
+			TEXT(".mcp.json already has an entry \"%s\", pointing somewhere else. Left it as it is -- ")
+			TEXT("it may be a tunnel or another editor. Tools -> NodeScribe -> Configure project MCP fixes it to %s."),
+			EntryName, *Url);
 	}
 
-	const TSharedPtr<FJsonObject> Nova = MakeShared<FJsonObject>();
-	Nova->SetStringField(TEXT("type"), TEXT("http"));
-	Nova->SetStringField(TEXT("url"), Url);
-	Servidores->SetObjectField(NomeDaEntrada, Nova);
+	const TSharedPtr<FJsonObject> NewEntry = MakeShared<FJsonObject>();
+	NewEntry->SetStringField(TEXT("type"), TEXT("http"));
+	NewEntry->SetStringField(TEXT("url"), Url);
+	Servers->SetObjectField(EntryName, NewEntry);
 
-	FString Saida;
-	const TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> Escritor =
-		TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&Saida);
+	FString Output;
+	const TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> Writer =
+		TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&Output);
 
-	if (!FJsonSerializer::Serialize(Raiz.ToSharedRef(), Escritor)
-		|| !FFileHelper::SaveStringToFile(Saida, *Arquivo))
+	if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer)
+		|| !FFileHelper::SaveStringToFile(Output, *FilePath))
 	{
-		return FString::Printf(TEXT("[erro]: nao consegui gravar %s."), *Arquivo);
+		return FString::Printf(TEXT("[error]: could not write %s."), *FilePath);
 	}
 
-	return FString::Printf(TEXT("escrevi a entrada \"%s\" -> %s em %s."), NomeDaEntrada, *Url, *Arquivo);
+	return FString::Printf(TEXT("wrote the entry \"%s\" -> %s in %s."), EntryName, *Url, *FilePath);
 }
 
 void FNodeScribeMcpSetup::RegisterStartupHook()
@@ -265,7 +265,7 @@ void FNodeScribeMcpSetup::RegisterStartupHook()
 
 void FNodeScribeMcpSetup::RegisterMenu()
 {
-	FToolMenuOwnerScoped Dono(FName("NodeScribeMcpSetup"));
+	FToolMenuOwnerScoped Owner(FName("NodeScribeMcpSetup"));
 
 	UToolMenu* Menu = UToolMenus::Get()->ExtendMenu(FName("LevelEditor.MainMenu.Tools"));
 	if (Menu == nullptr)
@@ -273,30 +273,30 @@ void FNodeScribeMcpSetup::RegisterMenu()
 		return;
 	}
 
-	FToolMenuSection& Secao = Menu->FindOrAddSection(
-		"NodeScribe", LOCTEXT("SecaoNodeScribe", "NodeScribe"));
+	FToolMenuSection& Section = Menu->FindOrAddSection(
+		"NodeScribe", LOCTEXT("NodeScribeSection", "NodeScribe"));
 
-	Secao.AddMenuEntry(
-		"NodeScribeConfigurarMcp",
-		LOCTEXT("ConfigurarMcp", "Configurar MCP do projeto"),
-		LOCTEXT("ConfigurarMcpTip",
-			"Liga o servidor MCP da Engine e poe o endereco dele no .mcp.json da raiz do projeto, que e onde o "
-			"Claude Code procura.\n\n"
-			"Isto ja roda sozinho a cada abertura. O item existe para o caso de a porta ter mudado, ou de voce "
-			"ter uma entrada antiga apontando para o lugar errado -- so daqui ela e corrigida."),
+	Section.AddMenuEntry(
+		"NodeScribeConfigureMcp",
+		LOCTEXT("ConfigureMcp", "Configure project MCP"),
+		LOCTEXT("ConfigureMcpTip",
+			"Turns on the Engine's MCP server and puts its address into the .mcp.json at the project root, which is "
+			"where Claude Code looks.\n\n"
+			"This already runs by itself on every launch. The item exists for when the port changed, or you "
+			"have an old entry pointing at the wrong place -- only from here does it get fixed."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Settings"),
 		FUIAction(FExecuteAction::CreateLambda([]()
 		{
-			const FString DoServidor = GarantirServidor();
-			const FString DoArquivo = GarantirEntradaNoMcpJson(/*bForcar*/ true);
+			const FString FromServer = EnsureServer();
+			const FString FromFile = EnsureMcpJsonEntry(/*bForce*/ true);
 
-			UE_LOG(LogNodeScribe, Log, TEXT("MCP: %s"), *DoServidor);
-			UE_LOG(LogNodeScribe, Log, TEXT("MCP: %s"), *DoArquivo);
+			UE_LOG(LogNodeScribe, Log, TEXT("MCP: %s"), *FromServer);
+			UE_LOG(LogNodeScribe, Log, TEXT("MCP: %s"), *FromFile);
 
 			FMessageDialog::Open(EAppMsgType::Ok, FText::Format(
-				LOCTEXT("ResultadoMcp", "Servidor: {0}\n\nArquivo: {1}\n\nSe o assistente ja estava aberto, reconecte-o para ele ver a mudanca."),
-				FText::FromString(DoServidor),
-				FText::FromString(DoArquivo)));
+				LOCTEXT("McpResult", "Server: {0}\n\nFile: {1}\n\nIf the assistant was already open, reconnect it so it sees the change."),
+				FText::FromString(FromServer),
+				FText::FromString(FromFile)));
 		})));
 }
 

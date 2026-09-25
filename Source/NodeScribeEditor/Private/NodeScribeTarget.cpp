@@ -29,6 +29,6 @@ FVector2D FNodeScribeTarget::FindFreeOrigin(const UEdGraph* Graph)
 		return FVector2D(0.0f, 0.0f);
 	}
 
-	// Uma faixa livre abaixo de tudo que ja' existe.
+	// A free band below everything that already exists.
 	return FVector2D(static_cast<float>(MinX), static_cast<float>(MaxY + 500));
 }

@@ -4,83 +4,85 @@
 #include "Containers/Ticker.h"
 
 /**
- * As duas configuracoes que separam "plugin instalado" de "plugin funcionando".
+ * The two settings that separate "plugin installed" from "plugin working".
  *
- * O NodeScribe nao fala MCP: ele registra um toolset no ToolsetRegistry, e quem
- * poe aquilo no ar e' o plugin ModelContextProtocol, da propria Engine. Sao
- * dependencias opcionais no `.uplugin` -- sem elas o plugin continua inteiro do
- * lado do editor, so' que o assistente nao alcanca nada.
+ * NodeScribe does not speak MCP: it registers a toolset in the
+ * ToolsetRegistry, and what puts that on the air is the Engine's own
+ * ModelContextProtocol plugin. They are optional dependencies in the
+ * `.uplugin` -- without them the plugin stays whole on the editor side, only
+ * the assistant reaches nothing.
  *
- * O problema e' que instalar os tres nao basta, e as duas coisas que faltam nao
- * dao erro nenhum -- e' tudo silencio:
+ * The problem is that installing all three is not enough, and the two missing
+ * things give no error at all -- it is all silence:
  *
- * 1. O servidor da Engine nasce desligado (`bAutoStartServer` e' false por
- *    padrao). Sem ligar, cada abertura do editor exige rodar
- *    `ModelContextProtocol.StartServer` na mao.
+ * 1. The Engine's server is born off (`bAutoStartServer` is false by
+ *    default). Without turning it on, every editor launch requires running
+ *    `ModelContextProtocol.StartServer` by hand.
  *
- * 2. O cliente precisa saber o endereco. No Claude Code isso e' uma entrada em
- *    `.mcp.json` na raiz do projeto, que ninguem escreve sozinho.
+ * 2. The client needs to know the address. In Claude Code that is an entry in
+ *    `.mcp.json` at the project root, which nobody writes by themselves.
  *
- * Nos dois casos a falha e' calada: o assistente conecta, recebe lista vazia (ou
- * nem conecta) e segue sem dizer que perdeu alguma coisa. Uma sessao inteira se
- * passou aqui com o servidor desligado antes de alguem notar.
+ * In both cases the failure is silent: the assistant connects, gets an empty
+ * list (or does not even connect) and moves on without saying it lost
+ * anything. A whole session went by here with the server off before anyone
+ * noticed.
  *
- * Nao da' para resolver por ini de plugin: a Unreal injeta `<Plugin>/Config` na
- * hierarquia do projeto, mas so' para branches que ela ja' conhece pelo nome do
- * arquivo, e o resultado nao chega no `EditorPerProjectUserSettings`. Foi
- * medido, nao deduzido.
+ * It cannot be solved with a plugin ini: Unreal injects `<Plugin>/Config` into
+ * the project's hierarchy, but only for branches it already knows by file
+ * name, and the result does not reach `EditorPerProjectUserSettings`. That was
+ * measured, not deduced.
  *
- * Entao e' codigo. Nada aqui linka com o plugin da Epic: a settings e' lida por
- * reflexao pelo nome da classe, e o servidor sobe por comando de console. Sem o
- * ModelContextProtocol instalado, os dois falham quietos, que e' o certo -- a
- * dependencia e' opcional de verdade.
+ * So it is code. Nothing here links against Epic's plugin: the settings are
+ * read through reflection by class name, and the server starts through a
+ * console command. Without ModelContextProtocol installed, both fail quietly,
+ * which is right -- the dependency really is optional.
  */
 class FNodeScribeMcpSetup
 {
 public:
-	/** Agenda a conferencia para depois que todo mundo carregou. */
+	/** Schedules the check for after everyone has loaded. */
 	static void Start();
 
 	static void Stop();
 
 	/**
-	 * Liga o `bAutoStartServer` se estiver desligado, e sobe o servidor agora.
+	 * Turns `bAutoStartServer` on if it is off, and starts the server now.
 	 *
-	 * @return o que houve, em uma linha, para o log e para o menu.
+	 * @return what happened, in one line, for the log and for the menu.
 	 */
-	static FString GarantirServidor();
+	static FString EnsureServer();
 
 	/**
-	 * Poe a entrada deste projeto no `.mcp.json`, se ainda nao estiver la'.
+	 * Puts this project's entry into `.mcp.json`, if it is not there yet.
 	 *
-	 * Estritamente aditivo: entrada que ja' existe com outro nome, ou com outra
-	 * URL, fica como esta'. Mexer no que a pessoa escreveu seria pior que nao
-	 * fazer nada -- ela pode estar apontando para um tunel, outra porta, outro
-	 * editor.
+	 * Strictly additive: an entry that already exists under another name, or
+	 * with another URL, stays as it is. Touching what the person wrote would be
+	 * worse than doing nothing -- they may be pointing at a tunnel, another
+	 * port, another editor.
 	 *
-	 * @param bForcar corrige a URL de uma entrada nossa que esteja desatualizada.
-	 *                E' o que o item de menu manda, e o que a partida nao manda.
+	 * @param bForce  fixes the URL of an entry of ours that is out of date. It is
+	 *                what the menu item sends, and what startup does not send.
 	 */
-	static FString GarantirEntradaNoMcpJson(bool bForcar);
+	static FString EnsureMcpJsonEntry(bool bForce);
 
-	/** `<Projeto>/.mcp.json`. Exposto para a documentacao e para teste. */
+	/** `<Project>/.mcp.json`. Exposed for the documentation and for testing. */
 	static FString GetMcpJsonPath();
 
-	/** Registra o item em Tools, para refazer as duas coisas sob demanda. */
+	/** Registers the item under Tools, to redo both things on demand. */
 	static void RegisterStartupHook();
 
 	static void Unregister();
 
 private:
 	static void RegisterMenu();
-	static bool Conferir(float DeltaTime);
+	static bool Check(float DeltaTime);
 
 	/**
-	 * Porta e caminho configurados no plugin da Epic, por reflexao.
+	 * Port and path configured in Epic's plugin, through reflection.
 	 *
-	 * @return false se o ModelContextProtocol nao estiver no projeto.
+	 * @return false if ModelContextProtocol is not in the project.
 	 */
-	static bool LerEnderecoDoServidor(int32& OutPorta, FString& OutCaminho);
+	static bool ReadServerAddress(int32& OutPort, FString& OutPath);
 
 	static FTSTicker::FDelegateHandle TickHandle;
 	static FDelegateHandle StartupCallbackHandle;

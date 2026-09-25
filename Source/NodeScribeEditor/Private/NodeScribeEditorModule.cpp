@@ -25,24 +25,25 @@ void FNodeScribeEditorModule::StartupModule()
 	FNodeScribeGraphActions::RegisterStartupHook();
 	FNodeScribeCommandFile::Start();
 
-	// As duas configuracoes sem as quais o plugin fica instalado e mudo. Ver o
-	// cabecalho do NodeScribeMcpSetup: as duas falham em silencio, e a conta de
-	// nao conferir e uma sessao inteira achando que o assistente esta vendo o
-	// projeto quando ele nao esta vendo nada.
+	// The two settings without which the plugin sits installed and mute. See
+	// the NodeScribeMcpSetup header: both fail silently, and the price of not
+	// checking is a whole session believing the assistant sees the project
+	// when it sees nothing at all.
 	FNodeScribeMcpSetup::RegisterStartupHook();
 	FNodeScribeMcpSetup::Start();
 
-	// O catalogo e' montado uma vez e guardado em memoria, e sem isto ele nunca
-	// sabia do que nasceu depois: criar uma funcao num Blueprint e chama-la de
-	// *outro* Blueprint, na mesma sessao, dava "nao achei nenhum node chamado X"
-	// para uma funcao que existe. O `FindOwnFunction` ja' cobria a classe que
-	// voce esta' editando -- o buraco era todo o resto, e e' justamente o fluxo
-	// de quem cria um asset e escreve o grafo em seguida.
+	// The catalog is built once and kept in memory, and without this it never
+	// knew about what was born afterwards: creating a function in a Blueprint
+	// and calling it from *another* Blueprint, in the same session, gave "no
+	// node called X" for a function that exists. `FindOwnFunction` already
+	// covered the class being edited -- the hole was everything else, and it is
+	// precisely the flow of someone who creates an asset and writes the graph
+	// right after.
 	//
-	// A reconstrucao e' preguicosa: invalidar so' marca, e o proximo uso paga.
+	// The rebuild is lazy: invalidating only marks it, and the next use pays.
 	//
-	// GEditor ainda nao existe aqui -- este modulo carrega antes dele.
-	PostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddLambda([]
+	// GEditor does not exist yet here -- this module loads before it.
+	PostEngineInitHandle = FCoreDelegates::GetOnPostEngineInit().AddLambda([]
 	{
 		if (GEditor)
 		{
@@ -53,7 +54,7 @@ void FNodeScribeEditorModule::StartupModule()
 		}
 	});
 
-	UE_LOG(LogNodeScribe, Log, TEXT("NodeScribe pronto. Botoes na barra do editor de Blueprint."));
+	UE_LOG(LogNodeScribe, Log, TEXT("NodeScribe ready. Buttons on the Blueprint editor toolbar."));
 }
 
 void FNodeScribeEditorModule::ShutdownModule()
@@ -65,7 +66,7 @@ void FNodeScribeEditorModule::ShutdownModule()
 
 	if (PostEngineInitHandle.IsValid())
 	{
-		FCoreDelegates::OnPostEngineInit.Remove(PostEngineInitHandle);
+		FCoreDelegates::GetOnPostEngineInit().Remove(PostEngineInitHandle);
 	}
 
 	FNodeScribeMcpSetup::Stop();

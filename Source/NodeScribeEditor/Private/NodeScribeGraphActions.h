@@ -3,27 +3,26 @@
 #include "CoreMinimal.h"
 
 /**
- * Os tres botoes que o NodeScribe acrescenta a' barra do editor de Blueprint.
+ * The three buttons NodeScribe adds to the Blueprint editor's toolbar.
  *
- * Ficam la' em cima, ao lado de Compile, e nao numa janela separada, porque e'
- * onde a mao ja' esta' quando se olha para um grafo. A janela do NodeScribe
- * continua existindo para quando se quer editar o texto antes de inserir.
+ * They sit up there, next to Compile, and not in a separate window, because
+ * that is where the hand already is when looking at a graph.
  */
 class FNodeScribeGraphActions
 {
 public:
 	/**
-	 * Agenda o registro para quando o ToolMenus estiver pronto. As barras dos
-	 * editores de asset so' existem depois do StartupModule.
+	 * Schedules the registration for when ToolMenus is ready. The asset editors'
+	 * toolbars only exist after StartupModule.
 	 */
 	static void RegisterStartupHook();
 
 	static void Unregister();
 
-	/** Nome do canal do Message Log onde os diagnosticos aparecem. */
+	/** Name of the Message Log channel where the diagnostics show up. */
 	static const FName LogListingName;
 
 private:
-	/** Monta a secao nas barras. So' roda depois que o ToolMenus existe. */
+	/** Builds the section on the toolbars. Only runs after ToolMenus exists. */
 	static void RegisterToolbar();
 };

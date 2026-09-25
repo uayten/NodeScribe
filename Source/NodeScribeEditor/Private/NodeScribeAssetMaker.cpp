@@ -15,19 +15,12 @@
 namespace
 {
 	/**
-	 * A factory que sabe criar este tipo.
+	 * The properties the factory lets you configure.
 	 *
-	 * Varre em vez de manter tabela: e' o mesmo motivo dos tipos de chave de
-	 * blackboard -- um plugin, ou o proprio projeto, pode trazer a sua, e uma
-	 * tabela fixa responderia "nao sei criar" para algo que a Engine sabe.
-	 */
-	/**
-	 * As propriedades que a factory deixa configurar.
-	 *
-	 * Serve para dizer, quando o asset sai capenga, o que faltava passar. Uma
-	 * `UAnimBlueprintFactory` sem `TargetSkeleton` cria um AnimBlueprint sem
-	 * esqueleto: a Engine nao reclama, e o problema so' aparece quando alguem
-	 * abre o asset.
+	 * It serves to say, when the asset comes out lame, what was missing. A
+	 * `UAnimBlueprintFactory` without `TargetSkeleton` creates an AnimBlueprint
+	 * without a skeleton: the Engine does not complain, and the problem only
+	 * shows up when someone opens the asset.
 	 */
 	TArray<FString> EditableFactoryProperties(const UFactory* Factory)
 	{
@@ -41,8 +34,8 @@ namespace
 		{
 			const FProperty* Property = *It;
 
-			// Da UFactory para cima e' encanamento da Engine, nao configuracao
-			// deste asset.
+			// From UFactory up it is Engine plumbing, not configuration of this
+			// asset.
 			if (Property->GetOwnerClass() == UFactory::StaticClass())
 			{
 				continue;
@@ -57,6 +50,14 @@ namespace
 		return Names;
 	}
 
+	/**
+	 * The factory that knows how to create this type.
+	 *
+	 * It sweeps instead of keeping a table: it is the same reason as the
+	 * blackboard key types -- a plugin, or the project itself, may bring its
+	 * own, and a fixed table would answer "cannot create" for something the
+	 * Engine can.
+	 */
 	UFactory* FindFactoryFor(UClass* AssetClass)
 	{
 		for (TObjectIterator<UClass> It; It; ++It)
@@ -83,12 +84,12 @@ FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& P
 {
 	const FString Trimmed = Path.TrimStartAndEnd();
 
-	// So' dentro do conteudo do projeto. Escrever em /Engine ou /Script a partir
-	// de uma linha de texto e' o tipo de acidente que nao se desfaz.
+	// Only inside the project's content. Writing into /Engine or /Script from a
+	// line of text is the kind of accident that cannot be undone.
 	if (!Trimmed.StartsWith(TEXT("/Game/")))
 	{
 		return FString::Printf(
-			TEXT("[erro]: `%s` esta' fora de /Game/. So' crio dentro do conteudo do projeto."),
+			TEXT("[error]: `%s` is outside /Game/. I only create inside the project's content."),
 			*Trimmed);
 	}
 
@@ -98,27 +99,27 @@ FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& P
 	if (AssetName.IsEmpty() || PackagePath.IsEmpty())
 	{
 		return FString::Printf(
-			TEXT("[erro]: `%s` nao e' um caminho com nome de asset no fim."), *Trimmed);
+			TEXT("[error]: `%s` is not a path with an asset name at the end."), *Trimmed);
 	}
 
-	// Nao sobrescreve. Um asset existente pode ter meio projeto pendurado nele,
-	// e substituir a partir de uma linha de texto nao se desfaz.
+	// Never overwrites. An existing asset may have half the project hanging
+	// from it, and replacing it from a line of text cannot be undone.
 	//
-	// Duas checagens porque `DoesPackageExist` so' olha o disco, e asset criado
-	// e ainda nao salvo mora so' na memoria -- que e' exatamente o estado em que
-	// um recem-criado fica. Chamar duas vezes seguidas passava direto pela
-	// guarda.
+	// Two checks because `DoesPackageExist` only looks at the disk, and an asset
+	// created and not saved yet lives only in memory -- which is exactly the
+	// state a freshly created one stays in. Calling twice in a row went straight
+	// past the guard.
 	if (FPackageName::DoesPackageExist(Trimmed) || FindPackage(nullptr, *Trimmed))
 	{
 		return FString::Printf(
-			TEXT("[erro]: ja' existe algo em `%s`. Nao sobrescrevo."), *Trimmed);
+			TEXT("[error]: something already exists at `%s`. I do not overwrite."), *Trimmed);
 	}
 
 	UClass* ParentClass = NodeScribeTypeNames::FindClassByFriendlyName(Parent);
 	if (!ParentClass)
 	{
 		return FString::Printf(
-			TEXT("[erro]: nao achei a classe `%s`. Use o nome que aparece na tela, como ")
+			TEXT("[error]: could not find class `%s`. Use the name shown on screen, such as ")
 			TEXT("BTTask_BlueprintBase, GameplayEffect, BlackboardData, BehaviorTree."),
 			*Parent);
 	}
@@ -132,9 +133,9 @@ FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& P
 
 	if (FKismetEditorUtilities::CanCreateBlueprintOfClass(ParentClass))
 	{
-		// Blueprint filho da classe pedida. E' o caso de GameplayEffect,
-		// BTTask_BlueprintBase e BTService_BlueprintBase: na tela sao "assets",
-		// mas por dentro sao Blueprint com aquele pai.
+		// A Blueprint child of the requested class. It is the case of
+		// GameplayEffect, BTTask_BlueprintBase and BTService_BlueprintBase: on
+		// screen they are "assets", but inside they are Blueprints with that parent.
 		UBlueprintFactory* BlueprintFactory = NewObject<UBlueprintFactory>();
 		BlueprintFactory->ParentClass = ParentClass;
 
@@ -147,7 +148,7 @@ FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& P
 		if (!Factory)
 		{
 			return FString::Printf(
-				TEXT("[erro]: `%s` nao e' Blueprintable e nao achei factory que a crie."),
+				TEXT("[error]: `%s` is not Blueprintable and I found no factory that creates it."),
 				*ParentClass->GetName());
 		}
 
@@ -156,25 +157,25 @@ FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& P
 
 	const TArray<FString> Configurable = EditableFactoryProperties(Factory);
 
-	// A factory antes de criar. Depois nao adianta: as propriedades que ela
-	// carrega -- o esqueleto, sobretudo -- viram somente-leitura no asset
-	// pronto, e a Engine recusa escrever nelas.
+	// The factory before creating. Afterwards it is no use: the properties it
+	// carries -- the skeleton, above all -- become read-only on the finished
+	// asset, and the Engine refuses to write into them.
 	const FString TrimmedOptions = Options.TrimStartAndEnd();
 	if (!TrimmedOptions.IsEmpty())
 	{
 		const FNodeScribeObjectWriter::FResult Written =
 			FNodeScribeObjectWriter::WriteObject(Factory, TrimmedOptions);
 
-		// Aborta em vez de criar assim mesmo. Um asset criado com a factory meio
-		// configurada e' pior que asset nenhum: ele existe, parece pronto, e so'
-		// da' as caras quando alguem abre.
+		// Abort instead of creating anyway. An asset created with a half
+		// configured factory is worse than no asset: it exists, looks ready, and
+		// only shows itself when someone opens it.
 		if (Written.Diagnostics.Num() > 0)
 		{
 			return FString::Printf(
-				TEXT("[erro]: nao criei nada -- as opcoes da factory `%s` nao foram aceitas:\n%s\n\nEla configura: %s"),
+				TEXT("[error]: created nothing -- the options of factory `%s` were not accepted:\n%s\n\nIt configures: %s"),
 				*Factory->GetClass()->GetName(),
 				*FString::Join(Written.Diagnostics, TEXT("\n")),
-				Configurable.Num() > 0 ? *FString::Join(Configurable, TEXT(", ")) : TEXT("(nada)"));
+				Configurable.Num() > 0 ? *FString::Join(Configurable, TEXT(", ")) : TEXT("(nothing)"));
 		}
 	}
 
@@ -182,21 +183,23 @@ FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& P
 
 	if (!Created)
 	{
-		return FString::Printf(TEXT("[erro]: a Engine recusou criar `%s`."), *Trimmed);
+		return FString::Printf(TEXT("[error]: the Engine refused to create `%s`."), *Trimmed);
 	}
 
-	// Nao salva. Fica sujo como qualquer asset recem-criado no editor, e o
-	// `save_all_and_quit` grava -- assim quem criou por engano fecha sem salvar.
-	FString Message = FString::Printf(TEXT("Criado: %s"), *Created->GetPathName());
+	// Not saved. It stays dirty like any asset freshly created in the editor,
+	// and `save_all_and_quit` writes it -- that way whoever created it by
+	// mistake closes without saving.
+	FString Message = FString::Printf(TEXT("Created: %s"), *Created->GetPathName());
 
-	// Nota, e nao erro: ha' factory cuja configuracao e' toda opcional, e
-	// bloquear ali atrapalharia o caso comum. Mas passar em branco quando havia
-	// o que dizer e' como o AnimBlueprint sem esqueleto nasce.
+	// A note, not an error: some factories have all-optional configuration, and
+	// blocking there would get in the way of the common case. But staying quiet
+	// when there was something to say is how the AnimBlueprint without a
+	// skeleton is born.
 	if (TrimmedOptions.IsEmpty() && Configurable.Num() > 0)
 	{
 		Message += FString::Printf(
-			TEXT("\n[nota]: a factory `%s` configura %s, e nada foi passado em options. ")
-			TEXT("Se o asset depende de alguma dessas, ele nasceu sem."),
+			TEXT("\n[note]: factory `%s` configures %s, and nothing was passed in options. ")
+			TEXT("If the asset depends on any of those, it was born without."),
 			*Factory->GetClass()->GetName(), *FString::Join(Configurable, TEXT(", ")));
 	}
 
