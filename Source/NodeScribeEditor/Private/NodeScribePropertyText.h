@@ -8,126 +8,127 @@ class UEdGraphPin;
 struct FEdGraphPinType;
 
 /**
- * Valor de propriedade <-> texto, e o vocabulario de nomes que os dois lados
- * usam.
+ * Property value <-> text, and the vocabulary of names both sides use.
  *
- * Existe porque leitor e escritor sao espelhos. Se cada um formatasse do seu
- * jeito, o texto sairia de um e nao voltaria pelo outro -- e no caso de
- * propriedade a diferenca aparece como valor gravado errado num asset, que
- * compila, roda e so' da' as caras em playtest. Tudo que traduz valor mora
- * aqui, uma vez.
+ * It exists because reader and writer are mirrors. If each formatted in its
+ * own way, the text would come out of one and not come back through the other
+ * -- and for properties the difference shows up as a wrong value saved into
+ * an asset, which compiles, runs and only shows itself in playtest. Everything
+ * that translates values lives here, once.
  *
- * `DescribePinType` e as aspas vieram do NodeScribeReader por isso mesmo: o
- * tipo que a ficha escreve tem que ser o mesmo que o grafo escreve, senao o
- * usuario aprende dois vocabularios para a mesma coisa.
+ * `DescribePinType` and the quoting came from NodeScribeReader for exactly
+ * that reason: the type the sheet writes has to be the same one the graph
+ * writes, otherwise the user learns two vocabularies for the same thing.
  */
 namespace NodeScribePropertyText
 {
-	// -- Aspas ---------------------------------------------------------------
+	// -- Quotes --------------------------------------------------------------
 
-	/** Caracteres que mudariam o sentido da linha se ficassem soltos. */
+	/** Characters that would change the meaning of the line if left bare. */
 	bool NeedsQuotes(const FString& Value);
 
 	/**
-	 * O parser nao tem sequencia de escape: uma aspa dentro do valor quebraria a
-	 * linha. Escolhemos a aspa que nao aparece no texto; se as duas aparecerem,
-	 * quem chama avisa em vez de emitir algo que nao volta.
+	 * The parser has no escape sequence: a quote inside the value would break
+	 * the line. We pick the quote that does not appear in the text; if both
+	 * appear, the caller warns instead of emitting something that does not come
+	 * back.
 	 */
 	bool TryQuote(const FString& Value, FString& OutQuoted);
 
-	// -- Nomes ---------------------------------------------------------------
+	// -- Names ---------------------------------------------------------------
 
 	/**
-	 * `-90.0` em vez de `-90.000000`.
+	 * `-90.0` instead of `-90.000000`.
 	 *
-	 * Nao e' economia de token -- seria ~1% do custo, que este projeto nao
-	 * persegue. E' que seis zeros a' direita escondem o numero no meio do ruido,
-	 * e bater o olho e ver o valor e' o que faz o texto valer.
+	 * It is not about saving tokens -- that would be ~1% of the cost, which this
+	 * project does not chase. It is that six trailing zeros hide the number in
+	 * the noise, and seeing the value at a glance is what makes the text worth it.
 	 */
 	FString FormatFloat(double Value);
 
 	/**
-	 * O tipo como o formato escreve: `Float`, `Integer`, `TimerHandle`,
-	 * `Array de Name`. Vazio quando o tipo nao tem forma no texto.
+	 * The type as the format writes it: `Float`, `Integer`, `TimerHandle`,
+	 * `Array of Name`. Empty when the type has no form in text.
 	 */
 	FString DescribePinType(const FEdGraphPinType& PinType);
 
-	/** O mesmo, partindo de uma propriedade. Vazio quando nao tem forma. */
+	/** The same, starting from a property. Empty when it has no form. */
 	FString DescribeType(const FProperty* Property);
 
-	/** O nome que aparece no painel de detalhes: `bShowMouseCursor` -> `Show Mouse Cursor`. */
+	/** The name shown in the details panel: `bShowMouseCursor` -> `Show Mouse Cursor`. */
 	FString DisplayName(const FProperty* Property);
 
-	// -- Pinos ---------------------------------------------------------------
+	// -- Pins ----------------------------------------------------------------
 
-	/** O fio branco de execucao, que o formato escreve como indentacao. */
+	/** The white execution wire, which the format writes as indentation. */
 	bool IsExecPin(const UEdGraphPin* Pin);
 
-	/** Um pino cujo valor so' pode vir de uma escolha de asset, nao de texto. */
+	/** A pin whose value can only come from an asset choice, not from text. */
 	bool IsObjectLikePin(const UEdGraphPin* Pin);
 
-	// -- Visibilidade --------------------------------------------------------
+	// -- Visibility ----------------------------------------------------------
 
 	/**
-	 * true quando a propriedade entra na ficha.
+	 * true when the property goes into the sheet.
 	 *
-	 * Entra o que aparece no painel de detalhes (CPF_Edit) *ou* o que tem node
-	 * de Get no grafo (CPF_BlueprintVisible). A maioria tem os dois carimbos,
-	 * mas nao todas, e as excecoes sao justamente as que importam:
-	 * `ACharacter::bIsCrouched` e' BlueprintReadOnly sem Edit -- nao aparece no
-	 * painel e e' lida no grafo o tempo todo. Um filtro so' de painel
-	 * responderia "nao achei" para ela.
+	 * What goes in is what shows in the details panel (CPF_Edit) *or* what has
+	 * a Get node in the graph (CPF_BlueprintVisible). Most have both flags, but
+	 * not all, and the exceptions are precisely the ones that matter:
+	 * `ACharacter::bIsCrouched` is BlueprintReadOnly without Edit -- it does not
+	 * show in the panel and is read in the graph all the time. A panel-only
+	 * filter would answer "not found" for it.
 	 *
-	 * Sai a transiente, que nem e' salva em disco: `APawn::LastHitBy` e' estado
-	 * de execucao, nao configuracao, e numa ficha seria ruido que muda sozinho.
+	 * Transient ones are left out, since they are not even saved to disk:
+	 * `APawn::LastHitBy` is runtime state, not configuration, and in a sheet it
+	 * would be noise that changes on its own.
 	 */
 	bool IsVisible(const FProperty* Property);
 
-	// -- Opcoes de node ------------------------------------------------------
+	// -- Node options --------------------------------------------------------
 
 	/**
-	 * true quando a propriedade e' uma opcao ajustavel de um node do grafo.
+	 * true when the property is an adjustable option of a graph node.
 	 *
-	 * Duas exclusoes, e as duas doeram. `CPF_Edit` sozinho deixa passar o que a
-	 * struct guarda por dentro: `NodeGuid` nao e' editavel, mas os campos `A`,
-	 * `B`, `C` e `D` de um `FGuid` sao -- e a leitura passou a escrever
-	 * `Print String (In String = "ok", A = 1033722443, B = ...)` em todo node do
-	 * grafo. E o que `UEdGraphNode` declara e' encanamento do editor -- posicao,
-	 * comentario, guid --, nao configuracao do que o node faz.
+	 * Two exclusions, and both hurt. `CPF_Edit` alone lets through what a
+	 * struct keeps inside: `NodeGuid` is not editable, but the `A`, `B`, `C` and
+	 * `D` fields of an `FGuid` are -- and the reading started writing
+	 * `Print String (In String = "ok", A = 1033722443, B = ...)` on every node of
+	 * the graph. And what `UEdGraphNode` declares is editor plumbing --
+	 * position, comment, guid --, not configuration of what the node does.
 	 */
 	bool IsNodeSetting(const FProperty* Property);
 
 	/**
-	 * true quando a struct e' um `FAnimNode_*`.
+	 * true when the struct is an `FAnimNode_*`.
 	 *
-	 * E' a unica que se abre para achar opcao: `bLoopAnimation` e `PlayRate` sao
-	 * campos dela, e o `UAnimGraphNode_*` so' a carrega. Abrir qualquer struct
-	 * transformaria cada uma em varios argumentos soltos com nome de campo, sem
-	 * dizer de quem eram.
+	 * It is the only one that opens up to find options: `bLoopAnimation` and
+	 * `PlayRate` are its fields, and the `UAnimGraphNode_*` just carries it.
+	 * Opening any struct would turn each one into several loose arguments named
+	 * after fields, without saying whose they were.
 	 */
 	bool IsAnimNodeStruct(const FStructProperty* Property);
 
-	// -- Valor ---------------------------------------------------------------
+	// -- Value ---------------------------------------------------------------
 
 	/**
-	 * Valor -> texto pronto para ir depois do `=`, ja' com aspas se precisar.
+	 * Value -> text ready to go after the `=`, already quoted if needed.
 	 *
-	 * @return false quando o valor nao tem representacao que volte igual. Quem
-	 *         chama avisa; ninguem emite um texto que parece certo e volta
-	 *         diferente.
+	 * @return false when the value has no representation that comes back the
+	 *         same. The caller warns; nobody emits a text that looks right and
+	 *         comes back different.
 	 */
 	bool ValueToText(const FProperty* Property, const void* ValuePtr, FString& OutText);
 
 	/**
-	 * Texto -> valor, o espelho exato de ValueToText.
+	 * Text -> value, the exact mirror of ValueToText.
 	 *
-	 * @return false com o motivo em OutError. O valor fica intocado no erro.
+	 * @return false with the reason in OutError. The value is left untouched on error.
 	 */
 	bool TextToValue(const FProperty* Property, void* ValuePtr, const FString& Text, FString& OutError);
 
 	/**
-	 * true quando o valor difere do arquetipo -- a pergunta que a ficha faz de
-	 * cada propriedade, e a razao de ela caber numa tela.
+	 * true when the value differs from the archetype -- the question the sheet
+	 * asks of every property, and the reason it fits on one screen.
 	 */
 	bool DiffersFromDefault(const FProperty* Property, const void* ValuePtr, const void* DefaultPtr);
 }

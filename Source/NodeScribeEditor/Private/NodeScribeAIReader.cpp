@@ -17,7 +17,7 @@
 namespace
 {
 	/**
-	 * O tipo da chave como aparece na tela: `UBlackboardKeyType_Object` -> `Object`.
+	 * The key type as it shows on screen: `UBlackboardKeyType_Object` -> `Object`.
 	 */
 	FString DescribeKeyTypeName(const UBlackboardKeyType* KeyType)
 	{
@@ -27,13 +27,13 @@ namespace
 	}
 
 	/**
-	 * O detalhe que qualifica a chave: a classe base de um Object, o enum de um
-	 * Enum. Vazio quando o tipo nao tem detalhe.
+	 * The detail that qualifies the key: an Object's base class, an Enum's
+	 * enum. Empty when the type has no detail.
 	 *
-	 * Por reflexao, e nao por cast para cada subclasse conhecida. Sao dez tipos
-	 * na Engine e qualquer um pode escrever o seu; um `switch` de casts
-	 * responderia vazio para o tipo de chave que o proprio projeto criou, sem
-	 * dizer que estava ignorando algo.
+	 * Through reflection, not a cast to each known subclass. There are ten
+	 * types in the Engine and anyone can write their own; a `switch` of casts
+	 * would answer empty for the key type the project itself created, without
+	 * saying it was ignoring something.
 	 */
 	FString DescribeKeyTypeDetail(const UBlackboardKeyType* KeyType)
 	{
@@ -61,9 +61,9 @@ namespace
 				continue;
 			}
 
-			// O nome curto basta aqui: e' qualificador de tipo, nao referencia a
-			// resolver. `Object (Actor)` se le'; `Object (/Script/Engine.Actor)`
-			// enche a linha sem acrescentar.
+			// The short name is enough here: it is a type qualifier, not a
+			// reference to resolve. `Object (Actor)` reads well;
+			// `Object (/Script/Engine.Actor)` fills the line without adding anything.
 			int32 Dot = INDEX_NONE;
 			if (Text.FindLastChar(TEXT('.'), Dot))
 			{
@@ -79,18 +79,18 @@ namespace
 
 	// -- Behavior Tree -------------------------------------------------------
 
-	/** Dois espacos por nivel, como no resto do formato. */
+	/** Two spaces per level, as in the rest of the format. */
 	FString Indent(int32 Level)
 	{
 		return FString::ChrN(Level * 2, TEXT(' '));
 	}
 
 	/**
-	 * O seletor de chave de blackboard sai como o nome da chave, so'.
+	 * The blackboard key selector comes out as the key's name, only.
 	 *
-	 * E' o parametro mais comum de BT, e a forma canonica dele e' um struct com
-	 * a lista de tipos aceitos dentro -- um blobzao que enche a linha e esconde
-	 * a unica coisa que interessa, que e' qual chave.
+	 * It is the most common BT parameter, and its canonical form is a struct
+	 * with the list of accepted types inside -- a big blob that fills the line
+	 * and hides the only thing that matters, which is which key.
 	 */
 	bool TryDescribeKeySelector(const FProperty* Property, const void* ValuePtr, FString& OutText)
 	{
@@ -106,18 +106,19 @@ namespace
 	}
 
 	/**
-	 * Valor de BT que pode vir de um provider: `Wait Time`, `Acceptable Radius`
-	 * e companhia.
+	 * A BT value that may come from a provider: `Wait Time`, `Acceptable
+	 * Radius` and company.
 	 *
-	 * A forma canonica desses e' `(DefaultValue=1.000000)`, que enche a linha
-	 * escondendo o `1.0`. A propria Engine sabe se descrever -- `ToString()` da'
-	 * o numero quando o valor e' fixo e o nome da chave quando esta' amarrado ao
-	 * blackboard, que e' exatamente a distincao que interessa ler.
+	 * Their canonical form is `(DefaultValue=1.000000)`, which fills the line
+	 * hiding the `1.0`. The Engine itself knows how to describe them --
+	 * `ToString()` gives the number when the value is fixed and the key's name
+	 * when it is bound to the blackboard, which is exactly the distinction worth
+	 * reading.
 	 *
-	 * Sao duas familias porque a 5.8 aposentou a primeira: `FAIDataProviderValue`
-	 * ainda existe e nodes antigos usam, mas `Wait Time` agora e'
-	 * `FValueOrBBKey_Float`. Testar so' a antiga passa em silencio -- compila,
-	 * roda, e devolve o blobzao.
+	 * There are two families because 5.8 retired the first: `FAIDataProviderValue`
+	 * still exists and old nodes use it, but `Wait Time` is now
+	 * `FValueOrBBKey_Float`. Testing only the old one fails silently -- it
+	 * compiles, runs, and returns the big blob.
 	 */
 	bool TryDescribeBTValue(const FProperty* Property, const void* ValuePtr, FString& OutText)
 	{
@@ -143,11 +144,11 @@ namespace
 	}
 
 	/**
-	 * `BTTask_Patrulhar` -> `Patrulhar`.
+	 * `BTTask_Patrol` -> `Patrol`.
 	 *
-	 * `GetNodeName` ja' resolve os nodes da Engine, mas para classe vinda de
-	 * Blueprint ele so' tira o `_C` -- entao a task que o proprio projeto criou
-	 * aparecia com o prefixo tecnico, do lado de um `Move To` limpo.
+	 * `GetNodeName` already resolves the Engine's nodes, but for a class coming
+	 * from a Blueprint it only strips the `_C` -- so the task the project itself
+	 * created showed up with the technical prefix, next to a clean `Move To`.
 	 */
 	FString CleanNodeName(const UBTNode* Node)
 	{
@@ -166,11 +167,11 @@ namespace
 	}
 
 	/**
-	 * Os parametros do node que fogem do padrao da classe dele, entre
-	 * parenteses.
+	 * The node's parameters that depart from its class's default, in
+	 * parentheses.
 	 *
-	 * Mesma pergunta da ficha, mesmo formatador: o CDO da classe do node e' o
-	 * arquetipo. Um `Move To` com raio de fabrica nao ganha parametro nenhum.
+	 * Same question as the sheet, same formatter: the CDO of the node's class is
+	 * the archetype. A `Move To` with the factory radius gets no parameter at all.
 	 */
 	FString DescribeNodeParams(const UBTNode* Node)
 	{
@@ -187,8 +188,8 @@ namespace
 				continue;
 			}
 
-			// O nome do node ja' e' a linha. Repeti-lo como parametro seria dizer
-			// a mesma coisa duas vezes.
+			// The node's name already is the line. Repeating it as a parameter
+			// would say the same thing twice.
 			if (Property->GetFName() == TEXT("NodeName"))
 			{
 				continue;
@@ -201,8 +202,8 @@ namespace
 			FString Value;
 			if (TryDescribeKeySelector(Property, ValuePtr, Value))
 			{
-				// Seletor de chave e' transiente por dentro, entao a comparacao
-				// com o padrao nao vale para ele: sai sempre que tiver chave.
+				// A key selector is transient inside, so comparing with the
+				// default does not work for it: it comes out whenever it has a key.
 				Params.Add(FString::Printf(TEXT("%s = %s"),
 					*NodeScribePropertyText::DisplayName(Property), *Value));
 				continue;
@@ -228,18 +229,18 @@ namespace
 			: FString();
 	}
 
-	/** Uma linha de node, com os parametros que fogem do padrao. */
+	/** A node line, with the parameters that depart from the default. */
 	FString NodeLine(int32 Level, const TCHAR* Prefix, const UBTNode* Node)
 	{
 		return Indent(Level) + Prefix + CleanNodeName(Node) + DescribeNodeParams(Node);
 	}
 
 	/**
-	 * Percorre a arvore.
+	 * Walks the tree.
 	 *
-	 * @param Seen  guarda contra asset corrompido. Uma BT nao cicla por
-	 *              construcao, mas se ciclar isto para' e diz, em vez de
-	 *              escrever ate' faltar memoria.
+	 * @param Seen  guards against a corrupted asset. A BT does not cycle by
+	 *              construction, but if it does this stops and says so, instead
+	 *              of writing until memory runs out.
 	 */
 	void EmitNode(TArray<FString>& OutLines, const UBTNode* Node, int32 Level,
 		TSet<const UBTNode*>& Seen)
@@ -251,16 +252,17 @@ namespace
 
 		if (Seen.Contains(Node))
 		{
-			OutLines.Add(Indent(Level) + TEXT("# [aviso]: ciclo em `")
-				+ CleanNodeName(Node) + TEXT("` -- parei aqui."));
+			OutLines.Add(Indent(Level) + TEXT("# [warning]: cycle at `")
+				+ CleanNodeName(Node) + TEXT("` -- stopped here."));
 			return;
 		}
 		Seen.Add(Node);
 
 		OutLines.Add(NodeLine(Level, TEXT(""), Node));
 
-		// Service e' do node; decorator e' da ligacao com o pai, e por isso sai
-		// junto com o filho, la' embaixo. E' assim que o editor mostra tambem.
+		// A service belongs to the node; a decorator belongs to the link with the
+		// parent, and that is why it comes out together with the child, further
+		// down. It is how the editor shows it too.
 		const TArray<TObjectPtr<UBTService>>* Services = nullptr;
 		if (const UBTCompositeNode* Composite = Cast<UBTCompositeNode>(Node))
 		{
@@ -277,7 +279,7 @@ namespace
 			{
 				if (Service)
 				{
-					OutLines.Add(NodeLine(Level + 1, TEXT("servico "), Service));
+					OutLines.Add(NodeLine(Level + 1, TEXT("service "), Service));
 				}
 			}
 		}
@@ -294,7 +296,7 @@ namespace
 			{
 				if (Decorator)
 				{
-					OutLines.Add(NodeLine(Level + 1, TEXT("decorador "), Decorator));
+					OutLines.Add(NodeLine(Level + 1, TEXT("decorator "), Decorator));
 				}
 			}
 
@@ -304,8 +306,8 @@ namespace
 
 			if (!ChildNode)
 			{
-				// Filho vazio existe: e' o galho que ficou pela metade no editor.
-				OutLines.Add(Indent(Level + 1) + TEXT("# [aviso]: galho sem node."));
+				// An empty child exists: it is the branch left half-done in the editor.
+				OutLines.Add(Indent(Level + 1) + TEXT("# [warning]: branch without a node."));
 				continue;
 			}
 
@@ -338,11 +340,11 @@ FString FNodeScribeAIReader::ReadBehaviorTree(UBehaviorTree* Tree)
 {
 	TArray<FString> Lines;
 
-	FString Header = FString::Printf(TEXT("arvore %s"), *Tree->GetName());
+	FString Header = FString::Printf(TEXT("tree %s"), *Tree->GetName());
 	if (const UBlackboardData* Blackboard = Tree->BlackboardAsset)
 	{
-		// O blackboard vai no cabecalho porque toda chave citada la' embaixo
-		// vem dele -- sem isso os nomes de chave sao palavras soltas.
+		// The blackboard goes in the header because every key mentioned below
+		// comes from it -- without that the key names are loose words.
 		Header += FString::Printf(TEXT("  (blackboard %s)"), *Blackboard->GetName());
 	}
 	Lines.Add(Header);
@@ -351,13 +353,13 @@ FString FNodeScribeAIReader::ReadBehaviorTree(UBehaviorTree* Tree)
 	{
 		if (Decorator)
 		{
-			Lines.Add(NodeLine(0, TEXT("decorador "), Decorator));
+			Lines.Add(NodeLine(0, TEXT("decorator "), Decorator));
 		}
 	}
 
 	if (!Tree->RootNode)
 	{
-		Lines.Add(TEXT("# arvore vazia"));
+		Lines.Add(TEXT("# empty tree"));
 		return FString::Join(Lines, TEXT("\n"));
 	}
 
@@ -374,9 +376,9 @@ FString FNodeScribeAIReader::ReadBlackboard(UBlackboardData* Blackboard)
 	FString Header = FString::Printf(TEXT("blackboard %s"), *Blackboard->GetName());
 	if (const UBlackboardData* Parent = Blackboard->Parent)
 	{
-		// Chave herdada nao e' repetida: seriam as mesmas linhas em toda ficha
-		// filha, e o pai esta' a uma chamada de distancia.
-		Header += FString::Printf(TEXT("  (herda de %s)"), *Parent->GetName());
+		// An inherited key is not repeated: it would be the same lines in every
+		// child sheet, and the parent is one call away.
+		Header += FString::Printf(TEXT("  (inherits %s)"), *Parent->GetName());
 	}
 	Lines.Add(Header);
 
@@ -386,13 +388,13 @@ FString FNodeScribeAIReader::ReadBlackboard(UBlackboardData* Blackboard)
 	{
 		if (!Entry.KeyType)
 		{
-			// Chave sem tipo existe: e' a linha recem-criada no editor, ainda
-			// sem escolha. Dizer isso e' melhor que omitir.
+			// A key without a type exists: it is the line just created in the
+			// editor, with no choice made yet. Saying so is better than omitting it.
 			Unreadable.Add(Entry.EntryName.ToString());
 			continue;
 		}
 
-		FString Line = FString::Printf(TEXT("chave %s : %s"),
+		FString Line = FString::Printf(TEXT("key %s : %s"),
 			*Entry.EntryName.ToString(), *DescribeKeyTypeName(Entry.KeyType));
 
 		const FString Detail = DescribeKeyTypeDetail(Entry.KeyType);
@@ -401,15 +403,15 @@ FString FNodeScribeAIReader::ReadBlackboard(UBlackboardData* Blackboard)
 			Line += FString::Printf(TEXT(" (%s)"), *Detail);
 		}
 
-		// Sincronizada entre instancias e' comportamento, nao tipo, e muda o que
-		// a IA faz -- some da linha padrao e aparece quando esta' ligada.
+		// Synced across instances is behaviour, not type, and it changes what
+		// the AI does -- it is absent from the default line and shows up when on.
 		//
-		// Palavra, nao comentario: o escritor descarta comentario, e uma chave
-		// que volta dessincronizada seria um bug que so' aparece com dois
-		// inimigos na tela.
+		// A word, not a comment: the writer discards comments, and a key that
+		// comes back unsynced would be a bug that only shows up with two enemies
+		// on screen.
 		if (Entry.bInstanceSynced)
 		{
-			Line += TEXT(" sincronizada");
+			Line += TEXT(" synced");
 		}
 
 		Lines.Add(Line);
@@ -417,12 +419,12 @@ FString FNodeScribeAIReader::ReadBlackboard(UBlackboardData* Blackboard)
 
 	if (Blackboard->Keys.Num() == 0)
 	{
-		Lines.Add(TEXT("# sem chaves"));
+		Lines.Add(TEXT("# no keys"));
 	}
 
 	if (Unreadable.Num() > 0)
 	{
-		Lines.Add(FString::Printf(TEXT("# [aviso]: chave sem tipo escolhido: %s"),
+		Lines.Add(FString::Printf(TEXT("# [warning]: key with no type chosen: %s"),
 			*FString::Join(Unreadable, TEXT(", "))));
 	}
 

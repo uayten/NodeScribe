@@ -9,34 +9,34 @@ class UEdGraphNode;
 struct FEdGraphPinType;
 
 /**
- * Nome de tipo escrito a mao -> tipo de pino da Unreal.
+ * Hand-written type name -> Unreal pin type.
  *
- * Aceita o que aparece na interface (`Float`, `Timer Handle`,
- * `EPlayerMappableKeySlot`, `Array de Name`), porque e' o que o usuario ve'.
+ * Accepts what shows up in the interface (`Float`, `Timer Handle`,
+ * `EPlayerMappableKeySlot`, `Array of Name`), because that is what the user sees.
  *
- * E' o espelho de `NodeScribePropertyText::DescribePinType`: o que sai de la'
- * entra aqui. Mora no builder porque depende dos buscadores de struct, enum e
- * classe por nome de tela, que sao dele -- mas a ficha tambem precisa, para
- * criar variavel a partir de `variavel Nome : Tipo`.
+ * It is the mirror of `NodeScribePropertyText::DescribePinType`: what comes out
+ * there goes in here. It lives in the builder because it depends on the struct,
+ * enum and class lookups by display name, which are the builder's -- but the
+ * sheet needs it too, to create a variable from `variable Name : Type`.
  */
 namespace NodeScribeTypeNames
 {
 	bool ResolvePinTypeFromName(const FString& InTypeName, FEdGraphPinType& OutType);
 
 	/**
-	 * Classe pelo nome que aparece na tela, aceitando o `_C` de Blueprint.
-	 * `BP_Pedra` e `BP_Pedra_C` dao na mesma.
+	 * Class by the name shown on screen, accepting the Blueprint `_C`.
+	 * `BP_Rock` and `BP_Rock_C` are the same.
 	 */
 	UClass* FindClassByFriendlyName(const FString& Name);
 }
 
 /**
- * Transforma statements em nodes reais dentro de um UEdGraph.
+ * Turns statements into real nodes inside a UEdGraph.
  *
- * Regra que orienta o arquivo inteiro: quando nao da' para decidir com
- * seguranca, nao decide. Node nao resolvido vira comentario vermelho no grafo;
- * pino que depende de uma escolha sua fica vazio e impede compilar. O modo de
- * falha aceitavel e' o barulhento -- nunca um node plausivel chutado.
+ * Rule that guides the whole file: when it cannot decide safely, it does not
+ * decide. An unresolved node becomes a red comment in the graph; a pin that
+ * depends on a choice of yours stays empty and blocks compiling. The acceptable
+ * failure mode is the loud one -- never a guessed plausible node.
  */
 class FNodeScribeBuilder
 {
@@ -53,10 +53,10 @@ public:
 	};
 
 	/**
-	 * @param Statements  saida do parser.
-	 * @param Graph       grafo de destino (pode ser um grafo temporario para exportar).
-	 * @param Blueprint   Blueprint dono do grafo, usado para achar variaveis e funcoes proprias.
-	 * @param Origin      canto superior esquerdo onde comecar a desenhar.
+	 * @param Statements  parser output.
+	 * @param Graph       target graph (may be a temporary graph for exporting).
+	 * @param Blueprint   Blueprint that owns the graph, used to find its own variables and functions.
+	 * @param Origin      top-left corner where drawing starts.
 	 */
 	static FResult Build(
 		const TArray<FNodeScribeStatement>& Statements,

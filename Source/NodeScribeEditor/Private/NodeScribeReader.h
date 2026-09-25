@@ -8,17 +8,18 @@ class UEdGraph;
 class UEdGraphNode;
 
 /**
- * O caminho de volta: nodes de um grafo -> texto no formato do NodeScribe.
+ * The way back: nodes of a graph -> text in the NodeScribe format.
  *
- * Existe para fechar o ciclo. Sem ele, mostrar um grafo pronto a alguem (ou a
- * um assistente) custa um print, que nao diz os valores dos pinos, ou o
- * Ctrl+C da Unreal, que custa ~1.000 tokens por node.
+ * It exists to close the loop. Without it, showing a finished graph to someone
+ * (or to an assistant) costs a screenshot, which does not tell the pin values,
+ * or Unreal's Ctrl+C, which costs ~1,000 tokens per node.
  *
- * Herda o mesmo principio do builder ao contrario: quando o grafo tem algo que
- * o formato de texto nao sabe dizer -- uma cadeia que reconverge, um node sem
- * nome estavel -- o leitor avisa em vez de emitir um texto que parece completo
- * e nao e'. Um texto que volta como um grafo diferente do original e' o pior
- * resultado possivel, porque a diferenca so' aparece depois.
+ * It inherits the builder's principle in reverse: when the graph has something
+ * the text format cannot say -- a chain that reconverges, a node without a
+ * stable name -- the reader warns instead of emitting a text that looks
+ * complete and is not. A text that comes back as a graph different from the
+ * original is the worst possible result, because the difference only shows up
+ * later.
  */
 class FNodeScribeReader
 {
@@ -33,23 +34,24 @@ public:
 		int32 WarningCount = 0;
 
 		/**
-		 * Nodes que existem no grafo e nao existem no texto: os de dado que nao
-		 * alimentam ninguem.
+		 * Nodes that exist in the graph and do not exist in the text: the data
+		 * ones that feed nobody.
 		 *
-		 * Sao inofensivos numa leitura -- viram uma nota no fim. Sao fatais para
-		 * quem pensa em apagar o grafo e recolar a partir deste texto, porque
-		 * eles nao voltam. Por isso saem contados a' parte, e nao so' como nota.
+		 * They are harmless in a reading -- they become a note at the end. They
+		 * are fatal for whoever plans to erase the graph and paste it back from
+		 * this text, because they do not come back. That is why they are counted
+		 * separately, and not only as a note.
 		 */
 		int32 LostNodeCount = 0;
 	};
 
 	/**
-	 * @param Nodes      os nodes a transcrever. Nodes ligados a alguem de fora
-	 *                   dessa lista viram aviso, nao ligacao silenciosa.
-	 * @param Blueprint  dono do grafo, usado para reconhecer variaveis proprias.
+	 * @param Nodes      the nodes to transcribe. Nodes linked to something outside
+	 *                   this list become a warning, not a silent link.
+	 * @param Blueprint  owner of the graph, used to recognise its own variables.
 	 */
 	static FResult Read(const TArray<UEdGraphNode*>& Nodes, UBlueprint* Blueprint);
 
-	/** Atalho para o grafo inteiro. */
+	/** Shortcut for the whole graph. */
 	static FResult ReadGraph(UEdGraph* Graph, UBlueprint* Blueprint);
 };

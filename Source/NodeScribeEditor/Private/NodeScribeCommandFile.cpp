@@ -12,29 +12,29 @@ FTSTicker::FDelegateHandle FNodeScribeCommandFile::TickHandle;
 namespace
 {
 	/**
-	 * Meio segundo.
+	 * Half a second.
 	 *
-	 * Existe um custo por ciclo e um custo por espera. Olhar um arquivo que
-	 * quase nunca esta' la' e' barato; esperar meio segundo a mais para o editor
-	 * comecar a fechar nao muda nada num ciclo que leva minutos.
+	 * There is a cost per cycle and a cost per wait. Looking at a file that is
+	 * almost never there is cheap; waiting half a second more for the editor to
+	 * start closing changes nothing in a cycle that takes minutes.
 	 */
 	const float PollSeconds = 0.5f;
 }
 
 FString FNodeScribeCommandFile::GetCommandPath()
 {
-	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("NodeScribe"), TEXT("comando.txt"));
+	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("NodeScribe"), TEXT("command.txt"));
 }
 
 FString FNodeScribeCommandFile::GetResponsePath()
 {
-	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("NodeScribe"), TEXT("resposta.txt"));
+	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("NodeScribe"), TEXT("response.txt"));
 }
 
 void FNodeScribeCommandFile::Start()
 {
-	// Comando velho de uma sessao anterior nao vale: o editor fecharia sozinho
-	// ao abrir, e quem escreveu aquilo ja' foi embora.
+	// A stale command from a previous session does not count: the editor would
+	// close by itself on opening, and whoever wrote it is long gone.
 	IFileManager::Get().Delete(*GetCommandPath(), /*RequireExists*/ false);
 
 	TickHandle = FTSTicker::GetCoreTicker().AddTicker(
@@ -62,13 +62,13 @@ bool FNodeScribeCommandFile::Tick(float DeltaTime)
 	FString Command;
 	if (!FFileHelper::LoadFileToString(Command, *CommandPath))
 	{
-		// Provavelmente pego no meio da escrita. Nao apaga: o proximo ciclo pega
-		// inteiro, e apagar aqui perderia o comando.
+		// Probably caught mid-write. Do not delete: the next cycle gets it whole,
+		// and deleting here would lose the command.
 		return true;
 	}
 
-	// Apagar antes de executar. `quit` derruba o processo, e um comando que
-	// sobrevive ao fechamento roda de novo na proxima abertura.
+	// Delete before executing. `quit` brings the process down, and a command
+	// that survives the shutdown runs again on the next launch.
 	IFileManager::Get().Delete(*CommandPath, /*RequireExists*/ false);
 
 	Command.TrimStartAndEndInline();
@@ -81,10 +81,10 @@ bool FNodeScribeCommandFile::Tick(float DeltaTime)
 	else
 	{
 		Response = FString::Printf(
-			TEXT("[erro]: nao conheco o comando `%s`. Conheco: quit."), *Command);
+			TEXT("[error]: unknown command `%s`. Known: quit."), *Command);
 	}
 
-	UE_LOG(LogNodeScribe, Log, TEXT("comando.txt `%s`: %s"), *Command, *Response);
+	UE_LOG(LogNodeScribe, Log, TEXT("command.txt `%s`: %s"), *Command, *Response);
 	FFileHelper::SaveStringToFile(Response, *GetResponsePath());
 
 	return true;

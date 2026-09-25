@@ -5,31 +5,33 @@
 class UBlendSpace;
 
 /**
- * Preencher um BlendSpace por texto.
+ * Filling a BlendSpace from text.
  *
- * Existe porque a ficha nao alcanca. `SampleData` e' array de struct e
- * `BlendParameters` e' array fixo de struct: escrever nos dois pela ficha seria
- * montar a mao o que a Engine ja' monta -- e sem a validacao dela, que e' quem
- * recalcula a malha de interpolacao. Sem essa malha o BlendSpace existe, abre,
- * e nao interpola nada.
+ * It exists because the sheet does not reach. `SampleData` is an array of
+ * structs and `BlendParameters` is a fixed array of structs: writing both
+ * through the sheet would be assembling by hand what the Engine already
+ * assembles -- and without its validation, which is what rebuilds the
+ * interpolation grid. Without that grid the BlendSpace exists, opens, and
+ * interpolates nothing.
  *
- * Uma linha por sample, no mesmo espirito do resto do plugin:
+ * One line per sample, in the same spirit as the rest of the plugin:
  *
- *     eixo X : Speed = 0 .. 600
+ *     axis X : Speed = 0 .. 600
  *     MM_Idle = 0
  *     MF_Unarmed_Walk_Fwd = 300
  *     MF_Unarmed_Jog_Fwd = 600
  *
- * Em duas dimensoes o eixo Y entra igual, e o sample ganha a segunda posicao:
+ * In two dimensions the Y axis goes in the same way, and the sample gets the
+ * second position:
  *
- *     eixo X : Direction = -180 .. 180
- *     eixo Y : Speed = 0 .. 600
+ *     axis X : Direction = -180 .. 180
+ *     axis Y : Speed = 0 .. 600
  *     MM_Idle = 0, 0
  *     MF_Unarmed_Walk_Fwd = 0, 300
  *
- * O nome do asset segue a mesma regra do AnimGraph: nome curto se for unico,
- * caminho completo se nao for. Dois assets com o mesmo nome curto nao viram
- * escolha -- sai a lista, e quem decide e' quem escreveu.
+ * The asset name follows the same rule as the AnimGraph: short name if it is
+ * unique, full path if it is not. Two assets with the same short name do not
+ * become a choice -- the list comes out, and whoever wrote it decides.
  */
 namespace NodeScribeBlendSpace
 {
@@ -42,28 +44,29 @@ struct FResult
 };
 
 /**
- * Aplica o texto no BlendSpace.
+ * Applies the text to the BlendSpace.
  *
- * Os eixos sao aplicados antes dos samples, aconteca em que ordem aparecerem no
- * texto: um sample fora do intervalo do eixo e' recusado pela Engine, e definir
- * o intervalo depois nao o traz de volta.
+ * The axes are applied before the samples, whatever order they appear in the
+ * text: a sample outside the axis range is refused by the Engine, and setting
+ * the range afterwards does not bring it back.
  *
- * Nao apaga o que ja' esta' la'. Como toda escrita do plugin, o texto e' uma
- * lista de mudancas -- para recomecar do zero, crie outro asset.
+ * It does not erase what is already there. Like every write in the plugin, the
+ * text is a list of changes -- to start over from scratch, create another asset.
  */
 FResult Write(UBlendSpace* BlendSpace, const FString& Text);
 
 /**
- * O caminho de volta: os eixos e os samples, no formato que Write aceita.
+ * The way back: the axes and the samples, in the format Write accepts.
  *
- * Vive aqui, e nao numa ferramenta propria, porque a pergunta e' a mesma que a
- * ficha responde -- `read_object` num BlendSpace chama isto e emenda o bloco no
- * fim. Antes, a ficha dizia `nao sei escrever o valor de: Sample Data`, e nao
- * havia como saber o que ja' estava no asset sem abrir o editor. Escrever as
- * cegas num BlendSpace que ja' tem samples e' como o resto do plugin trata
- * qualquer escrita sem leitura: adivinhacao.
+ * It lives here, and not in a tool of its own, because the question is the
+ * same one the sheet answers -- `read_object` on a BlendSpace calls this and
+ * appends the block at the end. Before, the sheet said `I do not know how to
+ * write the value of: Sample Data`, and there was no way to know what was
+ * already in the asset without opening the editor. Writing blind into a
+ * BlendSpace that already has samples is, by the standard the rest of the
+ * plugin applies to any write without a read, guesswork.
  *
- * Vazio quando o BlendSpace nao tem nem eixo nomeado nem sample.
+ * Empty when the BlendSpace has neither a named axis nor a sample.
  */
 FString Read(const UBlendSpace* BlendSpace);
 

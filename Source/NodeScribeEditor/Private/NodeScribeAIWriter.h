@@ -6,11 +6,11 @@ class UBlackboardData;
 class UObject;
 
 /**
- * O espelho do FNodeScribeAIReader. Hoje so' blackboard.
+ * The mirror of FNodeScribeAIReader. Only the blackboard for now.
  *
- * Behavior Tree ainda nao: o asset guarda a hierarquia de execucao *e* um grafo
- * de editor que precisa ficar em sincronia, e escrever so' o lado de runtime
- * da' um asset que roda e aparece vazio na tela.
+ * Not the Behavior Tree yet: the asset keeps the execution hierarchy *and* an
+ * editor graph that has to stay in sync, and writing only the runtime side
+ * gives an asset that runs and shows up empty on screen.
  */
 class FNodeScribeAIWriter
 {
@@ -21,7 +21,7 @@ public:
 		TArray<FString> Diagnostics;
 	};
 
-	/** true quando WriteAsset sabe escrever neste objeto. */
+	/** true when WriteAsset can write into this object. */
 	static bool Handles(const UObject* Object);
 
 	static FResult WriteAsset(UObject* Object, const FString& Text);

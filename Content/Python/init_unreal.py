@@ -1,5 +1,5 @@
-# Carregado pela Unreal quando o plugin sobe. Registra o toolset do NodeScribe
-# no ToolsetRegistry, que e' quem o expoe pelo MCP.
+# Loaded by Unreal when the plugin starts. Registers the NodeScribe toolset
+# with the ToolsetRegistry, which is what exposes it through the MCP.
 
 from nodescribe_toolset import toolsets
 

@@ -5,27 +5,25 @@
 class UObject;
 
 /**
- * Um objeto como ficha: uma linha por propriedade, e so' o que difere do
- * padrao.
+ * An object as a sheet: one line per property, and only what differs from the
+ * default.
  *
- * A compressao vem de nao mandar o que da' para resolver deste lado. Num CDO
- * tipico 95% das propriedades estao no valor de fabrica, e `Gravity Scale =
- * 1.0` nao carrega informacao nenhuma. E' a mesma jogada do catalogo, aplicada
- * a propriedade em vez de a nome de node.
+ * The compression comes from not sending what can be resolved on this side.
+ * In a typical CDO 95% of the properties are at their factory value, and
+ * `Gravity Scale = 1.0` carries no information at all. It is the same move as
+ * the catalog, applied to properties instead of node names.
  *
- * O espelho -- escrever ficha de volta -- ainda nao existe. Ler nao estraga
- * asset nenhum, entao vale rodar sozinho enquanto o formato ainda esta'
- * mudando de ideia.
+ * The mirror -- writing the sheet back -- is `FNodeScribeObjectWriter`.
  */
 class FNodeScribeObjectReader
 {
 public:
 	/**
-	 * @param Object  o alvo. Blueprint e classe viram o CDO delas.
-	 * @param Filter  vazio devolve o que difere do padrao. Com texto, devolve
-	 *                as propriedades cujo nome casa -- inclusive as que estao
-	 *                no padrao, porque ali a pergunta e' "existe e quanto vale",
-	 *                nao "o que mudou".
+	 * @param Object  the target. Blueprints and classes become their CDO.
+	 * @param Filter  empty returns what differs from the default. With text, it
+	 *                returns the properties whose name matches -- including the
+	 *                ones at their default, because there the question is "does
+	 *                it exist and what is it worth", not "what changed".
 	 */
 	static FString ReadObject(UObject* Object, const FString& Filter);
 };

@@ -32,18 +32,18 @@ namespace
 	{
 		switch (Severity)
 		{
-		case ENodeScribeSeverity::Error:   return TEXT("erro");
-		case ENodeScribeSeverity::Warning: return TEXT("aviso");
-		default:                           return TEXT("nota");
+		case ENodeScribeSeverity::Error:   return TEXT("error");
+		case ENodeScribeSeverity::Warning: return TEXT("warning");
+		default:                           return TEXT("note");
 		}
 	}
 
 	/**
-	 * Diagnosticos em texto puro.
+	 * Diagnostics as plain text.
 	 *
-	 * Quem chama de fora nao ve' o Message Log nem os comentarios vermelhos no
-	 * grafo, entao tudo que o plugin recusou tem que voltar aqui -- e' o unico
-	 * canal que esse chamador tem.
+	 * An outside caller sees neither the Message Log nor the red comments in the
+	 * graph, so everything the plugin refused has to come back here -- it is the
+	 * only channel that caller has.
 	 */
 	FString FormatDiagnostics(const TArray<FNodeScribeDiagnostic>& Diagnostics)
 	{
@@ -53,7 +53,7 @@ namespace
 		for (const FNodeScribeDiagnostic& Diagnostic : Diagnostics)
 		{
 			Lines.Add(Diagnostic.Line > 0
-				? FString::Printf(TEXT("linha %d [%s]: %s"),
+				? FString::Printf(TEXT("line %d [%s]: %s"),
 					Diagnostic.Line, SeverityLabel(Diagnostic.Severity), *Diagnostic.Message)
 				: FString::Printf(TEXT("[%s]: %s"),
 					SeverityLabel(Diagnostic.Severity), *Diagnostic.Message));
@@ -64,11 +64,11 @@ namespace
 }
 
 /**
- * Apaga o que da' para apagar do grafo, e diz quantos foram.
+ * Deletes what can be deleted from the graph, and says how many.
  *
- * Node de entrada de funcao recusa ser apagado (`CanUserDeleteNode`), e recusa
- * com razao: ele nasce com a funcao. Pular esses e' o comportamento certo, nao
- * uma limitacao.
+ * A function entry node refuses to be deleted (`CanUserDeleteNode`), and
+ * rightly so: it is born with the function. Skipping those is the right
+ * behaviour, not a limitation.
  */
 static int32 RemoveDeletableNodes(UEdGraph* Graph, UBlueprint* Blueprint)
 {
@@ -93,65 +93,65 @@ FString UNodeScribeLibrary::WriteGraph(UEdGraph* Graph, const FString& Text, boo
 {
 	if (!Graph)
 	{
-		return TEXT("[erro]: nenhum grafo informado.");
+		return TEXT("[error]: no graph given.");
 	}
 
 	UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
 	if (!Blueprint)
 	{
-		return TEXT("[erro]: esse grafo nao pertence a um Blueprint.");
+		return TEXT("[error]: this graph does not belong to a Blueprint.");
 	}
 
-	// A guarda da substituicao, antes de qualquer alteracao.
+	// The replacement guard, before any change.
 	//
-	// Apagar e' a unica coisa que este plugin faz que nao da' para conferir
-	// depois: o que sumiu nao aparece no texto que sobrou. Entao a pergunta que
-	// decide nao e' "o texto novo esta' bom", e sim "o grafo que esta' la' cabe
-	// em texto". Se a leitura dele perde alguma coisa -- uma reconvergencia, um
-	// Cast com continuacao, um node que o formato nao sabe nomear, um node de
-	// dado solto --, apagar destroi exatamente aquilo que ninguem tem escrito.
+	// Erasing is the only thing this plugin does that cannot be checked
+	// afterwards: what vanished does not show up in the text that is left. So
+	// the deciding question is not "is the new text good", but "does the graph
+	// that is there fit in text". If its reading loses something -- a
+	// reconvergence, a Cast with a continuation, a node the format cannot name,
+	// a loose data node --, erasing destroys exactly what nobody has written.
 	//
-	// Nao ha' modo forcado de proposito. Quem realmente quer limpar seleciona
-	// tudo no grafo e aperta Delete: e' um gesto humano, visivel, e com Ctrl+Z
-	// do lado.
+	// There is no forced mode, on purpose. Whoever really wants to clear selects
+	// everything in the graph and presses Delete: a human gesture, visible, with
+	// Ctrl+Z right there. Or calls ClearGraph, which hands back what it erased.
 	if (bReplace)
 	{
 		const FNodeScribeReader::FResult Current = FNodeScribeReader::ReadGraph(Graph, Blueprint);
 
 		if (Current.WarningCount > 0 || Current.LostNodeCount > 0)
 		{
-			TArray<FString> Motivos;
+			TArray<FString> Reasons;
 			for (const FNodeScribeDiagnostic& Diagnostic : Current.Diagnostics)
 			{
 				if (Diagnostic.Severity == ENodeScribeSeverity::Warning)
 				{
-					Motivos.Add(TEXT("  - ") + Diagnostic.Message);
+					Reasons.Add(TEXT("  - ") + Diagnostic.Message);
 				}
 			}
 
 			if (Current.LostNodeCount > 0)
 			{
-				Motivos.Add(FString::Printf(
-					TEXT("  - %d node(s) de dado nao alimentam nada, e nao voltariam."),
+				Reasons.Add(FString::Printf(
+					TEXT("  - %d data node(s) feed nothing, and would not come back."),
 					Current.LostNodeCount));
 			}
 
 			return FString::Printf(
-				TEXT("[erro]: nao substitui este grafo -- ele tem coisa que o texto nao sabe dizer, ")
-				TEXT("e apagar destruiria justamente isso. Nada foi alterado.\n%s\n")
-				TEXT("Escreva sem substituir, ou apague na mao o que quiser trocar (Ctrl+A, Delete no grafo) e escreva depois."),
-				*FString::Join(Motivos, TEXT("\n")));
+				TEXT("[error]: did not replace this graph -- it has things the text cannot say, ")
+				TEXT("and erasing would destroy exactly those. Nothing was changed.\n%s\n")
+				TEXT("Write without `replace`, or delete by hand what you want to swap (Ctrl+A, Delete in the graph) and write afterwards."),
+				*FString::Join(Reasons, TEXT("\n")));
 		}
 	}
 
 	TArray<FNodeScribeDiagnostic> ParseDiagnostics;
 	const TArray<FNodeScribeStatement> Statements = FNodeScribeParser::Parse(Text, ParseDiagnostics);
 
-	const FScopedTransaction Transaction(LOCTEXT("WriteGraphTransaction", "NodeScribe: escrever grafo"));
+	const FScopedTransaction Transaction(LOCTEXT("WriteGraphTransaction", "NodeScribe: write graph"));
 	Blueprint->Modify();
 	Graph->Modify();
 
-	// Dentro da transacao: o Ctrl+Z desfaz o apagar e o escrever de uma vez.
+	// Inside the transaction: Ctrl+Z undoes the erase and the write at once.
 	int32 Removed = 0;
 	if (bReplace)
 	{
@@ -167,14 +167,14 @@ FString UNodeScribeLibrary::WriteGraph(UEdGraph* Graph, const FString& Text, boo
 
 	const FString Report = FormatDiagnostics(Result.Diagnostics);
 
-	// A contagem vai junto mesmo quando nao ha' diagnostico: quem chamou nao
-	// esta' olhando o grafo e precisa saber que algo aconteceu.
-	const FString Apagados = Removed > 0
-		? FString::Printf(TEXT("%d node(s) apagados, "), Removed)
+	// The count goes along even when there is no diagnostic: the caller is not
+	// looking at the graph and needs to know something happened.
+	const FString Deleted = Removed > 0
+		? FString::Printf(TEXT("%d node(s) deleted, "), Removed)
 		: FString();
 
-	return FString::Printf(TEXT("%s%d node(s) criados.%s%s"),
-		*Apagados,
+	return FString::Printf(TEXT("%s%d node(s) created.%s%s"),
+		*Deleted,
 		Result.CreatedNodes.Num(),
 		Report.IsEmpty() ? TEXT("") : TEXT("\n"),
 		*Report);
@@ -184,21 +184,22 @@ FString UNodeScribeLibrary::ClearGraph(UEdGraph* Graph)
 {
 	if (!Graph)
 	{
-		return TEXT("[erro]: nenhum grafo informado.");
+		return TEXT("[error]: no graph given.");
 	}
 
 	UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
 	if (!Blueprint)
 	{
-		return TEXT("[erro]: esse grafo nao pertence a um Blueprint.");
+		return TEXT("[error]: this graph does not belong to a Blueprint.");
 	}
 
-	// Ler antes de apagar. E' isto que separa este gesto de um modo forcado: o
-	// grafo volta na resposta, e o que a leitura nao soube dizer volta como
-	// aviso -- entao quem apagou sabe o que perdeu, em vez de descobrir depois.
+	// Read before erasing. This is what separates this gesture from a forced
+	// mode: the graph comes back in the response, and what the reading could not
+	// say comes back as a warning -- so whoever erased knows what they lost,
+	// instead of finding out later.
 	const FNodeScribeReader::FResult Before = FNodeScribeReader::ReadGraph(Graph, Blueprint);
 
-	const FScopedTransaction Transaction(LOCTEXT("ClearGraphTransaction", "NodeScribe: esvaziar grafo"));
+	const FScopedTransaction Transaction(LOCTEXT("ClearGraphTransaction", "NodeScribe: clear graph"));
 	Blueprint->Modify();
 	Graph->Modify();
 
@@ -206,14 +207,14 @@ FString UNodeScribeLibrary::ClearGraph(UEdGraph* Graph)
 
 	if (Removed == 0)
 	{
-		return TEXT("O grafo ja' estava vazio. Nada foi alterado.");
+		return TEXT("The graph was already empty. Nothing was changed.");
 	}
 
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
 	TArray<FString> Lines;
-	Lines.Add(FString::Printf(TEXT("%d node(s) apagados. O que estava la':"), Removed));
-	Lines.Add(Before.Text.IsEmpty() ? TEXT("# (nada que o texto soubesse dizer)") : Before.Text);
+	Lines.Add(FString::Printf(TEXT("%d node(s) deleted. What was there:"), Removed));
+	Lines.Add(Before.Text.IsEmpty() ? TEXT("# (nothing the text could express)") : Before.Text);
 
 	const FString Report = FormatDiagnostics(Before.Diagnostics);
 	if (!Report.IsEmpty())
@@ -228,7 +229,7 @@ FString UNodeScribeLibrary::ReadGraph(UEdGraph* Graph)
 {
 	if (!Graph)
 	{
-		return TEXT("[erro]: nenhum grafo informado.");
+		return TEXT("[error]: no graph given.");
 	}
 
 	UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
@@ -241,7 +242,7 @@ FString UNodeScribeLibrary::ReadGraph(UEdGraph* Graph)
 		return Result.Text;
 	}
 
-	// Os avisos entram comentados: o texto continua colavel de volta como esta'.
+	// The warnings go in commented out: the text stays pasteable back as it is.
 	TArray<FString> Commented;
 	Report.ParseIntoArrayLines(Commented);
 
@@ -265,9 +266,9 @@ FString UNodeScribeLibrary::WriteObject(UObject* Object, const FString& Text)
 
 	const FString Report = FString::Join(Result.Diagnostics, TEXT("\n"));
 
-	// A contagem vai junto mesmo sem diagnostico: quem chamou nao esta' olhando
-	// o painel de detalhes e precisa saber que algo aconteceu.
-	return FString::Printf(TEXT("%d propriedade(s) alterada(s).%s%s"),
+	// The count goes along even without a diagnostic: the caller is not looking
+	// at the details panel and needs to know something happened.
+	return FString::Printf(TEXT("%d change(s) applied.%s%s"),
 		Result.Applied,
 		Report.IsEmpty() ? TEXT("") : TEXT("\n"),
 		*Report);
@@ -283,7 +284,7 @@ FString UNodeScribeLibrary::WriteBlendSpace(UBlendSpace* BlendSpace, const FStri
 	const NodeScribeBlendSpace::FResult Result = NodeScribeBlendSpace::Write(BlendSpace, Text);
 
 	TArray<FString> Lines;
-	Lines.Add(FString::Printf(TEXT("%d sample(s), %d eixo(s)."),
+	Lines.Add(FString::Printf(TEXT("%d sample(s), %d axis/axes."),
 		Result.SamplesAdded, Result.AxesSet));
 
 	Lines.Append(Result.Diagnostics);
@@ -305,22 +306,22 @@ FString UNodeScribeLibrary::SaveAllAndQuit()
 {
 	if (!GEditor)
 	{
-		return TEXT("[erro]: sem editor.");
+		return TEXT("[error]: no editor.");
 	}
 
-	// Fechar no meio de um teste surpreende, e o ganho de tempo nao paga isso.
+	// Closing in the middle of a test is a surprise, and the time saved does not pay for it.
 	if (GEditor->IsPlaySessionInProgress())
 	{
-		return TEXT("[erro]: ha' um Play In Editor rodando. Pare o Play antes.");
+		return TEXT("[error]: a Play In Editor session is running. Stop Play first.");
 	}
 
-	// O caminho do Slate pergunta "tem certeza?" num dialogo modal quando essa
-	// opcao esta ligada. Quem chama isto e' um programa: ninguem estaria la para
-	// clicar, e o editor ficaria pendurado sem explicacao.
+	// The Slate path asks "are you sure?" in a modal dialog when this option is
+	// on. Whoever calls this is a program: nobody would be there to click, and
+	// the editor would hang with no explanation.
 	if (GetDefault<UEditorPerProjectUserSettings>()->bConfirmEditorClose)
 	{
-		return TEXT("[erro]: 'Confirm on Editor Close' esta' ligado -- fechar abriria um dialogo\n")
-			TEXT("que so' um humano fecha. Desmarque em Editor Preferences > General > Loading & Saving.");
+		return TEXT("[error]: 'Confirm on Editor Close' is on -- closing would open a dialog\n")
+			TEXT("only a human can close. Untick it in Editor Preferences > General > Loading & Saving.");
 	}
 
 	bool bNeededSaving = false;
@@ -333,63 +334,64 @@ FString UNodeScribeLibrary::SaveAllAndQuit()
 		/*bCanBeDeclined*/ false,
 		&bNeededSaving);
 
-	// O retorno de SaveDirtyPackages nao serve de prova, e o bNeededSaving
-	// tambem nao. Sao dois caminhos de perda silenciosa:
+	// SaveDirtyPackages' return value is no proof, and neither is bNeededSaving.
+	// They are two silent-loss paths:
 	//
-	// - InternalSavePackages so devolve false quando o usuario cancela ("Only
-	//   cancel should return false", diz o comentario da engine). Pacote que
-	//   falhou ao gravar -- somente leitura, travado no controle de versao, erro
-	//   no meio -- devolve sucesso. E com bPromptUserToSave e bCanBeDeclined em
-	//   false nao ha cancelamento possivel, entao o retorno e sempre true.
+	// - InternalSavePackages only returns false when the user cancels ("Only
+	//   cancel should return false", says the engine's comment). A package that
+	//   failed to save -- read-only, locked in source control, error midway --
+	//   returns success. And with bPromptUserToSave and bCanBeDeclined false
+	//   there is no possible cancel, so the return value is always true.
 	//
-	// - Se todo pacote sujo estiver em FEditorFileUtils::PackagesNotSavedDuringSaveAll
-	//   (a lista do que o usuario desmarcou em algum dialogo de salvar, que dura
-	//   a sessao inteira), a funcao nem tenta gravar e ainda devolve
+	// - If every dirty package is in FEditorFileUtils::PackagesNotSavedDuringSaveAll
+	//   (the list of what the user unticked in some save dialog, which lasts the
+	//   whole session), the function does not even try to save and still returns
 	//   bNeededSaving = false.
 	//
-	// Entao se pergunta de novo quem continua sujo, e ai sim se sabe.
-	TArray<UPackage*> AindaSujos;
-	FEditorFileUtils::GetDirtyWorldPackages(AindaSujos);
-	FEditorFileUtils::GetDirtyContentPackages(AindaSujos);
+	// So we ask again who is still dirty, and then we know.
+	TArray<UPackage*> StillDirty;
+	FEditorFileUtils::GetDirtyWorldPackages(StillDirty);
+	FEditorFileUtils::GetDirtyContentPackages(StillDirty);
 
-	if (AindaSujos.Num() > 0)
+	if (StillDirty.Num() > 0)
 	{
-		TArray<FString> Nomes;
-		Nomes.Reserve(AindaSujos.Num());
-		for (const UPackage* Pacote : AindaSujos)
+		TArray<FString> Names;
+		Names.Reserve(StillDirty.Num());
+		for (const UPackage* Package : StillDirty)
 		{
-			Nomes.Add(Pacote->GetName());
+			Names.Add(Package->GetName());
 		}
-		Nomes.Sort();
+		Names.Sort();
 
 		return FString::Printf(
-			TEXT("[erro]: nao fechei -- %d pacote(s) continuam sem salvar depois do save:\n%s\n")
-			TEXT("Salve na mao (Ctrl+Shift+S) e veja o que o editor reclama."),
-			Nomes.Num(),
-			*FString::Join(Nomes, TEXT("\n")));
+			TEXT("[error]: did not close -- %d package(s) are still unsaved after the save:\n%s\n")
+			TEXT("Save by hand (Ctrl+Shift+S) and see what the editor complains about."),
+			Names.Num(),
+			*FString::Join(Names, TEXT("\n")));
 	}
 
-	// O QUIT_EDITOR pula o desligamento do Slate: vai direto em
-	// UUnrealEdEngine::CloseEditor -> RequestEngineExit. Os editores de asset
-	// abertos ficam vivos, e so' sao desmontados depois que a janela principal ja
-	// morreu -- com a cena de preview deles apontando para coisa destruida. E' o
-	// crash do AnimationBlueprintEditor. A propria engine avisa, no
-	// EditorServer.cpp, ao lado do QUIT_EDITOR: "Don't call quit_editor directly
+	// QUIT_EDITOR skips the Slate shutdown: it goes straight to
+	// UUnrealEdEngine::CloseEditor -> RequestEngineExit. The open asset editors
+	// stay alive, and are only torn down after the main window already died --
+	// with their preview scene pointing at destroyed things. That is the
+	// AnimationBlueprintEditor crash. The engine itself warns, in
+	// EditorServer.cpp, next to QUIT_EDITOR: "Don't call quit_editor directly
 	// with slate".
 	//
-	// CLOSE_SLATE_MAINFRAME e' a porta certa. Cai em
-	// FMainFrameHandler::ShutDownEditor, que na ordem certa: fecha os editores de
-	// asset (BroadcastEditorClose), desliga o arquivo de restauracao do autosave
-	// -- e' ele que fazia o editor oferecer "recuperar" na abertura seguinte --,
-	// salva a posicao da janela, e so' entao enfileira o QUIT_EDITOR.
+	// CLOSE_SLATE_MAINFRAME is the right door. It lands in
+	// FMainFrameHandler::ShutDownEditor, which in the right order: closes the
+	// asset editors (BroadcastEditorClose), turns off the autosave restore file
+	// -- it was what made the editor offer "recover" on the next launch --,
+	// saves the window position, and only then queues QUIT_EDITOR.
 	//
-	// Adiado porque sair aqui derrubaria a conexao antes desta resposta sair, e
-	// quem chamou veria um erro de rede em vez da confirmacao.
+	// Deferred because quitting here would drop the connection before this
+	// response got out, and the caller would see a network error instead of the
+	// confirmation.
 	GEngine->DeferredCommands.Add(TEXT("CLOSE_SLATE_MAINFRAME"));
 
 	return bNeededSaving
-		? TEXT("Tudo salvo. Fechando o editor.")
-		: TEXT("Nada pendente para salvar. Fechando o editor.");
+		? TEXT("Everything saved. Closing the editor.")
+		: TEXT("Nothing pending to save. Closing the editor.");
 }
 
 FString UNodeScribeLibrary::GetFormatDocs()
@@ -397,15 +399,15 @@ FString UNodeScribeLibrary::GetFormatDocs()
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("NodeScribe"));
 	if (!Plugin.IsValid())
 	{
-		return TEXT("[erro]: nao achei o plugin NodeScribe.");
+		return TEXT("[error]: could not find the NodeScribe plugin.");
 	}
 
-	const FString DocsPath = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Docs"), TEXT("FORMATO.md"));
+	const FString DocsPath = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Docs"), TEXT("FORMAT.md"));
 
 	FString Contents;
 	if (!FFileHelper::LoadFileToString(Contents, *DocsPath))
 	{
-		return FString::Printf(TEXT("[erro]: nao consegui ler %s"), *DocsPath);
+		return FString::Printf(TEXT("[error]: could not read %s"), *DocsPath);
 	}
 
 	return Contents;

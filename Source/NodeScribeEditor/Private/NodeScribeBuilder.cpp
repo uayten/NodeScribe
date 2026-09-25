@@ -69,88 +69,92 @@ using namespace NodeScribePropertyText;
 namespace
 {
 	/**
-	 * Um nome que alguem escreveu e o plugin nao casou com nada, numa linha, num
-	 * arquivo so'.
+	 * A name someone wrote that the plugin matched to nothing, one per line, in
+	 * a single file.
 	 *
-	 * **Nao e' log de erro.** O erro ja' volta no retorno da chamada, ja' vai
-	 * para o Message Log e ja' fica como comentario vermelho dentro do grafo --
-	 * que e' onde ele serve, junto do problema, e de onde o proprio `read_graph`
-	 * o traz de volta. Duplicar isso seria uma copia mais pobre.
+	 * **It is not an error log.** The error already comes back in the call's
+	 * return value, already goes to the Message Log and already stays as a red
+	 * comment inside the graph -- which is where it is useful, next to the
+	 * problem, and where `read_graph` itself brings it back from. Duplicating
+	 * that would be a poorer copy.
 	 *
-	 * Isto responde outra pergunta, que hoje nao da' para responder de jeito
-	 * nenhum: **quais apelidos faltam no catalogo**. Depois de algumas semanas de
-	 * uso, `sort | uniq -c | sort -rn` neste arquivo e' uma lista de tarefas
-	 * ordenada por frequencia -- "voce escreveu `Delay` sete vezes e o catalogo
-	 * achou outra coisa".
+	 * This answers another question, one that cannot be answered any other way
+	 * today: **which aliases are missing from the catalog**. After a few weeks of
+	 * use, `sort | uniq -c | sort -rn` on this file is a to-do list sorted by
+	 * frequency -- "you wrote `Delay` seven times and the catalog found something
+	 * else".
 	 *
-	 * Nao ha' data na linha, de proposito: repetido precisa sair como linha
-	 * *identica*, senao a contagem nao existe, e a ordem do arquivo ja' e'
-	 * cronologica. Pelo mesmo motivo nao entram aqui os erros que nao sao de
-	 * vocabulario -- tipo incompativel, pino vazio, evento duplicado. Esses tem
-	 * causa conhecida, e virariam ruido numa contagem que existe para achar
-	 * padrao.
+	 * There is no date on the line, on purpose: a repeat has to come out as an
+	 * *identical* line, otherwise the count does not exist, and the order of the
+	 * file is already chronological. For the same reason, errors that are not
+	 * about vocabulary do not go in here -- incompatible type, empty pin,
+	 * duplicate event. Those have a known cause, and would become noise in a
+	 * count that exists to find patterns.
 	 */
-	void AnotaNomeNaoResolvido(const TCHAR* Tipo, const FString& Nome, const FString& Contexto = FString())
+	void RecordUnresolvedName(const TCHAR* Kind, const FString& Name, const FString& Context = FString())
 	{
-		FString Linha = FString(Tipo) + TEXT("  ") + Nome.TrimStartAndEnd();
+		FString Line = FString(Kind) + TEXT("  ") + Name.TrimStartAndEnd();
 
-		if (!Contexto.IsEmpty())
+		if (!Context.IsEmpty())
 		{
-			Linha += TEXT("  em  ") + Contexto.TrimStartAndEnd();
+			Line += TEXT("  in  ") + Context.TrimStartAndEnd();
 		}
 
-		Linha += LINE_TERMINATOR;
+		Line += LINE_TERMINATOR;
 
-		const FString Pasta = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("NodeScribe"));
-		IFileManager::Get().MakeDirectory(*Pasta, /*Tree*/ true);
+		const FString Folder = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("NodeScribe"));
+		IFileManager::Get().MakeDirectory(*Folder, /*Tree*/ true);
 
 		FFileHelper::SaveStringToFile(
-			Linha,
-			*FPaths::Combine(Pasta, TEXT("vocabulario.txt")),
+			Line,
+			*FPaths::Combine(Folder, TEXT("vocabulary.txt")),
 			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM,
 			&IFileManager::Get(),
 			FILEWRITE_Append);
 	}
 
-	/** Espacamento horizontal entre nodes de uma mesma cadeia de execucao. */
+	/** Horizontal spacing between nodes of the same execution chain. */
 	constexpr int32 ColumnWidth = 620;
 
-	/** Distancia da linha de execucao ate' o primeiro node de dado, abaixo dela. */
+	/** Distance from the execution row to the first data node, below it. */
 	constexpr int32 DataRowOffsetY = 200;
 
-	/** Cada node de dado ganha a propria linha, empilhando para baixo. */
+	/** Each data node gets its own row, stacking downwards. */
 	constexpr int32 DataRowHeight = 170;
 
-	/** A pilha de dados fica um pouco a' esquerda da coluna de execucao. */
+	/** The data stack sits a little to the left of the execution column. */
 	constexpr int32 DataColumnOffsetX = -40;
 
-	/** Quanto mais fundo na cadeia de dados, mais para a esquerda. */
+	/** The deeper in the data chain, the further to the left. */
 	constexpr int32 DataDepthIndentX = 30;
 
-	/** Espacamento vertical entre blocos irmaos (os ramos de um Branch). */
+	/** Vertical spacing between sibling blocks (the branches of a Branch). */
 	constexpr int32 BranchRowHeight = 300;
 
-	/** Deslocamento de um node de dado criado implicitamente para o seu consumidor. */
+	/** The Engine's macro libraries, in lookup order. */
+	const TCHAR* const MacroLibraryPaths[] = {
+		TEXT("/Engine/EditorBlueprintResources/StandardMacros.StandardMacros"),
+		TEXT("/Engine/EditorBlueprintResources/ActorMacros.ActorMacros"),
+		TEXT("/Engine/EditorBlueprintResources/ActorComponentMacros.ActorComponentMacros")
+	};
 
-	const TCHAR* const StandardMacrosPath = TEXT("/Engine/EditorBlueprintResources/StandardMacros.StandardMacros");
-
-	/** true para o que aparece na lista de eventos sobrescreviveis do grafo. */
+	/** true for what shows up in the graph's list of overridable events. */
 	bool IsOverridableEvent(const UFunction* Function)
 	{
-		// BlueprintNativeEvent com retorno e' funcao, nao evento: nao tem pino de exec.
+		// A BlueprintNativeEvent with a return value is a function, not an event: it has no exec pin.
 		return Function
 			&& Function->HasAnyFunctionFlags(FUNC_BlueprintEvent)
 			&& Function->GetReturnProperty() == nullptr;
 	}
 
 	/**
-	 * Procura um evento de Blueprint com esse nome em qualquer classe carregada.
+	 * Looks for a Blueprint event with this name in any loaded class.
 	 *
-	 * Separa dois casos que merecem tratamento bem diferente: "voce inventou um
-	 * evento novo" (legitimo, e' o que `evento MinhaHabilidadeAtivou` faz) e
-	 * "esse evento existe, mas nao nesta classe" -- `BeginPlay` num Widget, por
-	 * exemplo. O segundo e' quase sempre engano, e o Custom Event resultante
-	 * compila sem reclamar e nunca dispara.
+	 * Separates two cases that deserve very different treatment: "you invented
+	 * a new event" (legitimate, it is what `event MyAbilityActivated` does) and
+	 * "this event exists, but not in this class" -- `BeginPlay` in a Widget, for
+	 * example. The second is almost always a mistake, and the resulting Custom
+	 * Event compiles without complaint and never fires.
 	 */
 	UClass* FindClassOwningBlueprintEvent(const FString& EventName)
 	{
@@ -162,10 +166,10 @@ namespace
 
 		for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
 		{
-			// SKEL_/REINST_/TRASHCLASS_ sao restos de compilacao de Blueprint.
-			// Sem esse filtro o aviso dizia coisas como "`PreencherLista` e'
-			// evento de `REINST_SKEL_WBP_TelaDeRemap_C_21`", que nao e' um nome
-			// que exista para o usuario.
+			// SKEL_/REINST_/TRASHCLASS_ are leftovers of Blueprint compilation.
+			// Without this filter the warning said things like "`FillList` is an
+			// event of `REINST_SKEL_WBP_RemapScreen_C_21`", which is not a name
+			// that exists for the user.
 			const FString ClassName = ClassIt->GetName();
 			if (ClassName.StartsWith(TEXT("SKEL_"))
 				|| ClassName.StartsWith(TEXT("REINST_"))
@@ -187,7 +191,7 @@ namespace
 		return nullptr;
 	}
 
-	/** Os eventos que a classe realmente oferece, para o usuario escolher outro. */
+	/** The events the class really offers, so the user can pick another one. */
 	FString ListAvailableEvents(UClass* Class, int32 MaxCount)
 	{
 		if (!Class)
@@ -221,15 +225,15 @@ namespace
 	}
 
 	/**
-	 * Nodes que constroem um objeto a partir de uma classe.
+	 * Nodes that build an object from a class.
 	 *
-	 * Os pinos deles dependem do valor do pino `Class`: os campos marcados como
-	 * *Expose on Spawn* so' aparecem depois que a classe e' escolhida. Por isso
-	 * este e' o unico tipo de node em que a ordem dos argumentos importa.
+	 * Their pins depend on the value of the `Class` pin: fields marked as
+	 * *Expose on Spawn* only show up after the class is chosen. That is why this
+	 * is the only kind of node where the order of the arguments matters.
 	 *
-	 * Resolvidos por caminho, e nao por include: `K2Node_CreateWidget` mora no
-	 * Private do UMGEditor, e linkar aquele modulo inteiro por causa de um
-	 * ponteiro de classe seria caro demais.
+	 * Resolved by path, not by include: `K2Node_CreateWidget` lives in the
+	 * Private folder of UMGEditor, and linking that whole module for the sake of
+	 * a class pointer would be too expensive.
 	 */
 	struct FConstructNodeForm
 	{
@@ -239,7 +243,6 @@ namespace
 
 	const FConstructNodeForm ConstructNodeForms[] = {
 		{ TEXT("createwidget"),            TEXT("/Script/UMGEditor.K2Node_CreateWidget") },
-		{ TEXT("criarwidget"),             TEXT("/Script/UMGEditor.K2Node_CreateWidget") },
 		{ TEXT("spawnactorfromclass"),     TEXT("/Script/BlueprintGraph.K2Node_SpawnActorFromClass") },
 		{ TEXT("spawnactor"),              TEXT("/Script/BlueprintGraph.K2Node_SpawnActorFromClass") },
 		{ TEXT("constructobjectfromclass"),TEXT("/Script/BlueprintGraph.K2Node_ConstructObjectFromClass") }
@@ -259,11 +262,11 @@ namespace
 	}
 
 	/**
-	 * Asset de um tipo qualquer, por caminho completo ou por nome curto.
+	 * Asset of any type, by full path or by short name.
 	 *
-	 * O nome curto so' alcanca o que ja' esta' carregado -- o suficiente para o
-	 * asset que voce acabou de abrir, e por isso vale a conveniencia. Quando
-	 * falha, quem chama manda usar o caminho, que sempre funciona.
+	 * The short name only reaches what is already loaded -- enough for the
+	 * asset you just opened, and that is why the convenience is worth it. When
+	 * it fails, the caller says to use the path, which always works.
 	 */
 	UObject* FindAssetByPathOrName(const TCHAR* ClassPath, const FString& Value)
 	{
@@ -294,11 +297,11 @@ namespace
 	}
 
 	/**
-	 * Dispatcher por nome tolerante.
+	 * Dispatcher by tolerant name.
 	 *
-	 * O nome de um dispatcher e' digitado a mao e aceita espaco -- inclusive no
-	 * fim, onde ninguem ve'. O parser apara os espacos da linha, entao a busca
-	 * exata nunca acharia `OnVidaMudou ` a partir de `Call OnVidaMudou`.
+	 * A dispatcher's name is typed by hand and accepts spaces -- including at
+	 * the end, where nobody sees them. The parser trims the line's spaces, so an
+	 * exact lookup would never find `OnHealthChanged ` from `Call OnHealthChanged`.
 	 */
 	FMulticastDelegateProperty* FindDelegateByFriendlyName(UClass* Class, const FString& Name)
 	{
@@ -326,11 +329,11 @@ namespace
 	}
 
 	/**
-	 * Nome de tipo escrito a mao -> tipo de pino da Unreal.
+	 * Hand-written type name -> Unreal pin type.
 	 *
-	 * Aceita o que aparece na interface (`Float`, `Timer Handle`,
-	 * `EPlayerMappableKeySlot`), porque e' o que o usuario ve' -- e e' tambem o
-	 * que o leitor escreve na volta.
+	 * Accepts what shows up in the interface (`Float`, `Timer Handle`,
+	 * `EPlayerMappableKeySlot`), because that is what the user sees -- and it is
+	 * also what the reader writes on the way back.
 	 */
 	UScriptStruct* FindStructByFriendlyName(const FString& Name);
 	UEnum* FindEnumByFriendlyName(const FString& Name);
@@ -341,108 +344,75 @@ namespace
 		FString TypeName = InTypeName.TrimStartAndEnd();
 		bool bIsArray = false;
 
-		// `BP_Pedra Class` e' a *classe*, nao uma instancia dela -- e' o que a
-		// interface mostra e o que se usa para spawnar ator ou apontar
-		// habilidade. Sem isto, so' dava para declarar referencia a objeto vivo,
-		// e uma variavel de classe tinha que ser criada na mao.
+		// `BP_Rock Class` is the *class*, not an instance of it -- it is what the
+		// interface shows and what is used to spawn an actor or point at an
+		// ability. Without this, only references to live objects could be
+		// declared, and a class variable had to be created by hand.
 		bool bIsClassReference = false;
-		for (const TCHAR* Suffix : { TEXT(" Class"), TEXT(" Classe") })
+		if (TypeName.EndsWith(TEXT(" Class"), ESearchCase::IgnoreCase))
 		{
-			if (TypeName.EndsWith(Suffix, ESearchCase::IgnoreCase))
-			{
-				TypeName = TypeName.LeftChop(FCString::Strlen(Suffix)).TrimEnd();
-				bIsClassReference = true;
-				break;
-			}
+			TypeName = TypeName.LeftChop(6).TrimEnd();
+			bIsClassReference = true;
 		}
 
-		// Mapa: `Mapa de Int64 para BP_Mirror`. As duas metades sao resolvidas
-		// pela mesma funcao, entao valem os mesmos nomes de tipo de sempre.
+		// Map: `Map of Int64 to BP_Mirror`. Both halves are resolved by the same
+		// function, so the usual type names apply.
 		//
-		// Vem antes do array porque a chave de um mapa nunca e' container: se a
-		// linha disser `Mapa de Array de X para Y`, e' erro, e o `return false`
-		// aqui embaixo e' que faz isso ser dito em voz alta.
+		// Comes before the array because a map key is never a container: if the
+		// line says `Map of Array of X to Y`, that is an error, and the
+		// `return false` down here is what makes it be said out loud.
+		//
+		// Only `Map of ` opens a map. A bare `Map ` prefix would swallow a struct
+		// like `Map Player Key Args` and then fail for lack of ` to `.
+		if (TypeName.StartsWith(TEXT("Map of "), ESearchCase::IgnoreCase))
 		{
-			static const TCHAR* const MapPrefixes[] = {
-				TEXT("Mapa de "), TEXT("Map de "), TEXT("Map of "), TEXT("Mapa ")
-			};
+			const FString Rest = TypeName.RightChop(7).TrimStartAndEnd();
 
-			for (const TCHAR* Prefix : MapPrefixes)
+			FString KeyName;
+			FString ValueName;
+			if (!Rest.Split(TEXT(" to "), &KeyName, &ValueName, ESearchCase::IgnoreCase))
 			{
-				if (!TypeName.StartsWith(Prefix, ESearchCase::IgnoreCase))
-				{
-					continue;
-				}
-
-				const FString Rest = TypeName.RightChop(FCString::Strlen(Prefix)).TrimStartAndEnd();
-
-				FString KeyName;
-				FString ValueName;
-				if (!Rest.Split(TEXT(" para "), &KeyName, &ValueName, ESearchCase::IgnoreCase)
-					&& !Rest.Split(TEXT(" to "), &KeyName, &ValueName, ESearchCase::IgnoreCase))
-				{
-					return false;
-				}
-
-				FEdGraphPinType KeyType;
-				FEdGraphPinType ValueType;
-				if (!ResolvePinTypeFromNameInternal(KeyName.TrimStartAndEnd(), KeyType)
-					|| !ResolvePinTypeFromNameInternal(ValueName.TrimStartAndEnd(), ValueType))
-				{
-					return false;
-				}
-
-				if (KeyType.ContainerType != EPinContainerType::None
-					|| ValueType.ContainerType != EPinContainerType::None)
-				{
-					return false;
-				}
-
-				OutType = KeyType;
-				OutType.ContainerType = EPinContainerType::Map;
-				OutType.PinValueType = FEdGraphTerminalType::FromPinType(ValueType);
-				return true;
+				return false;
 			}
+
+			FEdGraphPinType KeyType;
+			FEdGraphPinType ValueType;
+			if (!ResolvePinTypeFromNameInternal(KeyName.TrimStartAndEnd(), KeyType)
+				|| !ResolvePinTypeFromNameInternal(ValueName.TrimStartAndEnd(), ValueType))
+			{
+				return false;
+			}
+
+			if (KeyType.ContainerType != EPinContainerType::None
+				|| ValueType.ContainerType != EPinContainerType::None)
+			{
+				return false;
+			}
+
+			OutType = KeyType;
+			OutType.ContainerType = EPinContainerType::Map;
+			OutType.PinValueType = FEdGraphTerminalType::FromPinType(ValueType);
+			return true;
 		}
 
 		bool bIsSet = false;
+		if (TypeName.StartsWith(TEXT("Set of "), ESearchCase::IgnoreCase))
 		{
-			static const TCHAR* const SetPrefixes[] = {
-				TEXT("Conjunto de "), TEXT("Set de "), TEXT("Set of ")
-			};
-
-			for (const TCHAR* Prefix : SetPrefixes)
-			{
-				if (TypeName.StartsWith(Prefix, ESearchCase::IgnoreCase))
-				{
-					TypeName = TypeName.RightChop(FCString::Strlen(Prefix)).TrimStartAndEnd();
-					bIsSet = true;
-					break;
-				}
-			}
+			TypeName = TypeName.RightChop(7).TrimStartAndEnd();
+			bIsSet = true;
 		}
 
-		static const TCHAR* const ArrayPrefixes[] = {
-			TEXT("Array de "), TEXT("Array of "), TEXT("Lista de ")
-		};
-
-		for (const TCHAR* Prefix : ArrayPrefixes)
+		if (TypeName.StartsWith(TEXT("Array of "), ESearchCase::IgnoreCase))
 		{
-			if (TypeName.StartsWith(Prefix, ESearchCase::IgnoreCase))
-			{
-				TypeName = TypeName.RightChop(FCString::Strlen(Prefix)).TrimStartAndEnd();
-				bIsArray = true;
-				break;
-			}
+			TypeName = TypeName.RightChop(9).TrimStartAndEnd();
+			bIsArray = true;
 		}
 
 		static const TMap<FString, FName> Primitives = {
 			{ TEXT("bool"),     UEdGraphSchema_K2::PC_Boolean },
 			{ TEXT("boolean"),  UEdGraphSchema_K2::PC_Boolean },
-			{ TEXT("booleano"), UEdGraphSchema_K2::PC_Boolean },
 			{ TEXT("int"),      UEdGraphSchema_K2::PC_Int },
 			{ TEXT("integer"),  UEdGraphSchema_K2::PC_Int },
-			{ TEXT("inteiro"),  UEdGraphSchema_K2::PC_Int },
 			{ TEXT("int64"),    UEdGraphSchema_K2::PC_Int64 },
 			{ TEXT("byte"),     UEdGraphSchema_K2::PC_Byte },
 			{ TEXT("float"),    UEdGraphSchema_K2::PC_Real },
@@ -450,28 +420,26 @@ namespace
 			{ TEXT("real"),     UEdGraphSchema_K2::PC_Real },
 			{ TEXT("string"),   UEdGraphSchema_K2::PC_String },
 			{ TEXT("name"),     UEdGraphSchema_K2::PC_Name },
-			{ TEXT("nome"),     UEdGraphSchema_K2::PC_Name },
-			{ TEXT("text"),     UEdGraphSchema_K2::PC_Text },
-			{ TEXT("texto"),    UEdGraphSchema_K2::PC_Text }
+			{ TEXT("text"),     UEdGraphSchema_K2::PC_Text }
 		};
 
 		OutType = FEdGraphPinType();
 
 		const FString Normalized = FNodeScribeCatalog::Normalize(TypeName);
 
-		// Struct que casou so' pelo *nome de tela* perde para uma classe de nome
-		// exato.
+		// A struct that matched only by its *display name* loses to a class with
+		// an exact name.
 		//
-		// `FTypedElementActorTag` e' declarada `USTRUCT(meta = (DisplayName =
-		// "Actor"))`, e a busca de struct vem antes da de classe: sem esta regra,
-		// `variavel X : Actor` criava aquela struct. Compila, parece certo no
-		// painel, e nao e' um Actor -- o pior resultado possivel.
+		// `FTypedElementActorTag` is declared `USTRUCT(meta = (DisplayName =
+		// "Actor"))`, and the struct lookup comes before the class lookup: without
+		// this rule, `variable X : Actor` created that struct. It compiles, looks
+		// right in the panel, and is not an Actor -- the worst possible result.
 		//
-		// So' o nome de tela cede. `Vector` e `TimerHandle` casam pelo nome
-		// interno da struct e continuam ganhando de qualquer classe homonima, que
-		// e' o comportamento que ja' servia. E a busca de classe so' conhece nome
-		// interno (e o `_C` de Blueprint), entao "classe de nome exato" nao abre
-		// uma segunda porta de nome de tela.
+		// Only the display name yields. `Vector` and `TimerHandle` match by the
+		// struct's internal name and keep winning over any class of the same
+		// name, which is the behaviour that already worked. And the class lookup
+		// only knows internal names (and the Blueprint `_C`), so "class with an
+		// exact name" does not open a second display-name door.
 		UScriptStruct* Struct = FindStructByFriendlyName(TypeName);
 		if (Struct
 			&& FNodeScribeCatalog::Normalize(Struct->GetName()) != Normalized
@@ -511,8 +479,8 @@ namespace
 			return false;
 		}
 
-		// `Float Class` nao quer dizer nada: se o sufixo foi comido e o que
-		// sobrou nao e' classe, o nome inteiro estava errado.
+		// `Float Class` means nothing: if the suffix was eaten and what is left
+		// is not a class, the whole name was wrong.
 		if (bIsClassReference && OutType.PinCategory != UEdGraphSchema_K2::PC_Class)
 		{
 			return false;
@@ -530,7 +498,7 @@ namespace
 		return true;
 	}
 
-	/** Busca de struct por nome, aceitando `MapPlayerKeyArgs` e `Map Player Key Args`. */
+	/** Struct lookup by name, accepting `MapPlayerKeyArgs` and `Map Player Key Args`. */
 	UScriptStruct* FindStructByFriendlyName(const FString& Name)
 	{
 		const FString Normalized = FNodeScribeCatalog::Normalize(Name);
@@ -554,9 +522,9 @@ namespace
 	}
 
 	/**
-	 * O node de Get muda conforme onde o subsistema vive: um de LocalPlayer
-	 * precisa do PlayerController, um de Engine nao precisa de nada. Escolher
-	 * errado da' um node que nem compila.
+	 * The Get node changes depending on where the subsystem lives: a LocalPlayer
+	 * one needs the PlayerController, an Engine one needs nothing. Picking wrong
+	 * gives a node that does not even compile.
 	 */
 	UClass* ChooseSubsystemNodeClass(UClass* SubsystemClass)
 	{
@@ -570,8 +538,8 @@ namespace
 			return UK2Node_GetEngineSubsystem::StaticClass();
 		}
 
-		// UEditorSubsystem vive num modulo que este plugin nao linka; procuramos
-		// a classe pelo caminho para nao criar a dependencia so' por isso.
+		// UEditorSubsystem lives in a module this plugin does not link; the class
+		// is looked up by path so the dependency is not created just for this.
 		static const UClass* EditorSubsystemClass =
 			FindObject<UClass>(nullptr, TEXT("/Script/EditorSubsystem.EditorSubsystem"));
 
@@ -602,7 +570,7 @@ namespace
 		return nullptr;
 	}
 
-	/** Busca de classe por nome curto, aceitando tanto `BP_Boss` quanto `BP_Boss_C`. */
+	/** Class lookup by short name, accepting both `BP_Boss` and `BP_Boss_C`. */
 	UClass* FindClassByFriendlyNameInternal(const FString& Name)
 	{
 		const FString Normalized = FNodeScribeCatalog::Normalize(Name);
@@ -631,7 +599,7 @@ namespace
 				return Class;
 			}
 
-			// `BP_Boss` digitado pelo usuario aponta para a classe gerada `BP_Boss_C`.
+			// `BP_Boss` typed by the user points at the generated class `BP_Boss_C`.
 			if (NormalizedClassName == NormalizedWithSuffix && !Fallback)
 			{
 				Fallback = Class;
@@ -641,22 +609,42 @@ namespace
 		return Fallback;
 	}
 
-	/** Acha um grafo de macro da biblioteca padrao (ForEachLoop, DoOnce, Gate...). */
-	UEdGraph* FindStandardMacroGraph(const FString& Query)
+	/**
+	 * Finds a macro graph of the Engine's macro libraries (ForEachLoop, DoOnce,
+	 * Gate, Switch Has Authority...).
+	 *
+	 * There are three libraries, not one. `StandardMacros` serves any
+	 * Blueprint; `ActorMacros` and `ActorComponentMacros` only serve Blueprints
+	 * of that parent -- it is where `Switch Has Authority` lives, and looking only
+	 * at the first answered "no node called `Switch Has Authority`" for a macro
+	 * the editor's menu offers. The parent check is the same one the menu makes:
+	 * a macro from a library the class does not derive from does not compile.
+	 */
+	UEdGraph* FindStandardMacroGraph(const FString& Query, const UClass* SelfClass)
 	{
-		UBlueprint* MacroLibrary = LoadObject<UBlueprint>(nullptr, StandardMacrosPath);
-		if (!MacroLibrary)
-		{
-			return nullptr;
-		}
-
 		const FString Normalized = FNodeScribeCatalog::Normalize(Query);
 
-		for (UEdGraph* MacroGraph : MacroLibrary->MacroGraphs)
+		for (const TCHAR* LibraryPath : MacroLibraryPaths)
 		{
-			if (MacroGraph && FNodeScribeCatalog::Normalize(MacroGraph->GetName()) == Normalized)
+			UBlueprint* MacroLibrary = LoadObject<UBlueprint>(nullptr, LibraryPath);
+			if (!MacroLibrary)
 			{
-				return MacroGraph;
+				continue;
+			}
+
+			const UClass* LibraryParent = MacroLibrary->ParentClass;
+			if (LibraryParent && LibraryParent != UObject::StaticClass()
+				&& !(SelfClass && SelfClass->IsChildOf(LibraryParent)))
+			{
+				continue;
+			}
+
+			for (UEdGraph* MacroGraph : MacroLibrary->MacroGraphs)
+			{
+				if (MacroGraph && FNodeScribeCatalog::Normalize(MacroGraph->GetName()) == Normalized)
+				{
+					return MacroGraph;
+				}
 			}
 		}
 
@@ -664,30 +652,19 @@ namespace
 	}
 
 	/**
-	 * Apelidos PT/EN para rotulos de saida de execucao.
-	 * Mapeia para o nome interno do pino, que quase nunca e' o que se ve na tela:
-	 * o pino "True" de um Branch se chama, internamente, "then".
+	 * Aliases for execution output labels.
+	 * Maps to the pin's internal name, which is almost never what shows on
+	 * screen: the "True" pin of a Branch is called, internally, "then".
 	 */
 	FString ResolveLabelAlias(const FString& Label)
 	{
 		static const TMap<FString, FString> Aliases = {
-			{ TEXT("verdadeiro"), TEXT("then") },
 			{ TEXT("true"),       TEXT("then") },
-			{ TEXT("sim"),        TEXT("then") },
-			{ TEXT("entao"),      TEXT("then") },
 			{ TEXT("then"),       TEXT("then") },
-			{ TEXT("depois"),     TEXT("then") },
-			{ TEXT("falso"),      TEXT("else") },
 			{ TEXT("false"),      TEXT("else") },
-			{ TEXT("nao"),        TEXT("else") },
-			{ TEXT("senao"),      TEXT("else") },
 			{ TEXT("else"),       TEXT("else") },
-			{ TEXT("corpo"),      TEXT("loopbody") },
-			{ TEXT("cada"),       TEXT("loopbody") },
 			{ TEXT("loop"),       TEXT("loopbody") },
 			{ TEXT("loopbody"),   TEXT("loopbody") },
-			{ TEXT("completo"),   TEXT("completed") },
-			{ TEXT("concluido"),  TEXT("completed") },
 			{ TEXT("completed"),  TEXT("completed") },
 		};
 
@@ -700,14 +677,12 @@ namespace
 		return Normalized;
 	}
 
-	/** Apelidos para nomes de pino de entrada. */
+	/** Aliases for input pin names. */
 	FString ResolvePinAlias(const FString& PinName)
 	{
 		static const TMap<FString, FString> Aliases = {
-			{ TEXT("alvo"),      TEXT("self") },
 			{ TEXT("target"),    TEXT("self") },
 			{ TEXT("self"),      TEXT("self") },
-			{ TEXT("condicao"),  TEXT("condition") },
 			{ TEXT("condition"), TEXT("condition") },
 		};
 
@@ -722,12 +697,13 @@ namespace
 }
 
 /**
- * Referencia estavel a um pino.
+ * Stable reference to a pin.
  *
- * Guardar `UEdGraphPin*` cru nao serve: ligar um pino faz o node avisar seus
- * vizinhos, e alguns K2Nodes (wildcard, cast) se reconstroem nesse momento,
- * destruindo os pinos antigos. Um ponteiro guardado de uma linha anterior
- * viraria acesso a memoria liberada. Guardamos node + nome e resolvemos na hora.
+ * Keeping a raw `UEdGraphPin*` does not work: linking a pin makes the node
+ * notify its neighbours, and some K2Nodes (wildcard, cast) rebuild themselves
+ * at that moment, destroying the old pins. A pointer kept from an earlier line
+ * would become an access to freed memory. We keep node + name and resolve on
+ * demand.
  */
 struct FPinRef
 {
@@ -765,7 +741,7 @@ namespace
 	}
 }
 
-/** Estado de uma transcricao. Vive apenas durante Build(). */
+/** State of one transcription. Lives only during Build(). */
 class FNodeScribeBuildContext
 {
 public:
@@ -773,20 +749,20 @@ public:
 		: Graph(InGraph)
 		, Blueprint(InBlueprint)
 		, Origin(InOrigin)
-		// O schema do proprio grafo, e nao o K2 generico: e' o
-		// `UAnimationGraphSchema` que sabe ligar pose e que insere sozinho a
-		// conversao entre espaco local e de componente. Para EventGraph e
-		// funcao o schema do grafo ja' e' o K2, entao nada muda la'.
+		// The graph's own schema, not the generic K2 one: it is the
+		// `UAnimationGraphSchema` that knows how to link poses and inserts the
+		// local/component space conversion by itself. For EventGraph and
+		// functions the graph's schema is already K2, so nothing changes there.
 		, Schema(ResolveK2Schema(InGraph))
 		, bAnimGraph(NodeScribeAnimGraph::IsAnimationGraph(InGraph))
-		// Regra de transicao passa pelo mesmo schema, mas nao tem pose nenhuma:
-		// e' logica booleana. Sem esta distincao o vocabulario de anim
-		// competiria la' com o nome de uma funcao comum, e ganharia.
+		// A transition rule goes through the same schema, but has no pose at
+		// all: it is boolean logic. Without this distinction the anim vocabulary
+		// would compete there with the name of a regular function, and win.
 		, bPoseGraph(NodeScribeAnimGraph::IsAnimationGraph(InGraph)
 			&& !(InGraph && InGraph->IsA<UAnimationTransitionGraph>()))
-		// A regra de transicao tem um vocabulario que so' existe ali: os
-		// getters de maquina de estado (`Time Remaining`, `Get Transition Time
-		// Elapsed`). Eles nao sao chamada de funcao -- veja TryCreateAnimGetter.
+		// A transition rule has a vocabulary that only exists there: the state
+		// machine getters (`Time Remaining`, `Get Transition Time Elapsed`).
+		// They are not function calls -- see TryCreateAnimGetter.
 		, bTransitionGraph(InGraph && InGraph->IsA<UAnimationTransitionGraph>())
 	{
 	}
@@ -796,51 +772,51 @@ public:
 	FNodeScribeBuilder::FResult Result;
 
 private:
-	/** Um nivel de aninhamento: o corpo de um ramo, ou o nivel raiz. */
+	/** One nesting level: the body of a branch, or the root level. */
 	struct FFrame
 	{
 		int32 Indent = 0;
 
-		/** De onde sai a proxima ligacao de fluxo. Invalido = cadeia interrompida. */
+		/** Where the next flow link comes out of. Invalid = interrupted chain. */
 		FPinRef PendingExec;
 
 		/**
-		 * O pino de entrada de pose que este bloco alimenta, no AnimGraph.
+		 * The pose input pin this block feeds, in the AnimGraph.
 		 *
-		 * A indentacao la' abre uma *entrada* -- `True Pose:` de um blend --, e
-		 * quem enche essa entrada e' o resultado do bloco, ou seja o ultimo
-		 * node dele. Em vez de guardar a ligacao para o fim, cada node liga por
-		 * cima do anterior: o pino so' aceita um fio, entao o que sobra no fim
-		 * e' exatamente o ultimo. Invalido no EventGraph e no nivel raiz.
+		 * Indentation there opens an *input* -- `True Pose:` of a blend --, and
+		 * what fills that input is the result of the block, that is, its last
+		 * node. Instead of keeping the link for the end, each node links over
+		 * the previous one: the pin only accepts one wire, so what is left at the
+		 * end is exactly the last one. Invalid in the EventGraph and at the root.
 		 */
 		FPinRef FlowSink;
 
-		/** Ultimo node criado neste nivel, dono dos rotulos que vierem a seguir. */
+		/** Last node created at this level, owner of the labels that follow. */
 		UEdGraphNode* LastNode = nullptr;
 
 		int32 BaseX = 0;
 		int32 BaseY = 0;
 		int32 Column = 0;
 
-		/** Quantos ramos ja' foram abertos a partir de LastNode, para empilhar em Y. */
+		/** How many branches were already opened from LastNode, to stack in Y. */
 		int32 BranchesOpened = 0;
 	};
 
-	// --- Criacao de nodes -------------------------------------------------
+	// --- Node creation ----------------------------------------------------
 
 	/**
-	 * RF_Transactional e' o que faz o node entrar no sistema de undo.
+	 * RF_Transactional is what makes the node enter the undo system.
 	 *
-	 * Sem ele, `FBlueprintEditorUtils::UpdateTransactionalFlags` conserta o node
-	 * toda vez que o Blueprint abre e marca o asset como sujo -- e' de onde vem
-	 * o "was updated to fix issues detected on load. Please resave." que
-	 * reaparecia depois de compilar e salvar.
+	 * Without it, `FBlueprintEditorUtils::UpdateTransactionalFlags` fixes the
+	 * node every time the Blueprint opens and marks the asset dirty -- that is
+	 * where the "was updated to fix issues detected on load. Please resave."
+	 * that kept coming back after compiling and saving came from.
 	 */
 	template <typename TNode>
 	TNode* AllocateNode(UEdGraph* Target = nullptr)
 	{
-		// O destino e' quase sempre o grafo da colagem; o parametro existe para
-		// a maquina de estados, cujos estados nascem no sub-grafo dela.
+		// The destination is almost always the paste's graph; the parameter
+		// exists for the state machine, whose states are born in its sub-graph.
 		UEdGraph* Destination = Target ? Target : Graph;
 
 		TNode* Node = NewObject<TNode>(Destination, NAME_None, RF_Transactional);
@@ -859,41 +835,42 @@ private:
 	UEdGraphNode* TryCreateSpecialNode(const FNodeScribeStatement& Statement, bool& bOutHandled);
 	UEdGraphNode* CreateErrorComment(const FNodeScribeStatement& Statement, const FString& Reason);
 
-	/** Cria a variavel de uma linha `variavel Nome : Tipo = valor`. */
+	/** Creates the variable of a `variable Name : Type = value` line. */
 	void CreateDeclaredVariable(const FNodeScribeStatement& Statement);
 
 	/**
-	 * Cria todos os Custom Events antes de processar qualquer linha.
+	 * Creates every Custom Event before processing any line.
 	 *
-	 * Sem isto, chamar um evento definido mais abaixo no texto falha: a classe
-	 * so' conhece a funcao depois que o node existe e o esqueleto e' regerado.
-	 * No grafo a ordem nao importa, e no texto tambem nao deveria importar.
+	 * Without this, calling an event defined further down in the text fails:
+	 * the class only knows the function after the node exists and the skeleton
+	 * is regenerated. In the graph the order does not matter, and in the text it
+	 * should not matter either.
 	 */
 	void PreCreateCustomEvents(const TArray<FNodeScribeStatement>& Statements);
 
-	/** Eventos ja' criados pela pre-passagem, por nome. */
+	/** Events already created by the pre-pass, by name. */
 	TMap<FString, UEdGraphNode*> PreCreatedEvents;
 
 	/**
-	 * Um evento com a mesma identidade ja' no grafo.
+	 * An event with the same identity already in the graph.
 	 *
-	 * A Unreal permite um node por evento: dois `BeginPlay`, ou dois eventos do
-	 * mesmo dispatcher, deixam o Blueprint sem compilar. Colar por cima de um
-	 * grafo que ja' tem o evento e' o jeito mais facil de cair nisso.
+	 * Unreal allows one node per event: two `BeginPlay`s, or two events of the
+	 * same dispatcher, leave the Blueprint unable to compile. Pasting over a
+	 * graph that already has the event is the easiest way to fall into that.
 	 */
 	UEdGraphNode* FindExistingEvent(const TFunctionRef<bool(UEdGraphNode*)>& Matches) const;
 
 	UEdGraphNode* CreateDuplicateEventComment(const FNodeScribeStatement& Statement, const FString& EventLabel);
 
-	// --- Ligacao ----------------------------------------------------------
+	// --- Linking ----------------------------------------------------------
 
 	void ApplyArguments(UEdGraphNode* Node, const FNodeScribeStatement& Statement);
 	void ApplyLiteral(UEdGraphPin* Pin, const FString& Value, int32 Line);
 
-	/** @param ConsumerPin  onde o valor vai entrar; e' dele que sai o tipo de uma variavel nova. */
+	/** @param ConsumerPin  where the value goes in; a new variable's type comes from it. */
 	UEdGraphPin* ResolveReference(const FString& Name, int32 Line, UEdGraphPin* ConsumerPin);
 
-	/** Parte antes do ponto de `$nome.Pino`: resolve o node, nao o pino final. */
+	/** The part before the dot of `$name.Pin`: resolves the node, not the final pin. */
 	UEdGraphPin* ResolveBaseReference(const FString& Name, int32 Line, UEdGraphPin* ConsumerPin);
 
 	void RegisterOutput(const FString& Name, UEdGraphNode* Node, int32 Line);
@@ -901,11 +878,11 @@ private:
 	UEdGraphPin* FindPinByFuzzyName(UEdGraphNode* Node, const FString& Name, EEdGraphPinDirection Direction) const;
 
 	/**
-	 * Divide um pino de struct quando o texto pede uma parte dele.
+	 * Splits a struct pin when the text asks for a part of it.
 	 *
-	 * No grafo, `Selected Key` pode aparecer dividido em `Selected Key Key`,
-	 * `Selected Key Shift` e afins. O node nasce sempre inteiro; sem dividir,
-	 * a metade pedida simplesmente nao existe e a ligacao se perde.
+	 * In the graph, `Selected Key` may show up split into `Selected Key Key`,
+	 * `Selected Key Shift` and so on. The node is always born whole; without
+	 * splitting, the requested half simply does not exist and the link is lost.
 	 */
 	UEdGraphPin* TrySplitToFindPin(UEdGraphNode* Node, const FString& PinPath);
 	static UEdGraphPin* FindExecInput(UEdGraphNode* Node);
@@ -913,72 +890,73 @@ private:
 	static UEdGraphPin* FindPrimaryOutput(UEdGraphNode* Node);
 
 	/**
-	 * Fluxo: execucao no EventGraph, pose no AnimGraph.
+	 * Flow: execution in the EventGraph, pose in the AnimGraph.
 	 *
-	 * Sao a mesma forma -- uma saida do node anterior entra no node seguinte --
-	 * e por isso o percurso e' um so'. O que muda e' qual pino carrega o fluxo,
-	 * e isso o grafo decide, nao a linha.
+	 * They have the same shape -- an output of the previous node goes into the
+	 * next node -- and that is why there is a single walk. What changes is which
+	 * pin carries the flow, and the graph decides that, not the line.
 	 */
 	bool IsFlowPin(const UEdGraphPin* Pin) const;
 	UEdGraphPin* FindFlowInput(UEdGraphNode* Node) const;
 	TArray<UEdGraphPin*> GetFlowOutputs(UEdGraphNode* Node) const;
 
-	/** Nodes de anim criados nesta colagem, para conferir entrada de pose vazia no fim. */
+	/** Anim nodes created in this paste, to check for empty pose inputs at the end. */
 	TArray<TWeakObjectPtr<UEdGraphNode>> AnimNodes;
 
 	/**
-	 * Nodes que ja' estavam no grafo e a colagem apenas reaproveitou.
+	 * Nodes that were already in the graph and the paste only reused.
 	 *
-	 * O Output Pose e' o caso: ele nasce com o AnimGraph e escrever a linha dele
-	 * acha o que existe. Nao entra na contagem de criados nem e' reposicionado --
-	 * mover o node que o usuario ja' arrumou seria estranho.
+	 * The Output Pose is the case: it is born with the AnimGraph, and writing
+	 * its line finds the existing one. It does not count as created and is not
+	 * repositioned -- moving the node the user already arranged would be odd.
 	 */
 	TSet<UEdGraphNode*> AdoptedNodes;
 
 	UEdGraphNode* TryCreateAnimNode(const FNodeScribeStatement& Statement, bool& bOutHandled);
 
 	/**
-	 * Os getters de maquina de estado, dentro de uma regra de transicao.
+	 * The state machine getters, inside a transition rule.
 	 *
 	 * `Time Remaining`, `Get Transition Time Elapsed`, `Get Relevant Anim Time
-	 * Remaining`: no menu do editor eles aparecem como funcao, mas nao sao
-	 * chamada de funcao. Sao `UK2Node_AnimGetter`, e o que os faz funcionar nao
-	 * esta' em pino nenhum -- e' o estado de origem, guardado numa propriedade
-	 * que o menu preenche ao criar o node.
+	 * Remaining`: in the editor menu they show up as functions, but they are not
+	 * function calls. They are `UK2Node_AnimGetter`, and what makes them work is
+	 * not on any pin -- it is the source state, kept in a property the menu
+	 * fills in when creating the node.
 	 *
-	 * Sem este caminho, o nome caia no catalogo e achava a funcao homonima de
-	 * `UAnimationStateMachineLibrary`, que existe, e' publica, entra no grafo, e
-	 * pede dois pinos (`UpdateContext` e `Node`) que numa regra de transicao nao
-	 * tem de onde vir. O resultado era um node plausivel que nao compila --
-	 * exatamente o que o plugin promete nao fazer.
+	 * Without this path, the name fell into the catalog and found the function
+	 * of the same name in `UAnimationStateMachineLibrary`, which exists, is
+	 * public, goes into the graph, and asks for two pins (`UpdateContext` and
+	 * `Node`) that have nowhere to come from in a transition rule. The result
+	 * was a plausible node that does not compile -- exactly what the plugin
+	 * promises not to do.
 	 */
 	UEdGraphNode* TryCreateAnimGetter(const FNodeScribeStatement& Statement, bool& bOutHandled);
 
 	/**
-	 * O bloco indentado debaixo de uma maquina de estados.
+	 * The indented block under a state machine.
 	 *
-	 * Devolve o indice do primeiro statement que *nao* e' do bloco. Consome o
-	 * bloco inteiro de uma vez, e nao linha a linha como o resto do percurso,
-	 * porque estado e transicao nao vivem neste grafo: cada um tem o seu, e
-	 * cada um desses e' construido por um contexto proprio.
+	 * Returns the index of the first statement that is *not* part of the block.
+	 * It consumes the whole block at once, not line by line like the rest of the
+	 * walk, because states and transitions do not live in this graph: each has
+	 * its own, and each of those is built by a context of its own.
 	 */
 	int32 BuildStateMachine(UAnimGraphNode_StateMachineBase* Machine, const TArray<FNodeScribeStatement>& Statements, int32 First);
 
 	/**
-	 * Constroi um sub-grafo com um contexto novo e traz de volta os diagnosticos.
+	 * Builds a sub-graph with a new context and brings the diagnostics back.
 	 *
-	 * Devolve o node da ultima linha do bloco -- o resultado dele, pelo mesmo
-	 * criterio de um galho de pose. Quem chama decide o que fazer com isso: a
-	 * regra de uma transicao liga esse resultado no `Can Enter Transition`.
+	 * Returns the node of the block's last line -- its result, by the same
+	 * criterion as a pose branch. The caller decides what to do with it: a
+	 * transition's rule links that result into `Can Enter Transition`.
 	 */
 	UEdGraphNode* BuildSubGraph(UEdGraph* SubGraph, const TArray<FNodeScribeStatement>& Statements, int32 First, int32 End);
 
-	/** Nodes criados dentro de sub-grafos. Entram no resultado so' no fim, ja' fora do layout. */
+	/** Nodes created inside sub-graphs. They join the result only at the end, outside the layout. */
 	TArray<UEdGraphNode*> NestedNodes;
 
 	void Connect(UEdGraphPin* From, UEdGraphPin* To, int32 Line);
 
-	// --- Diagnosticos -----------------------------------------------------
+	// --- Diagnostics ------------------------------------------------------
 
 	void AddInfo(int32 Line, const FString& Message);
 	void AddWarning(int32 Line, const FString& Message);
@@ -986,16 +964,16 @@ private:
 
 	UClass* GetSelfClass() const;
 
-	/** true se o Blueprint (ou um pai dele) tem uma variavel visivel com esse nome. */
+	/** true if the Blueprint (or one of its parents) has a visible variable with this name. */
 	bool IsBlueprintVariable(const FString& Name) const;
 
-	/** Classe do objeto apontado por `Target = $algo`, quando a linha tem um. */
+	/** Class of the object pointed at by `Target = $something`, when the line has one. */
 	UClass* FindTargetClassFromArgs(const FNodeScribeStatement& Statement) const;
 
-	/** Propriedade por nome tolerante: `Show Mouse Cursor` acha `bShowMouseCursor`. */
+	/** Property by tolerant name: `Show Mouse Cursor` finds `bShowMouseCursor`. */
 	static FProperty* FindPropertyByFriendlyName(UClass* Class, const FString& Name);
 
-	/** Uma opcao do painel de detalhes de um node, e onde o valor dela mora. */
+	/** An option from a node's details panel, and where its value lives. */
 	struct FNodeSetting
 	{
 		FProperty* Property = nullptr;
@@ -1003,23 +981,23 @@ private:
 	};
 
 	/**
-	 * A opcao de nome `Name`, no node ou dentro da struct que ele embrulha.
+	 * The option named `Name`, on the node or inside the struct it wraps.
 	 *
-	 * `OutAvailable` sai preenchida em qualquer caso, com os nomes de tela de
-	 * todas as opcoes -- e' o que a mensagem de erro precisa dizer quando o node
-	 * nao tem pino nenhum.
+	 * `OutAvailable` is filled in any case, with the display names of every
+	 * option -- it is what the error message needs to say when the node has no
+	 * pins at all.
 	 */
 	static bool FindNodeSetting(UEdGraphNode* Node, const FString& Name, FNodeSetting& Out, TArray<FString>& OutAvailable);
 
-	/** Aplica os argumentos de um rotulo como opcoes do painel de detalhes. */
+	/** Applies a label's arguments as details panel options. */
 	void ApplyLabelSettings(UEdGraphNode* Node, const FNodeScribeStatement& Statement);
 
 	/**
-	 * Liga o fim do bloco no `Can Enter Transition` do grafo de regra.
+	 * Links the end of the block into the rule graph's `Can Enter Transition`.
 	 *
-	 * Serve transicao e conduto: os dois carregam um `TransitionResult`, e nos
-	 * dois o texto so' escreve a condicao -- ligar nele e' do plugin, como toda
-	 * ligacao que o formato nao escreve.
+	 * Serves transitions and conduits: both carry a `TransitionResult`, and in
+	 * both the text only writes the condition -- linking into it is the
+	 * plugin's job, like every link the format does not write.
 	 */
 	void WireRule(UEdGraph* RuleGraph, UEdGraphNode* RuleResult,
 		const FNodeScribeStatement& Statement, bool bHasBody, bool bRuleOptional);
@@ -1029,30 +1007,30 @@ private:
 	FVector2D Origin = FVector2D::ZeroVector;
 	const UEdGraphSchema_K2* Schema = nullptr;
 
-	/** Grafo de animacao: AnimGraph, interior de estado ou regra de transicao. */
+	/** Animation graph: AnimGraph, state interior or transition rule. */
 	bool bAnimGraph = false;
 
-	/** Dos tres acima, os dois que de fato tem pose. */
+	/** Of the three above, the two that actually have a pose. */
 	bool bPoseGraph = false;
 
-	/** O terceiro: a regra de transicao, que e' logica booleana. */
+	/** The third one: the transition rule, which is boolean logic. */
 	bool bTransitionGraph = false;
 
 	TArray<FFrame> Frames;
 
-	/** Saidas nomeadas com `nome = ...`, disponiveis para `$nome`. */
+	/** Outputs named with `name = ...`, available for `$name`. */
 	TMap<FString, FPinRef> NamedOutputs;
 
-	/** Nomes cuja linha nao resolveu, e em que linha isso aconteceu. */
+	/** Names whose line did not resolve, and on which line that happened. */
 	TMap<FString, int32> FailedOutputs;
 
 	/**
-	 * Linhas que criaram node e nao deram nome a' saida.
+	 * Lines that created a node and did not name its output.
 	 *
-	 * Existe por causa de um erro que se comete o tempo todo: escrever
-	 * `evento X` e depois `$X`, esquecendo que so' `nome = evento X` cria a
-	 * referencia. Sem isso o plugin criava uma variavel chamada X, que nao e'
-	 * nem de longe o que a pessoa quis dizer.
+	 * Exists because of a mistake made all the time: writing `event X` and then
+	 * `$X`, forgetting that only `name = event X` creates the reference. Without
+	 * this the plugin created a variable called X, which is not even close to
+	 * what the person meant.
 	 */
 	struct FUnnamedLine
 	{
@@ -1063,30 +1041,31 @@ private:
 	TArray<FUnnamedLine> UnnamedLines;
 
 	/**
-	 * Gets que o plugin criou sozinho por causa de um `$Variavel`.
+	 * Gets the plugin created by itself because of a `$Variable`.
 	 *
-	 * Se a ligacao que os justificava nao aconteceu -- tipo errado, pino que
-	 * nao existe --, eles ficam no grafo sem servir para nada. Como nao foram
-	 * pedidos por uma linha do texto, somem no fim em vez de virar entulho.
+	 * If the link that justified them did not happen -- wrong type, pin that
+	 * does not exist --, they stay in the graph serving no purpose. Since no
+	 * line of the text asked for them, they vanish at the end instead of
+	 * becoming clutter.
 	 */
 	TArray<UEdGraphNode*> AutoCreatedGets;
 
 	/**
-	 * Nodes de conversao que o schema inseriu sozinho dentro de Connect().
+	 * Conversion nodes the schema inserted by itself inside Connect().
 	 *
-	 * Ninguem os escreveu, entao eles nao entram em CreatedNodes -- a contagem
-	 * que o usuario ve' e' de linhas que ele mandou. Mas eles precisam ser
-	 * posicionados como qualquer node de dado, senao ficam parados onde os dois
-	 * lados estavam na hora da ligacao, que o layout depois abandona.
+	 * Nobody wrote them, so they do not go into CreatedNodes -- the count the
+	 * user sees is of lines they sent. But they need to be positioned like any
+	 * data node, otherwise they stay where both sides were at link time, which
+	 * the layout later abandons.
 	 */
 	TArray<UEdGraphNode*> ConversionNodes;
 
 	/**
-	 * Nodes de varias saidas de execucao ainda sem rotulo.
+	 * Nodes with several execution outputs still without a label.
 	 *
-	 * O aviso so' pode sair no fim: na hora em que o node nasce, o rotulo que
-	 * o resolve costuma estar na linha seguinte, e avisar ali seria alarme
-	 * falso em todo Branch e todo laco bem escrito.
+	 * The warning can only come out at the end: when the node is born, the
+	 * label that resolves it is usually on the next line, and warning there
+	 * would be a false alarm on every well-written Branch and loop.
 	 */
 	struct FUnbranchedNode
 	{
@@ -1097,64 +1076,65 @@ private:
 
 	TArray<FUnbranchedNode> UnbranchedNodes;
 
-	/** true quando o node nao participa do fluxo de execucao: e' so' um valor. */
+	/** true when the node takes no part in the execution flow: it is only a value. */
 	bool IsPureDataNode(UEdGraphNode* Node) const;
 
 	/**
-	 * Segue os fios de dado para a frente ate' achar quem consome o valor.
-	 * @param OutDepth  saltos ate' la'. 1 = alimenta o node de execucao direto.
+	 * Follows the data wires forward until it finds who consumes the value.
+	 * @param OutDepth  hops until there. 1 = feeds the execution node directly.
 	 */
 	UEdGraphNode* FindConsumingExecNode(UEdGraphNode* Node, int32& OutDepth) const;
 
-	/** Quantos saltos de dado ainda faltam ate' o fim da cadeia. 0 = ninguem consome. */
+	/** How many data hops are still left until the end of the chain. 0 = nobody consumes. */
 	int32 DataChainRemaining(UEdGraphNode* Node) const;
 
 	/**
-	 * Posiciona todos os nodes de dado, depois que o grafo inteiro existe.
+	 * Positions every data node, after the whole graph exists.
 	 *
-	 * Tem que ser no fim: um Get criado por `$Variavel` nasce durante a
-	 * ligacao, e o node que o consome pode ainda nao ter posicao nenhuma. Era
-	 * o que jogava esse Get para longe -- ele era ancorado num (0,0).
+	 * It has to be at the end: a Get created by `$Variable` is born during
+	 * linking, and the node that consumes it may not have a position yet. That
+	 * was what threw that Get far away -- it was anchored at (0,0).
 	 */
 	void LayoutDataNodes();
 
 	/**
-	 * Posiciona a arvore de pose do AnimGraph.
+	 * Positions the AnimGraph's pose tree.
 	 *
-	 * O layout em colunas do EventGraph nao serve aqui: la' a cadeia e' uma
-	 * fila, e aqui e' uma arvore que converge no Output Pose. A largura de um
-	 * galho so' se sabe depois que ele inteiro existe, entao isto roda no fim,
-	 * a partir da raiz, andando para tras pelos pinos de entrada.
+	 * The EventGraph's column layout does not work here: there the chain is a
+	 * queue, and here it is a tree converging on the Output Pose. A branch's
+	 * width is only known after all of it exists, so this runs at the end,
+	 * starting at the root, walking backwards through the input pins.
 	 */
 	void LayoutAnimNodes();
 
-	/** Coloca `Node` e o que o alimenta. Devolve o Y do node. */
+	/** Places `Node` and what feeds it. Returns the node's Y. */
 	int32 PlaceAnimNode(UEdGraphNode* Node, int32 Depth, int32 RootX, int32 RootY, int32& NextRow, TSet<UEdGraphNode*>& Visited);
 
 	/**
-	 * Liga o fim da cadeia no Output Pose, quando o texto nao o escreveu.
+	 * Links the end of the chain into the Output Pose, when the text did not write it.
 	 *
-	 * Um AnimGraph que so' diz `Idle` quis dizer "Idle e' a pose". Escrever
-	 * `Output Pose` numa segunda linha e' ruido: ligar a saida no fim da cadeia
-	 * e' do plugin, como toda ligacao que o formato nao escreve.
+	 * An AnimGraph that only says `Idle` meant "Idle is the pose". Writing
+	 * `Output Pose` on a second line is noise: linking the output at the end of
+	 * the chain is the plugin's job, like every link the format does not write.
 	 */
 	void ConnectOutputPose();
 
 	/**
-	 * Liga o inicio da cadeia no Function Entry, quando o texto nao o escreveu.
+	 * Links the start of the chain into the Function Entry, when the text did not write it.
 	 *
-	 * E' o espelho do ConnectOutputPose. Num grafo de funcao -- e no Construction
-	 * Script -- a entrada ja' existe e nao se cria por linha, do mesmo jeito que
-	 * o Output Pose. Sem esta ligacao a cadeia entra inteira, compila sem um
-	 * aviso, e nunca roda: nada na tela distingue isso de um grafo certo, e a
-	 * leitura de volta so' mostra o `Function Entry` sozinho no fim.
+	 * It is the mirror of ConnectOutputPose. In a function graph -- and in the
+	 * Construction Script -- the entry already exists and is not created by a
+	 * line, just like the Output Pose. Without this link the whole chain goes in,
+	 * compiles without a warning, and never runs: nothing on screen tells that
+	 * apart from a correct graph, and reading it back only shows the
+	 * `Function Entry` alone at the end.
 	 */
 	void ConnectFunctionEntry();
 
-	/** A propriedade aceita Set vindo de Blueprint? */
+	/** Does the property accept a Set coming from Blueprint? */
 	bool IsVariableWritable(const FString& Name) const;
 
-	/** Reclama de entrada de pose vazia: pose vazia nao quebra nada, so' fica parada. */
+	/** Complains about empty pose inputs: an empty pose breaks nothing, it just stands still. */
 	void ReportEmptyPoseInputs();
 };
 
@@ -1171,8 +1151,8 @@ UEdGraphNode* FNodeScribeBuildContext::FindConsumingExecNode(UEdGraphNode* Node,
 	OutDepth = 0;
 	UEdGraphNode* Current = Node;
 
-	// O grafo de dados e' aciclico, mas um texto torto pode fechar um ciclo;
-	// o teto evita travar o editor quando isso acontece.
+	// The data graph is acyclic, but crooked text can close a cycle; the cap
+	// keeps the editor from hanging when that happens.
 	for (int32 Guard = 0; Guard < 64; ++Guard)
 	{
 		UEdGraphNode* Next = nullptr;
@@ -1245,11 +1225,11 @@ void FNodeScribeBuildContext::LayoutDataNodes()
 	TMap<UEdGraphNode*, TArray<FDataNode>> ByConsumer;
 	TArray<UEdGraphNode*> Orphans;
 
-	// Os de conversao entram junto com os que o texto pediu: para o layout eles
-	// sao nodes de dado como quaisquer outros, e quem os consome ja' e' achado
-	// pela mesma travessia. A lista e' explicita, e nao uma varredura do grafo
-	// atras de nodes de dado sem posicao, porque uma varredura arrastaria
-	// tambem o que ja' estava no grafo antes desta colagem.
+	// Conversion nodes go in together with the ones the text asked for: for
+	// the layout they are data nodes like any other, and their consumer is
+	// found by the same walk. The list is explicit, and not a sweep of the graph
+	// looking for data nodes without a position, because a sweep would also
+	// drag along what was in the graph before this paste.
 	TArray<UEdGraphNode*> DataCandidates = Result.CreatedNodes;
 	DataCandidates.Append(ConversionNodes);
 
@@ -1275,9 +1255,9 @@ void FNodeScribeBuildContext::LayoutDataNodes()
 	{
 		TArray<FDataNode>& Group = Pair.Value;
 
-		// Quem alimenta a execucao diretamente fica logo abaixo dela, e as
-		// dependencias descem a partir dai'. Lendo de cima para baixo voce vai
-		// do valor pronto para de onde ele veio.
+		// What feeds the execution directly sits right below it, and the
+		// dependencies go down from there. Reading top to bottom you go from the
+		// finished value to where it came from.
 		Group.Sort([](const FDataNode& A, const FDataNode& B) { return A.Depth < B.Depth; });
 
 		for (int32 Row = 0; Row < Group.Num(); ++Row)
@@ -1290,13 +1270,14 @@ void FNodeScribeBuildContext::LayoutDataNodes()
 		}
 	}
 
-	// Valor que ninguem consome nao tem embaixo de quem ficar. Vai para uma
-	// coluna propria depois do fim da cadeia, em vez de empilhar em (0,0).
+	// A value nobody consumes has nobody to sit under. It goes to a column of
+	// its own after the end of the chain, instead of piling up at (0,0).
 	//
-	// Aqui nao ha' node de execucao para medir distancia, entao a ordem sai da
-	// propria cadeia de dados: o node que ninguem consome fica no topo e as
-	// dependencias descem -- mesma leitura do caso com execucao. Sem isso a
-	// ordem era a de criacao, que e' a do texto, e saia de cabeca para baixo.
+	// There is no execution node here to measure distance from, so the order
+	// comes from the data chain itself: the node nobody consumes goes on top and
+	// the dependencies go down -- the same reading as the execution case.
+	// Without this the order was the creation order, which is the text's, and it
+	// came out upside down.
 	if (Orphans.Num() > 0 && Frames.Num() > 0)
 	{
 		Orphans.Sort([this](UEdGraphNode& A, UEdGraphNode& B)
@@ -1323,8 +1304,8 @@ int32 FNodeScribeBuildContext::PlaceAnimNode(
 	}
 	Visited.Add(Node);
 
-	// Um galho por pino de entrada, na ordem em que os pinos aparecem no node --
-	// que e' a ordem que o usuario ve' na tela.
+	// One branch per input pin, in the order the pins show up on the node --
+	// which is the order the user sees on screen.
 	TArray<int32> ChildRows;
 	for (UEdGraphPin* Pin : NodeScribeAnimGraph::GetPoseInputs(Node))
 	{
@@ -1341,15 +1322,16 @@ int32 FNodeScribeBuildContext::PlaceAnimNode(
 	int32 Y = 0;
 	if (ChildRows.Num() == 0)
 	{
-		// Ponta da arvore: ganha a proxima linha livre. E' daqui que a altura
-		// do grafo inteiro sai.
+		// Tip of the tree: gets the next free row. The height of the whole graph
+		// comes from here.
 		Y = RootY + (NextRow * BranchRowHeight);
 		++NextRow;
 	}
 	else
 	{
-		// No meio, fica na altura media do que o alimenta -- o fio entra reto
-		// quando ha' um so' galho, e centralizado quando ha' varios.
+		// In the middle, it sits at the average height of what feeds it -- the
+		// wire comes in straight when there is a single branch, and centred when
+		// there are several.
 		int32 Sum = 0;
 		for (int32 Row : ChildRows)
 		{
@@ -1358,7 +1340,7 @@ int32 FNodeScribeBuildContext::PlaceAnimNode(
 		Y = Sum / ChildRows.Num();
 	}
 
-	// O node adotado (o Output Pose) fica onde esta': ele e' a origem.
+	// The adopted node (the Output Pose) stays where it is: it is the origin.
 	if (!AdoptedNodes.Contains(Node))
 	{
 		Node->NodePosX = RootX - (Depth * ColumnWidth);
@@ -1385,9 +1367,9 @@ void FNodeScribeBuildContext::LayoutAnimNodes()
 	TSet<UEdGraphNode*> Visited;
 	PlaceAnimNode(Root, 0, Root->NodePosX, Root->NodePosY, NextRow, Visited);
 
-	// O que nao chegou ao Output Pose nao esta' na arvore -- galho que o texto
-	// criou e nao ligou em nada. Fica numa faixa propria abaixo, visivel, em
-	// vez de empilhado por cima da arvore.
+	// What did not reach the Output Pose is not in the tree -- a branch the
+	// text created and linked to nothing. It goes to a band of its own below,
+	// visible, instead of piled on top of the tree.
 	int32 LooseRow = NextRow + 1;
 	for (const TWeakObjectPtr<UEdGraphNode>& Weak : AnimNodes)
 	{
@@ -1419,8 +1401,8 @@ void FNodeScribeBuildContext::ConnectOutputPose()
 
 	if (RootPose->LinkedTo.Num() == 0)
 	{
-		// Frames[0] e' o nivel raiz: o que sobrou ali e' a saida do ultimo node
-		// que o texto pos no fio principal.
+		// Frames[0] is the root level: what is left there is the output of the
+		// last node the text put on the main wire.
 		if (UEdGraphPin* End = Frames[0].PendingExec.Resolve())
 		{
 			if (NodeScribeAnimGraph::IsPosePin(End))
@@ -1432,10 +1414,10 @@ void FNodeScribeBuildContext::ConnectOutputPose()
 
 	if (RootPose->LinkedTo.Num() == 0 && AnimNodes.Num() > 0)
 	{
-		// O grafo tem nodes de anim e mesmo assim nada chega na saida. Sem isto
-		// o aviso nao sairia: o Output Pose nao e' node criado por esta colagem,
-		// e ReportEmptyPoseInputs so' olha os que sao.
-		AddWarning(0, TEXT("Nada chegou no Output Pose. O personagem fica na pose de referencia."));
+		// The graph has anim nodes and still nothing reaches the output. Without
+		// this the warning would not come out: the Output Pose is not a node
+		// created by this paste, and ReportEmptyPoseInputs only looks at those.
+		AddWarning(0, TEXT("Nothing reached the Output Pose. The character stays in the reference pose."));
 	}
 }
 
@@ -1458,31 +1440,31 @@ void FNodeScribeBuildContext::ConnectFunctionEntry()
 
 	if (!Entry)
 	{
-		// EventGraph nao tem entrada: la' quem comeca a cadeia e' o evento, e o
-		// texto o escreve.
+		// An EventGraph has no entry: there, what starts the chain is the event,
+		// and the text writes it.
 		return;
 	}
 
-	UEdGraphPin* Saida = nullptr;
+	UEdGraphPin* EntryOutput = nullptr;
 	for (UEdGraphPin* Pin : Entry->Pins)
 	{
 		if (Pin->Direction == EGPD_Output && IsExecPin(Pin))
 		{
-			Saida = Pin;
+			EntryOutput = Pin;
 			break;
 		}
 	}
 
-	if (!Saida)
+	if (!EntryOutput)
 	{
 		return;
 	}
 
-	// O primeiro node criado que ainda tem entrada de execucao livre e' o topo
-	// da cadeia: a ordem de criacao e' a ordem do texto, e tudo que vem depois
-	// dele ja' foi ligado por quem o precede.
-	UEdGraphNode* Primeiro = nullptr;
-	UEdGraphPin* Entrada = nullptr;
+	// The first created node that still has a free execution input is the top
+	// of the chain: creation order is the text's order, and everything after it
+	// was already linked by what precedes it.
+	UEdGraphNode* FirstNode = nullptr;
+	UEdGraphPin* FirstInput = nullptr;
 
 	for (UEdGraphNode* Node : Result.CreatedNodes)
 	{
@@ -1490,35 +1472,36 @@ void FNodeScribeBuildContext::ConnectFunctionEntry()
 		{
 			if (Pin->Direction == EGPD_Input && IsExecPin(Pin) && Pin->LinkedTo.Num() == 0)
 			{
-				Primeiro = Node;
-				Entrada = Pin;
+				FirstNode = Node;
+				FirstInput = Pin;
 				break;
 			}
 		}
 
-		if (Primeiro)
+		if (FirstNode)
 		{
 			break;
 		}
 	}
 
-	if (!Primeiro)
+	if (!FirstNode)
 	{
 		return;
 	}
 
-	if (Saida->LinkedTo.Num() > 0)
+	if (EntryOutput->LinkedTo.Num() > 0)
 	{
-		// Acrescentar a uma funcao que ja' tem cadeia: sequestrar a entrada
-		// apagaria o que estava la'. A cadeia nova fica solta, e o aviso diz.
+		// Appending to a function that already has a chain: hijacking the entry
+		// would erase what was there. The new chain stays loose, and the warning
+		// says so.
 		AddWarning(0, FString::Printf(
-			TEXT("`%s` entrou solto: o Function Entry ja' aponta para outra cadeia. ")
-			TEXT("Ligue na mao, ou reescreva o grafo com `substituir`."),
-			*Primeiro->GetNodeTitle(ENodeTitleType::ListView).ToString()));
+			TEXT("`%s` went in loose: the Function Entry already points at another chain. ")
+			TEXT("Link it by hand, or rewrite the graph with `replace`."),
+			*FirstNode->GetNodeTitle(ENodeTitleType::ListView).ToString()));
 		return;
 	}
 
-	Connect(Saida, Entrada, 0);
+	Connect(EntryOutput, FirstInput, 0);
 }
 
 void FNodeScribeBuildContext::ReportEmptyPoseInputs()
@@ -1554,15 +1537,15 @@ void FNodeScribeBuildContext::ReportEmptyPoseInputs()
 		return;
 	}
 
-	// Pose vazia e' o buraco silencioso deste tipo de grafo: compila, roda, e o
-	// personagem simplesmente fica na pose de referencia -- de bracos abertos.
+	// An empty pose is the silent hole of this kind of graph: it compiles, runs,
+	// and the character simply stays in the reference pose -- arms spread.
 	AddWarning(0, FString::Printf(
-		TEXT("Entrada de pose sem nada ligado: %s. O que sair dali e' a pose de referencia."),
+		TEXT("Pose input with nothing linked: %s. What comes out of there is the reference pose."),
 		*FString::Join(Empty, TEXT(", "))));
 }
 
 // ---------------------------------------------------------------------------
-// Diagnosticos
+// Diagnostics
 // ---------------------------------------------------------------------------
 
 void FNodeScribeBuildContext::AddInfo(int32 Line, const FString& Message)
@@ -1589,10 +1572,10 @@ UClass* FNodeScribeBuildContext::GetSelfClass() const
 		return nullptr;
 	}
 
-	// O esqueleto reflete o Blueprint como ele esta' agora, com as variaveis e
-	// dispatchers que voce acabou de criar. GeneratedClass so' alcanca o que ja'
-	// foi compilado, e ninguem compila antes de colar -- e' o esqueleto que o
-	// proprio editor usa para montar o grafo.
+	// The skeleton reflects the Blueprint as it is now, with the variables and
+	// dispatchers you just created. GeneratedClass only reaches what was
+	// already compiled, and nobody compiles before pasting -- the skeleton is
+	// what the editor itself uses to build the graph.
 	if (Blueprint->SkeletonGeneratedClass)
 	{
 		return Blueprint->SkeletonGeneratedClass;
@@ -1617,8 +1600,8 @@ bool FNodeScribeBuildContext::IsBlueprintVariable(const FString& Name) const
 		return false;
 	}
 
-	// Olhar a classe (e nao so' a lista de variaveis do Blueprint) faz com que
-	// variaveis herdadas de um pai em C++ tambem sejam reconhecidas.
+	// Looking at the class (and not only at the Blueprint's variable list)
+	// makes variables inherited from a C++ parent be recognised too.
 	UClass* SelfClass = GetSelfClass();
 	if (!SelfClass)
 	{
@@ -1639,13 +1622,13 @@ UClass* FNodeScribeBuildContext::FindTargetClassFromArgs(const FNodeScribeStatem
 		}
 
 		const FString PinName = FNodeScribeCatalog::Normalize(Arg.PinName);
-		if (PinName != TEXT("target") && PinName != TEXT("alvo") && PinName != TEXT("self"))
+		if (PinName != TEXT("target") && PinName != TEXT("self"))
 		{
 			continue;
 		}
 
-		// Consulta sem efeito colateral: `ResolveReference` criaria nodes, e
-		// aqui ainda estamos decidindo se este node existe.
+		// A query with no side effects: `ResolveReference` would create nodes,
+		// and here we are still deciding whether this node exists.
 		FString BaseName = Arg.Value;
 		FString Ignored;
 		BaseName.Split(TEXT("."), &BaseName, &Ignored);
@@ -1688,8 +1671,8 @@ FProperty* FNodeScribeBuildContext::FindPropertyByFriendlyName(UClass* Class, co
 			continue;
 		}
 
-		// O nome interno de um bool leva `b` na frente, e o nome que aparece na
-		// tela nao. `Show Mouse Cursor` tem que achar `bShowMouseCursor`.
+		// A bool's internal name has a `b` in front, and the name shown on
+		// screen does not. `Show Mouse Cursor` has to find `bShowMouseCursor`.
 		if (FNodeScribeCatalog::Normalize(Property->GetName()) == Wanted
 			|| FNodeScribeCatalog::Normalize(Property->GetDisplayNameText().ToString()) == Wanted)
 		{
@@ -1701,7 +1684,7 @@ FProperty* FNodeScribeBuildContext::FindPropertyByFriendlyName(UClass* Class, co
 }
 
 // ---------------------------------------------------------------------------
-// Pinos
+// Pins
 // ---------------------------------------------------------------------------
 
 UEdGraphPin* FNodeScribeBuildContext::FindExecInput(UEdGraphNode* Node)
@@ -1755,7 +1738,7 @@ TArray<UEdGraphPin*> FNodeScribeBuildContext::GetFlowOutputs(UEdGraphNode* Node)
 
 UEdGraphPin* FNodeScribeBuildContext::FindPrimaryOutput(UEdGraphNode* Node)
 {
-	// `ReturnValue` e' o nome canonico do resultado de uma chamada de funcao.
+	// `ReturnValue` is the canonical name of a function call's result.
 	for (UEdGraphPin* Pin : Node->Pins)
 	{
 		if (Pin->Direction == EGPD_Output && Pin->PinName == UEdGraphSchema_K2::PN_ReturnValue)
@@ -1777,30 +1760,42 @@ UEdGraphPin* FNodeScribeBuildContext::FindPrimaryOutput(UEdGraphNode* Node)
 
 UEdGraphPin* FNodeScribeBuildContext::FindPinByFuzzyName(UEdGraphNode* Node, const FString& Name, EEdGraphPinDirection Direction) const
 {
-	const FString Wanted = ResolvePinAlias(Name);
+	// The name as written first, the alias second. `Target` is an alias for the
+	// self pin, but a static function may have a parameter literally called
+	// `Target` -- `Get Blackboard (Target = $controller)` is one. Trying only the
+	// alias looked for `self`, found nothing, and answered "the node has no pin
+	// `Target`. Input pins: Target", which is what the reader had just written.
+	TArray<FString, TInlineAllocator<2>> Attempts;
+	Attempts.Add(FNodeScribeCatalog::Normalize(Name));
+	Attempts.AddUnique(ResolvePinAlias(Name));
 
-	for (UEdGraphPin* Pin : Node->Pins)
+	for (const FString& Wanted : Attempts)
 	{
-		if (Pin->Direction != Direction || Pin->bHidden)
+		for (UEdGraphPin* Pin : Node->Pins)
 		{
-			continue;
-		}
+			if (Pin->Direction != Direction || Pin->bHidden)
+			{
+				continue;
+			}
 
-		if (FNodeScribeCatalog::Normalize(Pin->PinName.ToString()) == Wanted)
-		{
-			return Pin;
-		}
+			if (FNodeScribeCatalog::Normalize(Pin->PinName.ToString()) == Wanted)
+			{
+				return Pin;
+			}
 
-		if (!Pin->PinFriendlyName.IsEmpty()
-			&& FNodeScribeCatalog::Normalize(Pin->PinFriendlyName.ToString()) == Wanted)
-		{
-			return Pin;
+			if (!Pin->PinFriendlyName.IsEmpty()
+				&& FNodeScribeCatalog::Normalize(Pin->PinFriendlyName.ToString()) == Wanted)
+			{
+				return Pin;
+			}
 		}
 	}
 
-	// Convencao de codigo da Unreal: bool se chama `bXYOverride`, e a interface
-	// mostra "XY Override". Ninguem digita o `b`, e o pino nem sempre tem nome
-	// amigavel para cobrir isso.
+	const FString Wanted = ResolvePinAlias(Name);
+
+	// Unreal code convention: a bool is called `bXYOverride`, and the interface
+	// shows "XY Override". Nobody types the `b`, and the pin does not always
+	// have a friendly name to cover that.
 	for (UEdGraphPin* Pin : Node->Pins)
 	{
 		if (Pin->Direction != Direction || Pin->bHidden)
@@ -1823,7 +1818,7 @@ UEdGraphPin* FNodeScribeBuildContext::TrySplitToFindPin(UEdGraphNode* Node, cons
 {
 	const FString Wanted = FNodeScribeCatalog::Normalize(PinPath);
 
-	// Copia: dividir um pino mexe em Node->Pins durante a iteracao.
+	// A copy: splitting a pin changes Node->Pins during the iteration.
 	TArray<UEdGraphPin*> Candidates = Node->Pins;
 
 	auto IsSplittableStruct = [this](UEdGraphPin* Pin)
@@ -1833,9 +1828,9 @@ UEdGraphPin* FNodeScribeBuildContext::TrySplitToFindPin(UEdGraphNode* Node, cons
 			&& Schema->CanSplitStructPin(*Pin);
 	};
 
-	// --- 1a tentativa: o nome pedido comeca com o nome do pino ------------
+	// --- 1st attempt: the requested name starts with the pin's name -------
 	//
-	// `Selected Key Key` comeca com `Selected Key`: e' parte dessa struct.
+	// `Selected Key Key` starts with `Selected Key`: it is part of that struct.
 	for (UEdGraphPin* Pin : Candidates)
 	{
 		if (!IsSplittableStruct(Pin))
@@ -1861,16 +1856,16 @@ UEdGraphPin* FNodeScribeBuildContext::TrySplitToFindPin(UEdGraphNode* Node, cons
 		}
 	}
 
-	// --- 2a tentativa: o nome pedido e' um campo da struct ----------------
+	// --- 2nd attempt: the requested name is a field of the struct ---------
 	//
-	// `$velocidade.Z` com o pino chamado `ReturnValue`. O prefixo nao ajuda --
-	// "z" nao comeca com "returnvalue" --, e o `Get Velocity` de um ator e' o
-	// caso mais comum que existe: o pino de retorno de uma funcao quase nunca
-	// tem nome proprio.
+	// `$velocity.Z` with the pin called `ReturnValue`. The prefix does not help
+	// -- "z" does not start with "returnvalue" --, and an actor's `Get Velocity`
+	// is the most common case there is: a function's return pin almost never
+	// has a name of its own.
 	//
-	// Perguntamos a struct antes de dividir. Dividir para descobrir mudaria o
-	// grafo procurando, e um pino dividido a toa fica visivelmente diferente do
-	// que o texto pediu.
+	// We ask the struct before splitting. Splitting to find out would change the
+	// graph while searching, and a pin split for nothing looks visibly
+	// different from what the text asked for.
 	TArray<UEdGraphPin*> WithField;
 	for (UEdGraphPin* Pin : Candidates)
 	{
@@ -1897,8 +1892,8 @@ UEdGraphPin* FNodeScribeBuildContext::TrySplitToFindPin(UEdGraphNode* Node, cons
 		}
 	}
 
-	// Dois pinos de struct com um campo `Z` cada: dividir um deles seria
-	// escolher, e o node escolhido compila e roda com o valor do outro.
+	// Two struct pins with a `Z` field each: splitting one of them would be
+	// choosing, and the chosen node compiles and runs with the other's value.
 	if (WithField.Num() > 1)
 	{
 		return nullptr;
@@ -1916,11 +1911,11 @@ UEdGraphPin* FNodeScribeBuildContext::TrySplitToFindPin(UEdGraphNode* Node, cons
 			return Found;
 		}
 
-		// O sub-pino nasce com o nome do pai colado no do campo: dividir
-		// `ReturnValue` da' `ReturnValue_X`, `ReturnValue_Y`, `ReturnValue_Z`.
-		// Procurar por `Z` puro nao acha nenhum deles -- e a busca parava aqui,
-		// depois de ja' ter dividido o pino, o que deixava o grafo mexido e a
-		// ligacao por fazer.
+		// The sub-pin is born with the parent's name glued to the field's:
+		// splitting `ReturnValue` gives `ReturnValue_X`, `ReturnValue_Y`,
+		// `ReturnValue_Z`. Looking for a bare `Z` finds none of them -- and the
+		// search used to stop here, after having already split the pin, which
+		// left the graph changed and the link undone.
 		for (UEdGraphPin* Sub : Parent->SubPins)
 		{
 			if (!Sub)
@@ -1946,17 +1941,17 @@ void FNodeScribeBuildContext::Connect(UEdGraphPin* From, UEdGraphPin* To, int32 
 		return;
 	}
 
-	// TryCreateConnection do schema K2 insere sozinho um node de conversao
-	// quando os tipos sao compativeis por cast implicito (int -> float, etc).
+	// The K2 schema's TryCreateConnection inserts a conversion node by itself
+	// when the types are compatible through an implicit cast (int -> float, etc).
 	if (Schema->TryCreateConnection(From, To))
 	{
-		// Quando isso acontece, os dois pinos nao ficam ligados um no outro: o
-		// que passou a alimentar `To` e' a saida do node de conversao. E' assim
-		// que ele se deixa reconhecer -- e precisa ser reconhecido aqui, porque
-		// depois da ligacao nada mais distingue esse node de um que o texto
-		// pediu. Sem isso ele fica na posicao em que os dois lados estavam
-		// agora, que LayoutDataNodes() logo abandona, e o resultado e' um node
-		// solto no meio do nada com dois fios atravessando o grafo inteiro.
+		// When that happens, the two pins are not linked to each other: what
+		// now feeds `To` is the conversion node's output. That is how it can be
+		// recognised -- and it needs to be recognised here, because after the
+		// link nothing else tells that node apart from one the text asked for.
+		// Without this it stays at the position both sides had right now, which
+		// LayoutDataNodes() soon abandons, and the result is a loose node in the
+		// middle of nowhere with two wires crossing the whole graph.
 		if (!From->LinkedTo.Contains(To))
 		{
 			const UEdGraphNode* SourceNode = From->GetOwningNodeUnchecked();
@@ -1972,11 +1967,11 @@ void FNodeScribeBuildContext::Connect(UEdGraphPin* From, UEdGraphPin* To, int32 
 	}
 	else
 	{
-		// Dizer os dois tipos e' o que resolve o caso mais confuso: um nome que
-		// existe, mas nao e' o que voce quis dizer. `$Slot` acha o `Slot` que
-		// todo UWidget herda, e nao a variavel que voce ia criar.
+		// Stating both types is what solves the most confusing case: a name that
+		// exists, but is not what you meant. `$Slot` finds the `Slot` every
+		// UWidget inherits, not the variable you were about to create.
 		AddWarning(Line, FString::Printf(
-			TEXT("`%s` e' %s, e o pino `%s` espera %s. A ligacao nao foi feita."),
+			TEXT("`%s` is %s, and pin `%s` expects %s. The link was not made."),
 			*From->PinName.ToString(),
 			*UEdGraphSchema_K2::TypeToText(From->PinType).ToString(),
 			*To->PinName.ToString(),
@@ -1985,18 +1980,19 @@ void FNodeScribeBuildContext::Connect(UEdGraphPin* From, UEdGraphPin* To, int32 
 }
 
 // ---------------------------------------------------------------------------
-// Valores e referencias
+// Values and references
 // ---------------------------------------------------------------------------
 
 void FNodeScribeBuildContext::ApplyLiteral(UEdGraphPin* Pin, const FString& Value, int32 Line)
 {
-	// `?` e' um buraco declarado: "essa escolha e' sua, nao minha".
-	// Deixamos o pino vazio de proposito -- se for obrigatorio, o Blueprint
-	// nao compila, e a pendencia aparece sozinha em vez de virar bug silencioso.
+	// `?` is a declared hole: "this choice is yours, not mine".
+	// We leave the pin empty on purpose -- if it is required, the Blueprint does
+	// not compile, and the pending item shows up by itself instead of becoming a
+	// silent bug.
 	if (Value == TEXT("?") || Value.StartsWith(TEXT("?")))
 	{
 		AddWarning(Line, FString::Printf(
-			TEXT("Pino `%s` ficou vazio esperando sua escolha."), *Pin->PinName.ToString()));
+			TEXT("Pin `%s` was left empty, waiting for your choice."), *Pin->PinName.ToString()));
 		return;
 	}
 
@@ -2011,12 +2007,12 @@ void FNodeScribeBuildContext::ApplyLiteral(UEdGraphPin* Pin, const FString& Valu
 			}
 
 			AddWarning(Line, FString::Printf(
-				TEXT("Nao achei o asset `%s`. Escolha no pino `%s`."), *Value, *Pin->PinName.ToString()));
+				TEXT("Could not find asset `%s`. Pick it on pin `%s`."), *Value, *Pin->PinName.ToString()));
 			return;
 		}
 
-		// Pino de classe aceita nome curto: `WBP_LinhaRemapear` acha a classe
-		// gerada `WBP_LinhaRemapear_C`. Mesmo atalho que `Cast to BP_Boss` usa.
+		// A class pin accepts a short name: `WBP_RemapRow` finds the generated
+		// class `WBP_RemapRow_C`. Same shortcut `Cast to BP_Boss` uses.
 		const FName Category = Pin->PinType.PinCategory;
 		if (Category == UEdGraphSchema_K2::PC_Class || Category == UEdGraphSchema_K2::PC_SoftClass)
 		{
@@ -2027,9 +2023,9 @@ void FNodeScribeBuildContext::ApplyLiteral(UEdGraphPin* Pin, const FString& Valu
 			}
 		}
 
-		// Sem caminho completo nao da' para saber qual asset e'. Nao chutamos.
+		// Without a full path there is no way to know which asset it is. We do not guess.
 		AddWarning(Line, FString::Printf(
-			TEXT("`%s` nao e' um caminho de asset. Escolha no pino `%s` do node."),
+			TEXT("`%s` is not an asset path. Pick it on the node's `%s` pin."),
 			*Value, *Pin->PinName.ToString()));
 		return;
 	}
@@ -2039,9 +2035,9 @@ void FNodeScribeBuildContext::ApplyLiteral(UEdGraphPin* Pin, const FString& Valu
 
 UEdGraphPin* FNodeScribeBuildContext::ResolveReference(const FString& Name, int32 Line, UEdGraphPin* ConsumerPin)
 {
-	// `$nome` sozinho pega a saida principal do node. Quando o node tem varias
-	// saidas de dado -- um evento com parametros, um Break de struct, uma funcao
-	// com out params -- `$nome.Pino` diz qual delas.
+	// `$name` alone takes the node's main output. When the node has several
+	// data outputs -- an event with parameters, a struct Break, a function with
+	// out params -- `$name.Pin` says which one.
 	FString BaseName = Name;
 	FString PinPath;
 
@@ -2082,10 +2078,10 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveReference(const FString& Name, int3
 		}
 	}
 
-	AnotaNomeNaoResolvido(TEXT("saida"), PinPath, TEXT("$") + BaseName);
+	RecordUnresolvedName(TEXT("output"), PinPath, TEXT("$") + BaseName);
 
 	AddError(Line, FString::Printf(
-		TEXT("`$%s` nao tem saida `%s`. Saidas de dado: %s"),
+		TEXT("`$%s` has no output `%s`. Data outputs: %s"),
 		*BaseName, *PinPath, *FString::Join(Available, TEXT(", "))));
 
 	return nullptr;
@@ -2101,16 +2097,16 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 		}
 	}
 
-	// Conveniencia: `$Health` sem declaracao previa vira um Get da variavel do
-	// Blueprint, criado e posicionado automaticamente.
+	// Convenience: `$Health` without a prior declaration becomes a Get of the
+	// Blueprint's variable, created and positioned automatically.
 	if (IsBlueprintVariable(Name))
 	{
 		UK2Node_VariableGet* GetNode = AllocateNode<UK2Node_VariableGet>();
 		GetNode->VariableReference.SetSelfMember(FName(*Name));
 		FinalizeNode(GetNode);
 
-		// A posicao fica para LayoutDataNodes(): aqui o node que consome este
-		// Get pode ainda nem ter sido posicionado.
+		// The position is left to LayoutDataNodes(): here the node that
+		// consumes this Get may not even have been positioned yet.
 		Result.CreatedNodes.Add(GetNode);
 		AutoCreatedGets.Add(GetNode);
 
@@ -2123,26 +2119,26 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 		return OutputPin;
 	}
 
-	// A causa ja' foi relatada la' atras; repetir "nao existe" aqui mandaria o
-	// usuario procurar o problema no lugar errado.
+	// The cause was already reported further back; repeating "does not exist"
+	// here would send the user looking for the problem in the wrong place.
 	if (const int32* FailedLine = FailedOutputs.Find(Name))
 	{
 		AddError(Line, FString::Printf(
-			TEXT("`$%s` vem da linha %d, que nao resolveu. Corrija aquela linha primeiro."),
+			TEXT("`$%s` comes from line %d, which did not resolve. Fix that line first."),
 			*Name, *FailedLine));
 
 		return nullptr;
 	}
 
-	// Antes de tratar como variavel: o nome pode ser de uma linha anterior que
-	// simplesmente nao foi nomeada. Criar uma variavel nesse caso seria obedecer
-	// a letra e ignorar a intencao -- e o texto costuma vir de quem escreveu
-	// `evento X` e logo abaixo `$X`.
+	// Before treating it as a variable: the name may belong to an earlier line
+	// that simply was not named. Creating a variable in that case would obey
+	// the letter and ignore the intent -- and the text usually comes from
+	// someone who wrote `event X` and right below it `$X`.
 	{
 		const FString Wanted = FNodeScribeCatalog::Normalize(Name);
 
-		// Nome curto casa por acaso com qualquer coisa; exigir tres letras
-		// evita transformar coincidencia em diagnostico.
+		// A short name matches anything by chance; requiring three letters keeps
+		// a coincidence from turning into a diagnostic.
 		if (Wanted.Len() >= 3)
 		{
 			for (const FUnnamedLine& Candidate : UnnamedLines)
@@ -2150,8 +2146,8 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 				if (FNodeScribeCatalog::Normalize(Candidate.Expression).Contains(Wanted))
 				{
 					AddError(Line, FString::Printf(
-						TEXT("`$%s` nao existe, mas a linha %d parece ser o que voce quis. ")
-						TEXT("Para poder referencia-la, de' nome a ela: escreva `%s = ` no comeco dela."),
+						TEXT("`$%s` does not exist, but line %d looks like what you meant. ")
+						TEXT("To reference it, give it a name: write `%s = ` at its start."),
 						*Name, Candidate.Line, *Name));
 
 					return nullptr;
@@ -2160,22 +2156,23 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 		}
 	}
 
-	// A variavel ainda nao existe. Em vez de descartar a ligacao, criamos o Get
-	// nao resolvido -- e' o que a Unreal faz ao colar nodes entre Blueprints
-	// diferentes. O grafo acusa o erro e o botao direito no node oferece criar
-	// a variavel, o que e' um clique contra reconstruir a cadeia na mao.
+	// The variable does not exist yet. Instead of dropping the link, we create
+	// the unresolved Get -- it is what Unreal does when pasting nodes between
+	// different Blueprints. The graph flags the error and right-clicking the
+	// node offers to create the variable, which is one click against rebuilding
+	// the chain by hand.
 	//
-	// Isso nao afrouxa a regra de nao chutar: o Blueprint continua sem
-	// compilar ate' voce agir. So' muda onde a pendencia fica visivel.
+	// This does not loosen the no-guessing rule: the Blueprint still does not
+	// compile until you act. It only changes where the pending item is visible.
 	if (ConsumerPin)
 	{
 		UK2Node_VariableGet* GetNode = AllocateNode<UK2Node_VariableGet>();
 		GetNode->VariableReference.SetSelfMember(FName(*Name));
 		FinalizeNode(GetNode);
 
-		// Sem a propriedade, AllocateDefaultPins nao cria pino nenhum. O tipo
-		// vem de quem vai consumir o valor: e' a unica fonte disponivel aqui, e
-		// e' exatamente o tipo que a variavel precisa ter.
+		// Without the property, AllocateDefaultPins creates no pin at all. The
+		// type comes from whoever will consume the value: it is the only source
+		// available here, and it is exactly the type the variable needs to have.
 		UEdGraphPin* OutputPin = FindPrimaryOutput(GetNode);
 		if (!OutputPin)
 		{
@@ -2186,8 +2183,8 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 		AutoCreatedGets.Add(GetNode);
 
 		AddWarning(Line, FString::Printf(
-			TEXT("`%s` nao existe neste Blueprint. Criei o Get assim mesmo: o grafo vai acusar o erro, ")
-			TEXT("e o botao direito no node oferece criar a variavel."), *Name));
+			TEXT("`%s` does not exist in this Blueprint. I created the Get anyway: the graph will flag the error, ")
+			TEXT("and right-clicking the node offers to create the variable."), *Name));
 
 		if (OutputPin)
 		{
@@ -2198,7 +2195,7 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 	}
 
 	AddError(Line, FString::Printf(
-		TEXT("`$%s` nao existe: nao e' saida de nenhuma linha anterior nem variavel deste Blueprint."), *Name));
+		TEXT("`$%s` does not exist: it is neither the output of an earlier line nor a variable of this Blueprint."), *Name));
 
 	return nullptr;
 }
@@ -2209,13 +2206,13 @@ void FNodeScribeBuildContext::RegisterOutput(const FString& Name, UEdGraphNode* 
 	if (!OutputPin)
 	{
 		AddWarning(Line, FString::Printf(
-			TEXT("`%s` nao foi registrado: esse node nao tem saida de dado."), *Name));
+			TEXT("`%s` was not registered: this node has no data output."), *Name));
 		return;
 	}
 
 	if (NamedOutputs.Contains(Name))
 	{
-		AddWarning(Line, FString::Printf(TEXT("`%s` foi definido de novo; vale o ultimo."), *Name));
+		AddWarning(Line, FString::Printf(TEXT("`%s` was defined again; the last one wins."), *Name));
 	}
 
 	NamedOutputs.Add(Name, FPinRef(OutputPin));
@@ -2225,10 +2222,10 @@ bool FNodeScribeBuildContext::FindNodeSetting(UEdGraphNode* Node, const FString&
 {
 	const FString Wanted = FNodeScribeCatalog::Normalize(Name);
 
-	// Duas camadas: as propriedades do node, e as de dentro da struct que ele
-	// embrulha. Num `UAnimGraphNode_SequencePlayer` o que interessa mora na
-	// segunda -- `bLoopAnimation` e `PlayRate` sao campos do `FAnimNode_*`, e o
-	// node so' a carrega.
+	// Two layers: the node's properties, and the ones inside the struct it
+	// wraps. In a `UAnimGraphNode_SequencePlayer` what matters lives in the
+	// second -- `bLoopAnimation` and `PlayRate` are fields of the `FAnimNode_*`,
+	// and the node just carries it.
 	TArray<FNodeSetting> Found;
 
 	auto Consider = [&](FProperty* Property, void* Container)
@@ -2254,9 +2251,9 @@ bool FNodeScribeBuildContext::FindNodeSetting(UEdGraphNode* Node, const FString&
 
 		if (FStructProperty* AsStruct = CastField<FStructProperty>(Property))
 		{
-			// So' a struct de anim se abre -- e' onde `Loop Animation` mora. Ver
-			// IsAnimNodeStruct: abrir qualquer uma faria os campos de um `FGuid`
-			// virarem opcoes chamadas `A`, `B`, `C` e `D`.
+			// Only the anim struct opens up -- it is where `Loop Animation`
+			// lives. See IsAnimNodeStruct: opening any of them would turn the
+			// fields of an `FGuid` into options called `A`, `B`, `C` and `D`.
 			if (IsNodeSetting(Property) && IsAnimNodeStruct(AsStruct))
 			{
 				void* StructPtr = AsStruct->ContainerPtrToValuePtr<void>(Node);
@@ -2271,8 +2268,8 @@ bool FNodeScribeBuildContext::FindNodeSetting(UEdGraphNode* Node, const FString&
 		Consider(Property, Node);
 	}
 
-	// Duas propriedades com o mesmo nome de tela, em camadas diferentes: escolher
-	// uma acerta metade das vezes, e a metade errada grava valor em asset.
+	// Two properties with the same display name, in different layers: picking
+	// one is right half the time, and the wrong half writes a value into an asset.
 	if (Found.Num() != 1)
 	{
 		return false;
@@ -2284,17 +2281,17 @@ bool FNodeScribeBuildContext::FindNodeSetting(UEdGraphNode* Node, const FString&
 
 void FNodeScribeBuildContext::ApplyLabelSettings(UEdGraphNode* Node, const FNodeScribeStatement& Statement)
 {
-	// Um rotulo nao tem pino: estado, conduto e transicao se ajustam so' pelo
-	// painel de detalhes. Por isso aqui e' so' a metade de opcao do
-	// ApplyArguments -- nao ha' para onde mandar um argumento posicional, e um
-	// `$referencia` nao teria fio para percorrer.
+	// A label has no pins: states, conduits and transitions are set up only
+	// through the details panel. That is why this is only the option half of
+	// ApplyArguments -- there is nowhere to send a positional argument, and a
+	// `$reference` would have no wire to follow.
 	for (const FNodeScribeArg& Arg : Statement.Args)
 	{
 		if (Arg.PinName.IsEmpty())
 		{
 			AddError(Statement.LineNumber, FString::Printf(
-				TEXT("`%s` em `%s:` nao tem nome. Um rotulo so' aceita opcao nomeada: ")
-				TEXT("`(Nome = valor)`."), *Arg.Value, *Statement.Label));
+				TEXT("`%s` in `%s:` has no name. A label only accepts named options: ")
+				TEXT("`(Name = value)`."), *Arg.Value, *Statement.Label));
 			continue;
 		}
 
@@ -2304,16 +2301,16 @@ void FNodeScribeBuildContext::ApplyLabelSettings(UEdGraphNode* Node, const FNode
 		if (!FindNodeSetting(Node, Arg.PinName, Setting, Available))
 		{
 			AddError(Statement.LineNumber, FString::Printf(
-				TEXT("`%s` nao e' opcao de `%s:`. Opcoes: %s"),
+				TEXT("`%s` is not an option of `%s:`. Options: %s"),
 				*Arg.PinName, *Statement.Label,
-				Available.Num() > 0 ? *FString::Join(Available, TEXT(", ")) : TEXT("nenhuma")));
+				Available.Num() > 0 ? *FString::Join(Available, TEXT(", ")) : TEXT("none")));
 			continue;
 		}
 
 		if (Arg.bIsReference)
 		{
 			AddError(Statement.LineNumber, FString::Printf(
-				TEXT("`%s` e' opcao do painel de detalhes: aceita valor fixo, nao `$%s`."),
+				TEXT("`%s` is a details panel option: it takes a fixed value, not `$%s`."),
 				*Arg.PinName, *Arg.Value));
 			continue;
 		}
@@ -2324,7 +2321,7 @@ void FNodeScribeBuildContext::ApplyLabelSettings(UEdGraphNode* Node, const FNode
 		if (!TextToValue(Setting.Property, Setting.ValuePtr, Arg.Value, Error))
 		{
 			AddError(Statement.LineNumber, FString::Printf(
-				TEXT("`%s = %s` nao entrou: %s"), *Arg.PinName, *Arg.Value, *Error));
+				TEXT("`%s = %s` did not go in: %s"), *Arg.PinName, *Arg.Value, *Error));
 			continue;
 		}
 
@@ -2334,7 +2331,7 @@ void FNodeScribeBuildContext::ApplyLabelSettings(UEdGraphNode* Node, const FNode
 
 void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScribeStatement& Statement)
 {
-	// Pinos de entrada elegiveis, na ordem, para resolver argumentos posicionais.
+	// Eligible input pins, in order, to resolve positional arguments.
 	TArray<UEdGraphPin*> PositionalPins;
 	for (UEdGraphPin* Pin : Node->Pins)
 	{
@@ -2356,12 +2353,12 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 
 			if (!Pin)
 			{
-				// Nem tudo que se ajusta num node e' pino. `Loop Animation` e
-				// `Play Rate` de um asset player, `Blend Time` de uma transicao:
-				// ficam no painel de detalhes, e antes disto a resposta era "o
-				// node nao tem pino `Loop Animation`. Pinos de entrada:" -- com
-				// a lista vazia, porque um Sequence Player nao tem nenhum. Quem
-				// lesse aquilo concluiria que a Engine nao tem essa opcao.
+				// Not everything you set on a node is a pin. `Loop Animation` and
+				// `Play Rate` of an asset player, `Blend Time` of a transition:
+				// they live in the details panel, and before this the answer was
+				// "the node has no pin `Loop Animation`. Input pins:" -- with an
+				// empty list, because a Sequence Player has none. Anyone reading
+				// that would conclude the Engine does not have that option.
 				FNodeSetting Setting;
 				TArray<FString> Settings;
 
@@ -2370,8 +2367,8 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 					if (Arg.bIsReference)
 					{
 						AddError(Statement.LineNumber, FString::Printf(
-							TEXT("`%s` e' uma opcao do painel de detalhes, nao um pino: aceita valor fixo, ")
-							TEXT("nao `$%s`."), *Arg.PinName, *Arg.Value));
+							TEXT("`%s` is a details panel option, not a pin: it takes a fixed value, ")
+							TEXT("not `$%s`."), *Arg.PinName, *Arg.Value));
 						continue;
 					}
 
@@ -2381,14 +2378,14 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 					if (!TextToValue(Setting.Property, Setting.ValuePtr, Arg.Value, Error))
 					{
 						AddError(Statement.LineNumber, FString::Printf(
-							TEXT("`%s = %s` nao entrou: %s"), *Arg.PinName, *Arg.Value, *Error));
+							TEXT("`%s = %s` did not go in: %s"), *Arg.PinName, *Arg.Value, *Error));
 						continue;
 					}
 
 					Node->PostEditChange();
 
 					AddInfo(Statement.LineNumber, FString::Printf(
-						TEXT("`%s` nao e' pino: entrou como opcao do node."), *Arg.PinName));
+						TEXT("`%s` is not a pin: it went in as a node option."), *Arg.PinName));
 					continue;
 				}
 
@@ -2398,22 +2395,22 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 					Available.Add(Candidate->PinName.ToString());
 				}
 
-				// Nome de pino errado e' a mesma familia: foi assim que apareceu
-				// que o exemplo `Break Vector (In Vec = ...)` da documentacao
-				// nunca funcionou -- o pino se chama como a struct.
-				AnotaNomeNaoResolvido(TEXT("pino"), Arg.PinName, Statement.NodeExpression);
+				// A wrong pin name is the same family: that is how it came out that
+				// the documentation's `Break Vector (In Vec = ...)` example never
+				// worked -- the pin is named after the struct.
+				RecordUnresolvedName(TEXT("pin"), Arg.PinName, Statement.NodeExpression);
 
-				// Sem pino nenhum, dizer "pinos de entrada: (nada)" nao ajuda.
-				// O que responde a pergunta seguinte e' a lista das opcoes.
-				const FString Onde = Available.Num() > 0
-					? FString::Printf(TEXT("Pinos de entrada: %s"), *FString::Join(Available, TEXT(", ")))
+				// With no pins at all, saying "input pins: (nothing)" does not help.
+				// What answers the next question is the list of options.
+				const FString Where = Available.Num() > 0
+					? FString::Printf(TEXT("Input pins: %s"), *FString::Join(Available, TEXT(", ")))
 					: (Settings.Num() > 0
-						? FString::Printf(TEXT("Este node nao tem pino de entrada. Opcoes do painel: %s"),
+						? FString::Printf(TEXT("This node has no input pins. Panel options: %s"),
 							*FString::Join(Settings, TEXT(", ")))
-						: TEXT("Este node nao tem pino de entrada nem opcao ajustavel."));
+						: TEXT("This node has no input pins and no adjustable options."));
 
 				AddError(Statement.LineNumber, FString::Printf(
-					TEXT("O node nao tem pino `%s`. %s"), *Arg.PinName, *Onde));
+					TEXT("The node has no pin `%s`. %s"), *Arg.PinName, *Where));
 				continue;
 			}
 		}
@@ -2422,7 +2419,7 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 			if (!PositionalPins.IsValidIndex(NextPositional))
 			{
 				AddError(Statement.LineNumber, FString::Printf(
-					TEXT("Argumento a mais (`%s`): o node nao tem tantos pinos de entrada."), *Arg.Value));
+					TEXT("One argument too many (`%s`): the node does not have that many input pins."), *Arg.Value));
 				continue;
 			}
 
@@ -2444,7 +2441,7 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 }
 
 // ---------------------------------------------------------------------------
-// Criacao de nodes
+// Node creation
 // ---------------------------------------------------------------------------
 
 UEdGraphNode* FNodeScribeBuildContext::CreateErrorComment(const FNodeScribeStatement& Statement, const FString& Reason)
@@ -2452,14 +2449,14 @@ UEdGraphNode* FNodeScribeBuildContext::CreateErrorComment(const FNodeScribeState
 	UEdGraphNode_Comment* Comment = AllocateNode<UEdGraphNode_Comment>();
 	FinalizeNode(Comment);
 
-	Comment->NodeComment = FString::Printf(TEXT("NodeScribe nao resolveu:\n%s\n\n%s"), *Statement.RawLine, *Reason);
+	Comment->NodeComment = FString::Printf(TEXT("NodeScribe could not resolve:\n%s\n\n%s"), *Statement.RawLine, *Reason);
 	Comment->CommentColor = FLinearColor(0.65f, 0.12f, 0.12f);
 	Comment->NodeWidth = 460;
 	Comment->NodeHeight = 160;
 	Comment->bCommentBubbleVisible = false;
 
-	// Quem registra em CreatedNodes e' o Run(), que recebe este node de volta
-	// como resultado da linha. Adicionar aqui duplicaria a contagem.
+	// Run() is the one that registers in CreatedNodes, since it gets this node
+	// back as the line's result. Adding it here would double the count.
 	return Comment;
 }
 
@@ -2481,34 +2478,25 @@ void FNodeScribeBuildContext::PreCreateCustomEvents(const TArray<FNodeScribeStat
 
 		const FString Expression = Statement.NodeExpression.TrimStartAndEnd();
 
-		FString EventName;
-		if (Expression.StartsWith(TEXT("Event "), ESearchCase::IgnoreCase))
-		{
-			EventName = Expression.RightChop(6);
-		}
-		else if (Expression.StartsWith(TEXT("Evento "), ESearchCase::IgnoreCase))
-		{
-			EventName = Expression.RightChop(7);
-		}
-		else
+		if (!Expression.StartsWith(TEXT("Event "), ESearchCase::IgnoreCase))
 		{
 			continue;
 		}
 
+		FString EventName = Expression.RightChop(6);
 		EventName.TrimStartAndEndInline();
 
-		// `X de Y` e' evento de dispatcher, e `__DelegateSignature` e' recusado:
-		// nenhum dos dois vira Custom Event, entao nao entram aqui.
+		// `X of Y` is a dispatcher event, and `__DelegateSignature` is refused:
+		// neither becomes a Custom Event, so they do not go in here.
 		if (EventName.IsEmpty()
 			|| EventName.EndsWith(TEXT("__DelegateSignature"), ESearchCase::CaseSensitive)
-			|| EventName.Contains(TEXT(" de "), ESearchCase::IgnoreCase)
 			|| EventName.Contains(TEXT(" of "), ESearchCase::IgnoreCase)
 			|| PreCreatedEvents.Contains(EventName))
 		{
 			continue;
 		}
 
-		// Evento que a classe pai oferece vira override, nao Custom Event.
+		// An event the parent class offers becomes an override, not a Custom Event.
 		bool bIsParentEvent = false;
 		if (UClass* ParentClass = Blueprint->ParentClass.Get())
 		{
@@ -2554,7 +2542,7 @@ void FNodeScribeBuildContext::PreCreateCustomEvents(const TArray<FNodeScribeStat
 		bCreatedAny = true;
 	}
 
-	// Uma regeracao para todos, em vez de uma por evento.
+	// One regeneration for all of them, instead of one per event.
 	if (bCreatedAny)
 	{
 		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
@@ -2569,12 +2557,12 @@ void FNodeScribeBuildContext::CreateDeclaredVariable(const FNodeScribeStatement&
 		return;
 	}
 
-	// Declarar de novo nao e' erro: colar o mesmo texto duas vezes tem que ser
-	// inofensivo, e o texto que o leitor produz sempre traz as declaracoes.
+	// Declaring again is not an error: pasting the same text twice has to be
+	// harmless, and the text the reader produces always carries the declarations.
 	if (FindPropertyByFriendlyName(GetSelfClass(), Statement.VariableName))
 	{
 		AddInfo(Statement.LineNumber, FString::Printf(
-			TEXT("`%s` ja' existe; nao mexi nela."), *Statement.VariableName));
+			TEXT("`%s` already exists; left it alone."), *Statement.VariableName));
 		return;
 	}
 
@@ -2582,15 +2570,15 @@ void FNodeScribeBuildContext::CreateDeclaredVariable(const FNodeScribeStatement&
 	if (!ResolvePinTypeFromNameInternal(Statement.VariableType, PinType))
 	{
 		AddError(Statement.LineNumber, FString::Printf(
-			TEXT("Nao reconheci o tipo `%s`. Use o nome que aparece na interface, como Float, Name, Timer Handle."),
+			TEXT("Did not recognise type `%s`. Use the name shown in the interface, such as Float, Name, Timer Handle."),
 			*Statement.VariableType));
 		return;
 	}
 
-	// Widget do Designer nao se cria por declaracao: a variavel nasce ao
-	// colocar o widget na tela e marcar Is Variable. Uma variavel com o mesmo
-	// nome compilaria e nunca apontaria para o widget -- e ainda atrapalharia
-	// quando o widget de verdade fosse criado.
+	// A Designer widget is not created by declaration: the variable is born when
+	// the widget is placed on screen with Is Variable ticked. A variable with the
+	// same name would compile and never point at the widget -- and would get in
+	// the way when the real widget was created.
 	if (PinType.PinCategory == UEdGraphSchema_K2::PC_Object)
 	{
 		const UClass* WidgetClass = FindObject<UClass>(nullptr, TEXT("/Script/UMG.Widget"));
@@ -2604,7 +2592,7 @@ void FNodeScribeBuildContext::CreateDeclaredVariable(const FNodeScribeStatement&
 		if (bIsWidgetBlueprint && WidgetClass && VariableClass && VariableClass->IsChildOf(WidgetClass))
 		{
 			AddError(Statement.LineNumber, FString::Printf(
-				TEXT("`%s` e' um widget: crie no Designer e marque `Is Variable`, nao aqui."),
+				TEXT("`%s` is a widget: create it in the Designer and tick `Is Variable`, not here."),
 				*Statement.VariableName));
 			return;
 		}
@@ -2614,12 +2602,12 @@ void FNodeScribeBuildContext::CreateDeclaredVariable(const FNodeScribeStatement&
 		Blueprint, FName(*Statement.VariableName), PinType, Statement.VariableDefault))
 	{
 		AddInfo(Statement.LineNumber, FString::Printf(
-			TEXT("Criei a variavel `%s`."), *Statement.VariableName));
+			TEXT("Created variable `%s`."), *Statement.VariableName));
 	}
 	else
 	{
 		AddError(Statement.LineNumber, FString::Printf(
-			TEXT("Nao consegui criar `%s`. O nome pode estar em uso por algo herdado."),
+			TEXT("Could not create `%s`. The name may be taken by something inherited."),
 			*Statement.VariableName));
 	}
 }
@@ -2642,13 +2630,13 @@ UEdGraphNode* FNodeScribeBuildContext::CreateDuplicateEventComment(
 	const FString& EventLabel)
 {
 	AddError(Statement.LineNumber, FString::Printf(
-		TEXT("O evento `%s` ja' existe neste grafo; a Unreal so' permite um."), *EventLabel));
+		TEXT("Event `%s` already exists in this graph; Unreal allows only one."), *EventLabel));
 
 	return CreateErrorComment(Statement, FString::Printf(
-		TEXT("`%s` ja' existe neste grafo.\n\n")
-		TEXT("A Unreal so' permite um node por evento, entao nao criei outro nem mexi no que ja' estava la'.\n\n")
-		TEXT("A cadeia desta linha ficou sem inicio: ligue ela no evento que ja' existe, ")
-		TEXT("ou apague aquele node antes de colar."),
+		TEXT("`%s` already exists in this graph.\n\n")
+		TEXT("Unreal allows only one node per event, so I did not create another one nor touch the existing one.\n\n")
+		TEXT("This line's chain was left without a start: link it to the existing event, ")
+		TEXT("or delete that node before pasting."),
 		*EventLabel));
 }
 
@@ -2657,16 +2645,17 @@ UEdGraphNode* FNodeScribeBuildContext::CreateDuplicateEventComment(
 // ---------------------------------------------------------------------------
 
 /**
- * Uma linha dentro de um grafo de animacao.
+ * A line inside an animation graph.
  *
- * Tres formas, nesta ordem: o Output Pose que ja' existe, um node de anim pelo
- * nome do menu, e um asset de animacao -- que aqui vira node em vez de ser
- * recusado. Fora do AnimGraph nome solto de asset continua sendo recusado, e
- * por bom motivo: la' nao ha' node obvio para embrulhar o asset. Aqui ha' um
- * so', e e' o mesmo que arrastar o asset para o grafo produz.
+ * Three forms, in this order: the Output Pose that already exists, an anim node
+ * by its menu name, and an animation asset -- which here becomes a node instead
+ * of being refused. Outside the AnimGraph a bare asset name is still refused,
+ * and for good reason: there is no obvious node to wrap the asset there. Here
+ * there is exactly one, and it is the same one dragging the asset into the
+ * graph produces.
  *
- * A classe de node vem antes do asset porque o vocabulario e' fechado e o de
- * assets nao: uma animacao chamada `Blend` nao pode roubar o node `Blend`.
+ * The node class comes before the asset because that vocabulary is closed and
+ * the asset one is not: an animation called `Blend` cannot steal the `Blend` node.
  */
 UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimNode(const FNodeScribeStatement& Statement, bool& bOutHandled)
 {
@@ -2682,10 +2671,8 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimNode(const FNodeScribeStatem
 
 	// --- Output Pose ------------------------------------------------------
 	if (Normalized == TEXT("outputpose")
-		|| Normalized == TEXT("posedesaida")
 		|| Normalized == TEXT("finalanimationpose")
-		|| Normalized == TEXT("result")
-		|| Normalized == TEXT("resultado"))
+		|| Normalized == TEXT("result"))
 	{
 		bOutHandled = true;
 
@@ -2696,15 +2683,15 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimNode(const FNodeScribeStatem
 		}
 
 		AddError(Statement.LineNumber,
-			TEXT("Este grafo nao tem Output Pose. Ele nasce com o AnimGraph -- ")
-			TEXT("se sumiu, e' o grafo que esta' errado, e criar outro nao conserta."));
+			TEXT("This graph has no Output Pose. It is born with the AnimGraph -- ")
+			TEXT("if it is gone, the graph itself is wrong, and creating another one does not fix it."));
 
 		return CreateErrorComment(Statement,
-			TEXT("Nao achei o Output Pose deste grafo.\n\n")
-			TEXT("Ele nao se cria: nasce junto com o AnimGraph."));
+			TEXT("Could not find this graph's Output Pose.\n\n")
+			TEXT("It is not created: it is born together with the AnimGraph."));
 	}
 
-	// --- Node de anim pelo nome -------------------------------------------
+	// --- Anim node by name ------------------------------------------------
 	const NodeScribeAnimGraph::FLookup Lookup = NodeScribeAnimGraph::FindNodeClass(Expression);
 
 	if (Lookup.IsAmbiguous())
@@ -2712,11 +2699,11 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimNode(const FNodeScribeStatem
 		bOutHandled = true;
 
 		AddError(Statement.LineNumber, FString::Printf(
-			TEXT("`%s` e' o nome de mais de um node de anim: %s."),
+			TEXT("`%s` is the name of more than one anim node: %s."),
 			*Expression, *FString::Join(Lookup.Candidates, TEXT(", "))));
 
 		return CreateErrorComment(Statement, FString::Printf(
-			TEXT("`%s` e' ambiguo.\n\nCandidatos: %s"),
+			TEXT("`%s` is ambiguous.\n\nCandidates: %s"),
 			*Expression, *FString::Join(Lookup.Candidates, TEXT("\n"))));
 	}
 
@@ -2729,9 +2716,9 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimNode(const FNodeScribeStatem
 		Node->CreateNewGuid();
 		FinalizeNode(Node);
 
-		// `Locomocao = Maquina de Estados` batiza a maquina. O nome de uma
-		// maquina de estados e' o do sub-grafo dela, e sem isto toda maquina
-		// nasceria "New State Machine" -- inclusive a segunda, que viraria
+		// `Locomotion = State Machine` names the machine. A state machine's name
+		// is its sub-graph's name, and without this every machine would be born
+		// "New State Machine" -- including the second one, which would become
 		// "New State Machine 1".
 		if (UAnimGraphNode_StateMachineBase* Machine = Cast<UAnimGraphNode_StateMachineBase>(Node))
 		{
@@ -2745,7 +2732,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimNode(const FNodeScribeStatem
 		return Node;
 	}
 
-	// --- Asset de animacao ------------------------------------------------
+	// --- Animation asset --------------------------------------------------
 	const NodeScribeAnimGraph::FAssetLookup Asset = NodeScribeAnimGraph::FindAnimationAsset(Expression);
 
 	if (Asset.IsAmbiguous())
@@ -2753,11 +2740,11 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimNode(const FNodeScribeStatem
 		bOutHandled = true;
 
 		AddError(Statement.LineNumber, FString::Printf(
-			TEXT("Ha' mais de uma animacao chamada `%s`. Escreva o caminho completo: %s"),
+			TEXT("There is more than one animation called `%s`. Write the full path: %s"),
 			*Expression, *FString::Join(Asset.Candidates, TEXT(", "))));
 
 		return CreateErrorComment(Statement, FString::Printf(
-			TEXT("`%s` e' o nome de mais de uma animacao.\n\nEscreva o caminho:\n%s"),
+			TEXT("`%s` is the name of more than one animation.\n\nWrite the path:\n%s"),
 			*Expression, *FString::Join(Asset.Candidates, TEXT("\n"))));
 	}
 
@@ -2772,11 +2759,11 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimNode(const FNodeScribeStatem
 		bOutHandled = true;
 
 		AddError(Statement.LineNumber, FString::Printf(
-			TEXT("`%s` e' um asset de animacao, mas nao ha' node de AnimGraph que toque um %s."),
+			TEXT("`%s` is an animation asset, but there is no AnimGraph node that plays a %s."),
 			*Expression, *Asset.Asset->GetClass()->GetName()));
 
 		return CreateErrorComment(Statement, FString::Printf(
-			TEXT("Nenhum node toca `%s`."), *Expression));
+			TEXT("No node plays `%s`."), *Expression));
 	}
 
 	bOutHandled = true;
@@ -2787,14 +2774,14 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimNode(const FNodeScribeStatem
 	Player->CreateNewGuid();
 	Player->SetAnimationAsset(Asset.Asset);
 
-	// Depois do asset: os pinos de um BlendSpace dependem dos eixos dele, e
-	// alocar antes daria um node com os pinos do espaco errado.
+	// After the asset: a BlendSpace's pins depend on its axes, and allocating
+	// before would give a node with the pins of the wrong space.
 	FinalizeNode(Player);
 
 	AnimNodes.Add(Player);
 
 	AddInfo(Statement.LineNumber, FString::Printf(
-		TEXT("`%s` virou um %s."), *Expression,
+		TEXT("`%s` became a %s."), *Expression,
 		*NodeClass->GetName().Replace(TEXT("AnimGraphNode_"), TEXT(""))));
 
 	return Player;
@@ -2804,9 +2791,9 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimGetter(const FNodeScribeStat
 {
 	bOutHandled = false;
 
-	// De quem esta regra e' a regra. O grafo mora dentro da transicao, e a
-	// transicao sabe de que estado ela sai -- que e' a resposta que o getter
-	// precisa e que o texto nao tem como dizer.
+	// Whose rule this is. The graph lives inside the transition, and the
+	// transition knows which state it leaves from -- which is the answer the
+	// getter needs and the text has no way to say.
 	UAnimStateTransitionNode* Transition = Cast<UAnimStateTransitionNode>(Graph->GetOuter());
 	if (!Transition)
 	{
@@ -2819,8 +2806,8 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimGetter(const FNodeScribeStat
 		return nullptr;
 	}
 
-	// A classe nativa mais proxima: os getters sao declarados em C++, e um
-	// AnimBlueprint que herda de outro AnimBlueprint nao os redeclara.
+	// The closest native class: the getters are declared in C++, and an
+	// AnimBlueprint that inherits from another AnimBlueprint does not redeclare them.
 	UClass* NativeClass = AnimBlueprint->ParentClass;
 	while (NativeClass && !NativeClass->HasAnyClassFlags(CLASS_Native))
 	{
@@ -2845,9 +2832,10 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimGetter(const FNodeScribeStat
 			continue;
 		}
 
-		// `GetterContext` diz onde o getter vale: `Transition`, `CustomBlend`.
-		// Sem contexto, vale em qualquer um. Um getter de contexto errado entra
-		// e nao funciona, e a Engine so' reclama muito depois.
+		// `GetterContext` says where the getter is valid: `Transition`,
+		// `CustomBlend`. Without a context, it is valid anywhere. A getter with
+		// the wrong context goes in and does not work, and the Engine only
+		// complains much later.
 		const FString Context = Function->HasMetaData(TEXT("GetterContext"))
 			? Function->GetMetaData(TEXT("GetterContext")) : FString();
 		if (!Context.IsEmpty() && !Context.Contains(TEXT("Transition")))
@@ -2880,15 +2868,16 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimGetter(const FNodeScribeStat
 	if (!PreviousState)
 	{
 		AddError(Statement.LineNumber, FString::Printf(
-			TEXT("`%s` precisa saber de que estado a transicao sai, e esta nao esta' ligada a um."),
+			TEXT("`%s` needs to know which state the transition leaves from, and this one is not linked to any."),
 			*Statement.NodeExpression));
 
 		return CreateErrorComment(Statement,
-			TEXT("A transicao nao tem estado de origem, e este getter le' justamente o estado de origem."));
+			TEXT("The transition has no source state, and this getter reads precisely the source state."));
 	}
 
-	// A maquina dona do estado. E' o par obrigatorio do estado: sem ela o node
-	// compila com "contains invalid data. Please delete and recreate the node."
+	// The machine that owns the state. It is the state's mandatory partner:
+	// without it the node compiles with "contains invalid data. Please delete
+	// and recreate the node."
 	UAnimGraphNode_StateMachineBase* MachineNode = nullptr;
 	if (UAnimationStateMachineGraph* MachineGraph = Cast<UAnimationStateMachineGraph>(PreviousState->GetOuter()))
 	{
@@ -2902,8 +2891,8 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimGetter(const FNodeScribeStat
 	Node->GetterClass = NativeClass;
 	Node->SourceAnimBlueprint = AnimBlueprint;
 
-	// O titulo e' guardado, nao calculado: `GetNodeTitle` devolve `CachedTitle` e
-	// mais nada, entao um node sem isto aparece sem nome nenhum no grafo.
+	// The title is stored, not computed: `GetNodeTitle` returns `CachedTitle`
+	// and nothing else, so a node without this shows up with no name at all.
 	const FString DisplayName = Getter->HasMetaData(TEXT("DisplayName"))
 		? Getter->GetMetaData(TEXT("DisplayName"))
 		: FName::NameToDisplayString(Getter->GetName(), false);
@@ -2916,7 +2905,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateAnimGetter(const FNodeScribeStat
 	FinalizeNode(Node);
 
 	AddInfo(Statement.LineNumber, FString::Printf(
-		TEXT("`%s` le' o estado `%s`, que e' de onde esta transicao sai."),
+		TEXT("`%s` reads state `%s`, which is where this transition leaves from."),
 		*Statement.NodeExpression, *PreviousState->GetStateName()));
 
 	return Node;
@@ -2926,34 +2915,34 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 {
 	bOutHandled = true;
 
-	// --- `$Alguma Coisa` sozinho numa linha -------------------------------
+	// --- `$Something` alone on a line -------------------------------------
 	//
-	// A linha inteira e' um valor. Aparece onde o bloco *e'* uma expressao: a
-	// regra de uma transicao, cujo resultado e' o ultimo node do bloco.
+	// The whole line is a value. It shows up where the block *is* an
+	// expression: a transition's rule, whose result is the block's last node.
 	//
-	// `Get Is In Air` ja' funcionava ali, e `$Is In Air` -- a forma que se
-	// escreve em todo argumento -- respondia "nao achei nenhum node chamado
-	// `$Is In Air`". Sao a mesma coisa escrita de dois jeitos, e aceitar so' uma
-	// delas obriga quem escreve a descobrir qual, num lugar em que o erro nao
-	// diz que a diferenca era essa.
+	// `Get Is In Air` already worked there, and `$Is In Air` -- the form written
+	// in every argument -- answered "no node called `$Is In Air`". They are the
+	// same thing written two ways, and accepting only one of them forces the
+	// writer to find out which, in a place where the error does not say that
+	// was the difference.
 	if (Statement.NodeExpression.StartsWith(TEXT("$")))
 	{
 		const FString Reference = Statement.NodeExpression.RightChop(1).TrimStartAndEnd();
 
-		// Sem pino consumidor: aqui nao ha' quem receba o valor, entao uma
-		// variavel que nao existe continua sendo erro -- e' o mesmo criterio de
-		// um `Get X` solto, e pelo mesmo motivo (nao ha' de onde tirar o tipo).
+		// No consumer pin: nothing receives the value here, so a variable that
+		// does not exist is still an error -- the same criterion as a loose
+		// `Get X`, and for the same reason (there is nowhere to take the type from).
 		if (UEdGraphPin* Pin = ResolveReference(Reference, Statement.LineNumber, nullptr))
 		{
 			return Pin->GetOwningNodeUnchecked();
 		}
 
-		// ResolveReference ja' disse o que houve.
+		// ResolveReference already said what happened.
 		return nullptr;
 	}
 
-	// Numa regra de transicao, os getters de maquina de estado vem antes do
-	// catalogo: as funcoes de mesmo nome existem e sao para outro lugar.
+	// In a transition rule, the state machine getters come before the catalog:
+	// the functions of the same name exist and are meant for somewhere else.
 	if (bTransitionGraph)
 	{
 		bool bGetterHandled = false;
@@ -2967,8 +2956,8 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		}
 	}
 
-	// Num grafo de animacao o vocabulario de anim vem primeiro: `Blend` la' e'
-	// um node de pose, nao a funcao de mesmo nome da biblioteca de matematica.
+	// In an animation graph the anim vocabulary comes first: `Blend` there is a
+	// pose node, not the math library function of the same name.
 	if (bPoseGraph)
 	{
 		bool bAnimHandled = false;
@@ -2986,7 +2975,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 	const FString Normalized = FNodeScribeCatalog::Normalize(Expression);
 
 	// --- Branch -----------------------------------------------------------
-	if (Normalized == TEXT("branch") || Normalized == TEXT("if") || Normalized == TEXT("se"))
+	if (Normalized == TEXT("branch") || Normalized == TEXT("if"))
 	{
 		UK2Node_IfThenElse* Node = AllocateNode<UK2Node_IfThenElse>();
 		FinalizeNode(Node);
@@ -2994,7 +2983,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 	}
 
 	// --- Sequence ---------------------------------------------------------
-	if (Normalized == TEXT("sequence") || Normalized == TEXT("sequencia"))
+	if (Normalized == TEXT("sequence"))
 	{
 		UK2Node_ExecutionSequence* Node = AllocateNode<UK2Node_ExecutionSequence>();
 		FinalizeNode(Node);
@@ -3002,7 +2991,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 	}
 
 	// --- Return -----------------------------------------------------------
-	if (Normalized == TEXT("return") || Normalized == TEXT("retornar") || Normalized == TEXT("retorno"))
+	if (Normalized == TEXT("return"))
 	{
 		UK2Node_FunctionResult* Node = AllocateNode<UK2Node_FunctionResult>();
 		FinalizeNode(Node);
@@ -3011,10 +3000,10 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 
 	// --- To Text ----------------------------------------------------------
 	//
-	// Node proprio, e nao a funcao de mesmo nome: a funcao e'
-	// `BlueprintInternalUseOnly` e nao esta' no catalogo. Sem este caso a linha
-	// que o leitor escreve nao teria como voltar.
-	if (Normalized == TEXT("totext") || Normalized == TEXT("paratexto"))
+	// A node of its own, not the function of the same name: the function is
+	// `BlueprintInternalUseOnly` and is not in the catalog. Without this case
+	// the line the reader writes would have no way back.
+	if (Normalized == TEXT("totext"))
 	{
 		UK2Node_GenericToText* Node = AllocateNode<UK2Node_GenericToText>();
 		FinalizeNode(Node);
@@ -3022,16 +3011,15 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 	}
 
 	// --- Self -------------------------------------------------------------
-	if (Normalized == TEXT("self") || Normalized == TEXT("eu"))
+	if (Normalized == TEXT("self"))
 	{
 		UK2Node_Self* Node = AllocateNode<UK2Node_Self>();
 		FinalizeNode(Node);
 		return Node;
 	}
 
-	// --- Comentario livre -------------------------------------------------
-	if (Expression.StartsWith(TEXT("Comment "), ESearchCase::IgnoreCase)
-		|| Expression.StartsWith(TEXT("Comentario "), ESearchCase::IgnoreCase))
+	// --- Free comment -----------------------------------------------------
+	if (Expression.StartsWith(TEXT("Comment "), ESearchCase::IgnoreCase))
 	{
 		const int32 SpaceIndex = Expression.Find(TEXT(" "));
 		UEdGraphNode_Comment* Node = AllocateNode<UEdGraphNode_Comment>();
@@ -3042,27 +3030,20 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		return Node;
 	}
 
-	// --- Cast to <Classe> -------------------------------------------------
+	// --- Cast to <Class> --------------------------------------------------
+	if (Expression.StartsWith(TEXT("Cast to "), ESearchCase::IgnoreCase))
 	{
-		FString ClassName;
-		if (Expression.StartsWith(TEXT("Cast to "), ESearchCase::IgnoreCase))
-		{
-			ClassName = Expression.RightChop(8);
-		}
-		else if (Expression.StartsWith(TEXT("Converter para "), ESearchCase::IgnoreCase))
-		{
-			ClassName = Expression.RightChop(15);
-		}
+		FString ClassName = Expression.RightChop(8);
+		ClassName.TrimStartAndEndInline();
 
 		if (!ClassName.IsEmpty())
 		{
-			ClassName.TrimStartAndEndInline();
 			UClass* TargetClass = FindClassByFriendlyNameInternal(ClassName);
 
 			if (!TargetClass)
 			{
 				return CreateErrorComment(Statement,
-					FString::Printf(TEXT("Nao achei a classe `%s`."), *ClassName));
+					FString::Printf(TEXT("Could not find class `%s`."), *ClassName));
 			}
 
 			UK2Node_DynamicCast* Node = AllocateNode<UK2Node_DynamicCast>();
@@ -3073,16 +3054,12 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		}
 	}
 
-	// --- Event <Nome> -----------------------------------------------------
+	// --- Event <Name> -----------------------------------------------------
 	{
 		FString EventName;
 		if (Expression.StartsWith(TEXT("Event "), ESearchCase::IgnoreCase))
 		{
 			EventName = Expression.RightChop(6);
-		}
-		else if (Expression.StartsWith(TEXT("Evento "), ESearchCase::IgnoreCase))
-		{
-			EventName = Expression.RightChop(7);
 		}
 
 		if (!EventName.IsEmpty())
@@ -3092,8 +3069,8 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			UFunction* EventFunction = nullptr;
 			if (UClass* ParentClass = Blueprint ? Blueprint->ParentClass.Get() : nullptr)
 			{
-				// A Engine prefixa os eventos implementaveis; o usuario escreve `BeginPlay`,
-				// a funcao de verdade se chama `ReceiveBeginPlay`.
+				// The Engine prefixes implementable events; the user writes
+				// `BeginPlay`, the real function is called `ReceiveBeginPlay`.
 				const TArray<FString> Attempts = {
 					EventName,
 					FString(TEXT("Receive")) + EventName,
@@ -3135,16 +3112,15 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 				return Node;
 			}
 
-			// --- evento <Dispatcher> de <Variavel> -----------------------
-			// A forma que faltava: o node vermelho de antes dizia "recrie a
-			// mao" justamente porque este bloco nao existia.
+			// --- event <Dispatcher> of <Variable> ------------------------
+			// The missing form: the red node from before said "recreate it by
+			// hand" precisely because this block did not exist.
 			{
 				FString DelegateName;
 				FString ComponentName;
 
 				const bool bHasOwner =
-					EventName.Split(TEXT(" de "), &DelegateName, &ComponentName, ESearchCase::IgnoreCase)
-					|| EventName.Split(TEXT(" of "), &DelegateName, &ComponentName, ESearchCase::IgnoreCase);
+					EventName.Split(TEXT(" of "), &DelegateName, &ComponentName, ESearchCase::IgnoreCase);
 
 				if (bHasOwner)
 				{
@@ -3160,10 +3136,10 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 					if (!ComponentProperty)
 					{
 						AddError(Statement.LineNumber, FString::Printf(
-							TEXT("`%s` nao e' uma variavel de objeto deste Blueprint."), *ComponentName));
+							TEXT("`%s` is not an object variable of this Blueprint."), *ComponentName));
 
 						return CreateErrorComment(Statement, FString::Printf(
-							TEXT("`%s` precisa ser uma variavel deste Blueprint que aponte para outro objeto."),
+							TEXT("`%s` must be a variable of this Blueprint that points at another object."),
 							*ComponentName));
 					}
 
@@ -3179,12 +3155,12 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 						}
 
 						AddError(Statement.LineNumber, FString::Printf(
-							TEXT("`%s` nao tem dispatcher `%s`. Dispatchers: %s"),
+							TEXT("`%s` has no dispatcher `%s`. Dispatchers: %s"),
 							*ComponentName, *DelegateName,
-							Available.Num() > 0 ? *FString::Join(Available, TEXT(", ")) : TEXT("nenhum")));
+							Available.Num() > 0 ? *FString::Join(Available, TEXT(", ")) : TEXT("none")));
 
 						return CreateErrorComment(Statement, FString::Printf(
-							TEXT("`%s` nao expoe um dispatcher chamado `%s`."), *ComponentName, *DelegateName));
+							TEXT("`%s` does not expose a dispatcher called `%s`."), *ComponentName, *DelegateName));
 					}
 
 					const FName WantedDelegate = DelegateProperty->GetFName();
@@ -3199,7 +3175,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 						}))
 					{
 						return CreateDuplicateEventComment(Statement,
-							FString::Printf(TEXT("%s de %s"), *DelegateName, *ComponentName));
+							FString::Printf(TEXT("%s of %s"), *DelegateName, *ComponentName));
 					}
 
 					UK2Node_ComponentBoundEvent* Node = AllocateNode<UK2Node_ComponentBoundEvent>();
@@ -3209,29 +3185,29 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 				}
 			}
 
-			// `__DelegateSignature` e' o sufixo que a Engine poe na funcao de
-			// assinatura de um delegate. Um Custom Event com esse nome nao e'
-			// algo que alguem escreveria: e' um evento de dispatcher que perdeu
-			// o vinculo. Criar mesmo assim daria um node plausivel e morto, que
-			// e' exatamente o resultado que este plugin recusa a produzir.
+			// `__DelegateSignature` is the suffix the Engine puts on a delegate's
+			// signature function. A Custom Event with that name is not something
+			// anyone would write: it is a dispatcher event that lost its binding.
+			// Creating it anyway would give a plausible, dead node, which is
+			// exactly the result this plugin refuses to produce.
 			if (EventName.EndsWith(TEXT("__DelegateSignature"), ESearchCase::CaseSensitive))
 			{
 				FString DispatcherName = EventName;
 				DispatcherName.RemoveFromEnd(TEXT("__DelegateSignature"));
 
 				AddError(Statement.LineNumber, FString::Printf(
-					TEXT("`%s` e' um evento de dispatcher/delegate. O formato ainda nao sabe recriar esse vinculo."),
+					TEXT("`%s` is a dispatcher/delegate event. The format cannot recreate that binding yet."),
 					*DispatcherName));
 
 				return CreateErrorComment(Statement, FString::Printf(
-					TEXT("`%s` e' um evento ligado a um dispatcher/delegate.\n\n")
-					TEXT("Um Custom Event com esse nome compilaria e nunca dispararia, entao nao criei nenhum.\n\n")
-					TEXT("Para fazer a mao: botao direito no grafo, procure `%s`, e escolha a opcao de evento."),
+					TEXT("`%s` is an event bound to a dispatcher/delegate.\n\n")
+					TEXT("A Custom Event with that name would compile and never fire, so I created none.\n\n")
+					TEXT("To do it by hand: right-click the graph, search for `%s`, and pick the event option."),
 					*DispatcherName, *DispatcherName));
 			}
 
-			// A pre-passagem ja' criou este evento para que linhas acima
-			// pudessem chama-lo. Aqui so' entregamos o mesmo node.
+			// The pre-pass already created this event so that lines above could
+			// call it. Here we just hand over the same node.
 			if (UEdGraphNode** PreCreated = PreCreatedEvents.Find(EventName))
 			{
 				return *PreCreated;
@@ -3252,11 +3228,11 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			Node->CustomFunctionName = FName(*EventName);
 			FinalizeNode(Node);
 
-			// Sem isto, uma linha adiante que CHAME este evento nao o encontra:
-			// a classe esqueleto so' ganha a funcao quando e' regerada, e
-			// ninguem compila no meio de uma colagem. Custa pouco -- eventos
-			// sao poucos por texto -- e e' o que torna `Pular` chamavel na
-			// mesma colagem que o declarou.
+			// Without this, a later line that CALLS this event does not find it:
+			// the skeleton class only gets the function when it is regenerated,
+			// and nobody compiles in the middle of a paste. It costs little --
+			// there are few events per text -- and it is what makes `Jump`
+			// callable in the same paste that declared it.
 			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 			FKismetEditorUtilities::GenerateBlueprintSkeleton(Blueprint, true);
 
@@ -3264,12 +3240,12 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 
 			if (UClass* OwningClass = FindClassOwningBlueprintEvent(EventName))
 			{
-				// O evento existe -- so' que em outra hierarquia. Um Custom Event com
-				// o nome de um evento da Engine compila, fica plausivel no grafo e
-				// nunca dispara. Isso e' aviso, nao nota de rodape.
+				// The event exists -- only in another hierarchy. A Custom Event with
+				// the name of an Engine event compiles, looks plausible in the graph
+				// and never fires. That is a warning, not a footnote.
 				FString Message = FString::Printf(
-					TEXT("`%s` e' evento de `%s`, mas este Blueprint deriva de `%s`. ")
-					TEXT("Criei um Custom Event com esse nome, e ele nunca vai disparar sozinho."),
+					TEXT("`%s` is an event of `%s`, but this Blueprint derives from `%s`. ")
+					TEXT("I created a Custom Event with that name, and it will never fire by itself."),
 					*EventName,
 					*OwningClass->GetName(),
 					SelfParentClass ? *SelfParentClass->GetName() : TEXT("?"));
@@ -3277,7 +3253,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 				const FString Available = ListAvailableEvents(SelfParentClass, 8);
 				if (!Available.IsEmpty())
 				{
-					Message += FString::Printf(TEXT(" Aqui existem: %s."), *Available);
+					Message += FString::Printf(TEXT(" Available here: %s."), *Available);
 				}
 
 				AddWarning(Statement.LineNumber, Message);
@@ -3285,7 +3261,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			else
 			{
 				AddInfo(Statement.LineNumber, FString::Printf(
-					TEXT("`%s` nao existe na classe pai; criei um Custom Event com esse nome."), *EventName));
+					TEXT("`%s` does not exist in the parent class; created a Custom Event with that name."), *EventName));
 			}
 
 			return Node;
@@ -3293,14 +3269,14 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 	}
 
 	// --- Select ----------------------------------------------------------
-	if (Normalized == TEXT("select") || Normalized == TEXT("selecionar"))
+	if (Normalized == TEXT("select"))
 	{
 		UK2Node_Select* Node = AllocateNode<UK2Node_Select>();
 		FinalizeNode(Node);
 		return Node;
 	}
 
-	// --- Chamar / Vincular / Desvincular / Limpar dispatcher -------------
+	// --- Call / Bind / Unbind / Clear dispatcher -------------------------
 	{
 		struct FDelegateForm
 		{
@@ -3310,13 +3286,9 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		};
 
 		static const FDelegateForm DelegateForms[] = {
-			{ TEXT("Chamar "),      7,  []() { return UK2Node_CallDelegate::StaticClass(); } },
 			{ TEXT("Call "),        5,  []() { return UK2Node_CallDelegate::StaticClass(); } },
-			{ TEXT("Vincular "),    9,  []() { return UK2Node_AddDelegate::StaticClass(); } },
 			{ TEXT("Bind "),        5,  []() { return UK2Node_AddDelegate::StaticClass(); } },
-			{ TEXT("Desvincular "), 12, []() { return UK2Node_RemoveDelegate::StaticClass(); } },
 			{ TEXT("Unbind "),      7,  []() { return UK2Node_RemoveDelegate::StaticClass(); } },
-			{ TEXT("Limpar "),      7,  []() { return UK2Node_ClearDelegate::StaticClass(); } },
 			{ TEXT("Clear "),       6,  []() { return UK2Node_ClearDelegate::StaticClass(); } }
 		};
 
@@ -3330,8 +3302,8 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			FString DelegateName = Expression.RightChop(Form.PrefixLength);
 			DelegateName.TrimStartAndEndInline();
 
-			// Sem `Target`, o dispatcher e' deste Blueprint. Com ele, e' do
-			// objeto apontado -- mesma regra de `Set X (Target = $obj)`.
+			// Without `Target`, the dispatcher belongs to this Blueprint. With
+			// it, to the object pointed at -- same rule as `Set X (Target = $obj)`.
 			UClass* OwnerClass = FindTargetClassFromArgs(Statement);
 			const bool bSelfContext = (OwnerClass == nullptr);
 
@@ -3345,8 +3317,8 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 
 			if (!DelegateProperty)
 			{
-				// Nao e' dispatcher: pode ser uma funcao que so' comeca com
-				// "Clear" ou "Call". Deixa o catalogo tentar.
+				// Not a dispatcher: it may be a function that just starts with
+				// "Clear" or "Call". Let the catalog try.
 				break;
 			}
 
@@ -3364,10 +3336,12 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 	// --- Switch on <Enum|Int|String|Name> --------------------------------
 	{
 		FString SwitchOn;
+		bool bExplicitSwitchOn = false;
 
 		if (Expression.StartsWith(TEXT("Switch on "), ESearchCase::IgnoreCase))
 		{
 			SwitchOn = Expression.RightChop(10);
+			bExplicitSwitchOn = true;
 		}
 		else if (Expression.StartsWith(TEXT("Switch "), ESearchCase::IgnoreCase))
 		{
@@ -3401,8 +3375,8 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 				return Node;
 			}
 
-			// Sobrou enum. Cada valor dele vira uma saida de execucao, entao o
-			// enum precisa estar posto antes de alocar os pinos.
+			// What is left is an enum. Each of its values becomes an execution
+			// output, so the enum has to be set before allocating the pins.
 			UEnum* Enum = nullptr;
 			for (TObjectIterator<UEnum> EnumIt; EnumIt; ++EnumIt)
 			{
@@ -3413,20 +3387,26 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 				}
 			}
 
-			if (!Enum)
+			if (Enum)
 			{
-				AddError(Statement.LineNumber, FString::Printf(
-					TEXT("Nao achei o enum `%s`."), *SwitchOn));
-
-				return CreateErrorComment(Statement, FString::Printf(
-					TEXT("Enum `%s` nao encontrado.\n\nUse o nome exato dele, como `EJSL4UBatteryLevel`."),
-					*SwitchOn));
+				UK2Node_SwitchEnum* Node = AllocateNode<UK2Node_SwitchEnum>();
+				Node->SetEnum(Enum);
+				FinalizeNode(Node);
+				return Node;
 			}
 
-			UK2Node_SwitchEnum* Node = AllocateNode<UK2Node_SwitchEnum>();
-			Node->SetEnum(Enum);
-			FinalizeNode(Node);
-			return Node;
+			// Only `Switch on X` promises an enum. A bare `Switch X` may be a
+			// standard macro -- `Switch Has Authority` -- and has to reach the
+			// macro lookup instead of dying here as "enum not found".
+			if (bExplicitSwitchOn)
+			{
+				AddError(Statement.LineNumber, FString::Printf(
+					TEXT("Could not find enum `%s`."), *SwitchOn));
+
+				return CreateErrorComment(Statement, FString::Printf(
+					TEXT("Enum `%s` not found.\n\nUse its exact name, such as `EJSL4UBatteryLevel`."),
+					*SwitchOn));
+			}
 		}
 	}
 
@@ -3436,23 +3416,23 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		FString ActionName = Expression.RightChop(20);
 		ActionName.TrimStartAndEndInline();
 
-		// Resolvido por caminho para nao arrastar o modulo InputBlueprintNodes
-		// como dependencia: o plugin nao deve exigir Enhanced Input instalado.
+		// Resolved by path so as not to drag the InputBlueprintNodes module in as
+		// a dependency: the plugin must not require Enhanced Input to be installed.
 		UClass* NodeClass = FindObject<UClass>(nullptr, TEXT("/Script/InputBlueprintNodes.K2Node_EnhancedInputAction"));
 		if (!NodeClass)
 		{
-			AddError(Statement.LineNumber, TEXT("O plugin Enhanced Input nao esta' habilitado neste projeto."));
-			return CreateErrorComment(Statement, TEXT("Enhanced Input nao esta' habilitado."));
+			AddError(Statement.LineNumber, TEXT("The Enhanced Input plugin is not enabled in this project."));
+			return CreateErrorComment(Statement, TEXT("Enhanced Input is not enabled."));
 		}
 
 		UObject* Action = FindAssetByPathOrName(TEXT("/Script/EnhancedInput.InputAction"), ActionName);
 		if (!Action)
 		{
 			AddError(Statement.LineNumber, FString::Printf(
-				TEXT("Nao achei a Input Action `%s`. Use o caminho completo se ela nao estiver aberta."), *ActionName));
+				TEXT("Could not find Input Action `%s`. Use the full path if it is not open."), *ActionName));
 
 			return CreateErrorComment(Statement, FString::Printf(
-				TEXT("Input Action `%s` nao encontrada.\n\nUse o caminho completo, algo como\n/Game/.../IA_Ataque.IA_Ataque"),
+				TEXT("Input Action `%s` not found.\n\nUse the full path, something like\n/Game/.../IA_Attack.IA_Attack"),
 				*ActionName));
 		}
 
@@ -3460,8 +3440,8 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		Graph->AddNode(Node, false, false);
 		Node->CreateNewGuid();
 
-		// A action define quais pinos de gatilho existem (Started, Triggered,
-		// Completed...), entao ela precisa estar posta antes de alocar pinos.
+		// The action defines which trigger pins exist (Started, Triggered,
+		// Completed...), so it has to be set before allocating pins.
 		if (FObjectProperty* ActionProperty = FindFProperty<FObjectProperty>(NodeClass, TEXT("InputAction")))
 		{
 			ActionProperty->SetObjectPropertyValue_InContainer(Node, Action);
@@ -3479,22 +3459,21 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		Node->CreateNewGuid();
 		FinalizeNode(Node);
 
-		// A classe tem que entrar antes dos outros argumentos: e' ela que faz
-		// os pinos de Expose on Spawn existirem. Aplicada na ordem normal, os
-		// outros argumentos chegariam antes dos pinos deles e virariam
-		// "o node nao tem pino X" -- um erro que nao explicaria nada.
+		// The class has to go in before the other arguments: it is what makes the
+		// Expose on Spawn pins exist. Applied in the normal order, the other
+		// arguments would arrive before their pins and become "the node has no
+		// pin X" -- an error that would explain nothing.
 		FString ClassValue;
 		for (const FNodeScribeArg& Arg : Statement.Args)
 		{
-			const FString PinName = FNodeScribeCatalog::Normalize(Arg.PinName);
-			if (PinName == TEXT("class") || PinName == TEXT("classe"))
+			if (FNodeScribeCatalog::Normalize(Arg.PinName) == TEXT("class"))
 			{
 				ClassValue = Arg.Value;
 				break;
 			}
 		}
 
-		// Sem nome de pino, o primeiro argumento e' a classe: `Create Widget (WBP_X)`.
+		// Without a pin name, the first argument is the class: `Create Widget (WBP_X)`.
 		if (ClassValue.IsEmpty() && Statement.Args.Num() > 0 && Statement.Args[0].PinName.IsEmpty())
 		{
 			ClassValue = Statement.Args[0].Value;
@@ -3503,7 +3482,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		if (ClassValue.IsEmpty() || ClassValue.StartsWith(TEXT("?")))
 		{
 			AddWarning(Statement.LineNumber,
-				TEXT("Sem `Class`, este node nao tem os pinos de Expose on Spawn. Escolha a classe nele."));
+				TEXT("Without `Class`, this node has no Expose on Spawn pins. Pick the class on it."));
 			return Node;
 		}
 
@@ -3514,7 +3493,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		if (!SpawnClass)
 		{
 			AddError(Statement.LineNumber, FString::Printf(
-				TEXT("Nao achei a classe `%s`, entao os pinos de Expose on Spawn nao existem."), *ClassValue));
+				TEXT("Could not find class `%s`, so the Expose on Spawn pins do not exist."), *ClassValue));
 			return Node;
 		}
 
@@ -3522,17 +3501,18 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		{
 			Schema->TrySetDefaultObject(*ClassPin, SpawnClass);
 
-			// `PinDefaultValueChanged` e' o hook que o editor dispara quando voce
-			// escolhe a classe no dropdown, e e' ele que cria os pinos de Expose
-			// on Spawn. `ReconstructNode` sozinho refaz o node com os pinos
-			// padrao -- o titulo ate' muda, o que engana, mas os pinos nao vem.
+			// `PinDefaultValueChanged` is the hook the editor fires when you pick
+			// the class in the dropdown, and it is what creates the Expose on
+			// Spawn pins. `ReconstructNode` alone rebuilds the node with the
+			// default pins -- the title even changes, which is misleading, but
+			// the pins do not come.
 			Node->PinDefaultValueChanged(ClassPin);
 		}
 
 		return Node;
 	}
 
-	// --- Make / Break de struct ------------------------------------------
+	// --- Struct Make / Break ---------------------------------------------
 	{
 		FString StructName;
 		bool bIsBreak = false;
@@ -3549,19 +3529,19 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 
 		StructName.TrimStartAndEndInline();
 
-		// So' vira node de struct se a struct existir mesmo. `Make Literal Int`
-		// e afins continuam caindo no catalogo de funcoes, que e' onde moram.
+		// Only becomes a struct node if the struct really exists. `Make Literal
+		// Int` and friends keep falling into the function catalog, where they live.
 		if (UScriptStruct* Struct = FindStructByFriendlyName(StructName))
 		{
-			// Algumas structs trazem a propria funcao de quebrar ou montar, e a
-			// Engine avisa na compilacao quando o node generico e' usado numa
-			// delas: "The structure cannot be broken using generic 'break' node.
-			// Try use specialized 'break' function if available."
+			// Some structs bring their own break or make function, and the Engine
+			// warns at compile time when the generic node is used on one of them:
+			// "The structure cannot be broken using generic 'break' node. Try use
+			// specialized 'break' function if available."
 			//
-			// O aviso e' de graca para quem escreve o texto -- nem da' para
-			// escolher o node especializado pelo formato --, entao a escolha e'
-			// aqui. `Vector`, `Rotator` e `Transform`, que sao os mais escritos,
-			// estao todos nesse caso.
+			// The warning is free for whoever writes the text -- the format cannot
+			// even choose the specialised node --, so the choice is made here.
+			// `Vector`, `Rotator` and `Transform`, the most written ones, are all
+			// in that case.
 			const TCHAR* const MetaKey = bIsBreak ? TEXT("HasNativeBreak") : TEXT("HasNativeMake");
 			if (Struct->HasMetaData(MetaKey))
 			{
@@ -3592,7 +3572,7 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		}
 	}
 
-	// --- Get / Set de variavel -------------------------------------------
+	// --- Variable Get / Set ----------------------------------------------
 	{
 		FString VariableName;
 		bool bIsSetter = false;
@@ -3606,25 +3586,20 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			VariableName = Expression.RightChop(4);
 			bIsSetter = true;
 		}
-		else if (Expression.StartsWith(TEXT("Definir "), ESearchCase::IgnoreCase))
-		{
-			VariableName = Expression.RightChop(8);
-			bIsSetter = true;
-		}
 
 		VariableName.TrimStartAndEndInline();
 
-		// So' trata como variavel se ela existir de fato. Assim `Get Player Controller`
-		// continua caindo no catalogo de funcoes, que e' onde ele mora.
-		// Somente-leitura nao vira Set. `LeaderPoseComponent` e' `BlueprintReadOnly`
-		// e entrava como setter assim mesmo -- escondendo a funcao
-		// `SetLeaderPoseComponent`, que e' quem faz o trabalho de verdade (o mapa
-		// de ossos entre os dois meshes). O node entrava, e o que ele faz nao e' o
-		// que a linha pedia. Bloqueado aqui, a linha cai no catalogo e acha a
-		// funcao, que e' onde ela sempre deveria ter caido.
-		const bool bSetterBloqueado = bIsSetter && !IsVariableWritable(VariableName);
+		// Only treated as a variable if it really exists. That way `Get Player
+		// Controller` keeps falling into the function catalog, where it lives.
+		// Read-only does not become a Set. `LeaderPoseComponent` is
+		// `BlueprintReadOnly` and used to go in as a setter anyway -- hiding the
+		// function `SetLeaderPoseComponent`, which is what does the real work
+		// (the bone map between the two meshes). The node went in, and what it
+		// does is not what the line asked for. Blocked here, the line falls into
+		// the catalog and finds the function, where it should always have fallen.
+		const bool bSetterBlocked = bIsSetter && !IsVariableWritable(VariableName);
 
-		if (IsBlueprintVariable(VariableName) && !bSetterBloqueado)
+		if (IsBlueprintVariable(VariableName) && !bSetterBlocked)
 		{
 			if (bIsSetter)
 			{
@@ -3640,16 +3615,17 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			return Node;
 		}
 
-		// Variavel de OUTRO objeto: `Set Show Mouse Cursor (Target = $pc, ...)`.
-		// A classe sai do pino que `Target` aponta -- e' a mesma informacao que
-		// o editor usa quando voce arrasta de um pino de objeto e pede o Set.
+		// A variable of ANOTHER object: `Set Show Mouse Cursor (Target = $pc, ...)`.
+		// The class comes from the pin `Target` points at -- it is the same
+		// information the editor uses when you drag from an object pin and ask
+		// for the Set.
 		if (!VariableName.IsEmpty())
 		{
 			if (UClass* TargetClass = FindTargetClassFromArgs(Statement))
 			{
 				FProperty* Property = FindPropertyByFriendlyName(TargetClass, VariableName);
 
-				// Mesmo motivo do bloco acima, do outro lado do `Target`.
+				// Same reason as the block above, on the other side of `Target`.
 				if (Property && bIsSetter
 					&& Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly | CPF_EditConst))
 				{
@@ -3674,8 +3650,8 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			}
 		}
 
-		// Nao e' variavel, mas pode ser subsistema: `Get EnhancedInputLocalPlayerSubsystem`.
-		// Esses nodes nao sao chamada de funcao e nunca apareceriam no catalogo.
+		// Not a variable, but it may be a subsystem: `Get EnhancedInputLocalPlayerSubsystem`.
+		// These nodes are not function calls and would never show up in the catalog.
 		if (!bIsSetter && !VariableName.IsEmpty())
 		{
 			if (UClass* SubsystemClass = FindClassByFriendlyNameInternal(VariableName))
@@ -3709,28 +3685,28 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 
 	if (bHandled)
 	{
-		// Um handler especial reconheceu a forma mas ja' reportou o problema.
+		// A special handler recognised the form but already reported the problem.
 		return nullptr;
 	}
 
 	const FNodeScribeLookup Lookup = FNodeScribeCatalog::Get().FindFunction(
 		Statement.NodeExpression, GetSelfClass(), nullptr);
 
-	// Macros da biblioteca padrao (ForEachLoop, DoOnce, Gate...).
+	// Standard library macros (ForEachLoop, DoOnce, Gate...).
 	//
-	// Nomear a saida (`x = ...`) faz uma funcao PURA de mesmo nome ter
-	// prioridade: `valido = Is Valid (...)` quer o bool, nao a macro. Mas so'
-	// quando essa funcao existe de fato -- `loop = For Each Loop (...)` nomeia
-	// a saida para poder escrever `$loop.Array Element`, e nao ha' funcao
-	// nenhuma com esse nome. Antes o nome sozinho descartava a macro, e o
-	// ForEachLoop nomeado simplesmente nao era encontrado.
+	// Naming the output (`x = ...`) gives priority to a PURE function of the
+	// same name: `valid = Is Valid (...)` wants the bool, not the macro. But only
+	// when that function really exists -- `loop = For Each Loop (...)` names the
+	// output to be able to write `$loop.Array Element`, and there is no function
+	// with that name. Before, the name alone discarded the macro, and the named
+	// ForEachLoop was simply not found.
 	const bool bPureFunctionWins = !Statement.OutputName.IsEmpty()
 		&& Lookup.IsConfident()
 		&& Lookup.Function->HasAnyFunctionFlags(FUNC_BlueprintPure);
 
 	if (!bPureFunctionWins)
 	{
-		if (UEdGraph* MacroGraph = FindStandardMacroGraph(Statement.NodeExpression))
+		if (UEdGraph* MacroGraph = FindStandardMacroGraph(Statement.NodeExpression, GetSelfClass()))
 		{
 			UK2Node_MacroInstance* Node = AllocateNode<UK2Node_MacroInstance>();
 			Node->SetMacroGraph(MacroGraph);
@@ -3741,16 +3717,16 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 
 	if (Lookup.IsConfident())
 	{
-		// Acao assincrona nao e' chamada de funcao: e' um node proprio, com uma
-		// saida de execucao para cada delegate do proxy (`On Connected`,
-		// `On Disconnected`). Essas saidas ja' sao pinos de execucao comuns,
-		// entao os rotulos indentados do formato servem sem nada novo.
+		// An async action is not a function call: it is a node of its own, with
+		// one execution output per proxy delegate (`On Connected`,
+		// `On Disconnected`). Those outputs are already regular execution pins,
+		// so the format's indented labels work with nothing new.
 		if (FNodeScribeCatalog::IsAsyncActionFactory(Lookup.Function))
 		{
 			UK2Node_AsyncAction* Node = AllocateNode<UK2Node_AsyncAction>();
 
-			// Antes de alocar os pinos: sao os delegates do proxy que dizem quais
-			// pinos existem, e o proxy so' e' conhecido depois desta linha.
+			// Before allocating the pins: the proxy's delegates say which pins
+			// exist, and the proxy is only known after this line.
 			Node->InitializeProxyFromFunction(Lookup.Function);
 			FinalizeNode(Node);
 			return Node;
@@ -3765,28 +3741,29 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 	if (Lookup.IsAmbiguous())
 	{
 		const FString Reason = FString::Printf(
-			TEXT("Mais de uma funcao combina. Escreva o nome exato de uma delas:\n  %s"),
+			TEXT("More than one function matches. Write the exact name of one of them:\n  %s"),
 			*FString::Join(Lookup.Candidates, TEXT("\n  ")));
 
-		// Ambiguo tambem e' falta de vocabulario: o nome curto existe e nao chega
-		// para decidir. Ou falta um apelido, ou falta o formato saber desempatar.
-		AnotaNomeNaoResolvido(TEXT("ambiguo"), Statement.NodeExpression);
+		// Ambiguous is also missing vocabulary: the short name exists and is not
+		// enough to decide. Either an alias is missing, or the format lacks a
+		// way to break the tie.
+		RecordUnresolvedName(TEXT("ambiguous"), Statement.NodeExpression);
 
 		AddError(Statement.LineNumber, FString::Printf(
-			TEXT("`%s` e' ambiguo. Candidatos: %s"),
+			TEXT("`%s` is ambiguous. Candidates: %s"),
 			*Statement.NodeExpression, *FString::Join(Lookup.Candidates, TEXT(" | "))));
 
 		return CreateErrorComment(Statement, Reason);
 	}
 
-	// A linha comeca com verbo de dispatcher e mesmo assim nao virou node: em vez
-	// de repetir "nao achei", diga quais dispatchers a classe realmente tem. E'
-	// a diferenca entre "errei o nome" e "esse recurso nao existe".
+	// The line starts with a dispatcher verb and still did not become a node:
+	// instead of repeating "not found", say which dispatchers the class really
+	// has. It is the difference between "I got the name wrong" and "that
+	// feature does not exist".
 	FString DelegateHint;
 	{
 		static const TCHAR* const DelegateVerbs[] = {
-			TEXT("Chamar "), TEXT("Call "), TEXT("Vincular "), TEXT("Bind "),
-			TEXT("Desvincular "), TEXT("Unbind "), TEXT("Limpar "), TEXT("Clear ")
+			TEXT("Call "), TEXT("Bind "), TEXT("Unbind "), TEXT("Clear ")
 		};
 
 		const FString Expression = Statement.NodeExpression.TrimStartAndEnd();
@@ -3808,98 +3785,86 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 			}
 
 			DelegateHint = Available.Num() > 0
-				? FString::Printf(TEXT("\n\nSe era um dispatcher: os deste Blueprint sao %s"),
+				? FString::Printf(TEXT("\n\nIf it was a dispatcher: this Blueprint's are %s"),
 					*FString::Join(Available, TEXT(", ")))
-				: TEXT("\n\nSe era um dispatcher: este Blueprint nao tem nenhum.");
+				: TEXT("\n\nIf it was a dispatcher: this Blueprint has none.");
 
 			break;
 		}
 	}
 
-	AnotaNomeNaoResolvido(TEXT("node"), Statement.NodeExpression);
+	RecordUnresolvedName(TEXT("node"), Statement.NodeExpression);
 
 	AddError(Statement.LineNumber, FString::Printf(
-		TEXT("Nao achei nenhum node chamado `%s`.%s"),
+		TEXT("Could not find any node called `%s`.%s"),
 		*Statement.NodeExpression, *DelegateHint.Replace(TEXT("\n\n"), TEXT(" "))));
 
 	return CreateErrorComment(Statement,
-		TEXT("Nenhum node com esse nome foi encontrado.") + DelegateHint);
+		TEXT("No node with that name was found.") + DelegateHint);
 }
 
 namespace
 {
 	/**
-	 * `estado Parado` -> "Parado". Sem o prefixo, nao e' declaracao de estado.
+	 * `state Idle` -> "Idle". Without the prefix, it is not a state declaration.
 	 *
-	 * O prefixo e' obrigatorio de proposito: dentro de uma maquina de estados
-	 * um rotulo solto seria indistinguivel de uma entrada de pose, e escolher
-	 * pelo formato do nome seria adivinhar.
+	 * The prefix is mandatory on purpose: inside a state machine a bare label
+	 * would be indistinguishable from a pose input, and choosing by the shape of
+	 * the name would be guessing.
 	 */
 	bool ParseStateLabel(const FString& Label, FString& OutName)
 	{
-		for (const TCHAR* Prefix : { TEXT("estado "), TEXT("state ") })
+		if (Label.StartsWith(TEXT("state "), ESearchCase::IgnoreCase))
 		{
-			if (Label.StartsWith(Prefix, ESearchCase::IgnoreCase))
-			{
-				OutName = Label.Mid(FCString::Strlen(Prefix)).TrimStartAndEnd();
-				return !OutName.IsEmpty();
-			}
+			OutName = Label.Mid(6).TrimStartAndEnd();
+			return !OutName.IsEmpty();
 		}
 		return false;
 	}
 
 	/**
-	 * `alias Para o Ar` -> "Para o Ar".
+	 * `alias To Air` -> "To Air".
 	 *
-	 * O alias e' um apelido para varios estados de uma vez: uma transicao que
-	 * sai dele sai de todos, sem repetir a regra em cada um. Nao tem sub-grafo
-	 * -- o bloco dele e' a lista dos estados que ele apelida, uma por linha.
+	 * An alias is a nickname for several states at once: a transition leaving
+	 * it leaves all of them, without repeating the rule on each one. It has no
+	 * sub-graph -- its block is the list of states it aliases, one per line.
 	 */
 	bool ParseAliasLabel(const FString& Label, FString& OutName)
 	{
-		for (const TCHAR* Prefix : { TEXT("alias "), TEXT("apelido ") })
+		if (Label.StartsWith(TEXT("alias "), ESearchCase::IgnoreCase))
 		{
-			if (Label.StartsWith(Prefix, ESearchCase::IgnoreCase))
-			{
-				OutName = Label.Mid(FCString::Strlen(Prefix)).TrimStartAndEnd();
-				return !OutName.IsEmpty();
-			}
+			OutName = Label.Mid(6).TrimStartAndEnd();
+			return !OutName.IsEmpty();
 		}
 		return false;
 	}
 
 	/**
-	 * `conduto Para Queda` -> "Para Queda".
+	 * `conduit To Fall` -> "To Fall".
 	 *
-	 * Um conduto nao guarda pose: e' um cruzamento com uma regra so', por onde
-	 * varias transicoes passam em vez de cada uma repetir a mesma condicao. Sem
-	 * palavra propria, `conduto X:` seria indistinguivel de `estado X:` -- e a
-	 * diferenca importa, porque o bloco de um e' pose e o do outro e' regra.
+	 * A conduit holds no pose: it is a crossing with a single rule, which
+	 * several transitions go through instead of each repeating the same
+	 * condition. Without a word of its own, `conduit X:` would be
+	 * indistinguishable from `state X:` -- and the difference matters, because
+	 * the block of one is a pose and the block of the other is a rule.
 	 */
 	bool ParseConduitLabel(const FString& Label, FString& OutName)
 	{
-		for (const TCHAR* Prefix : { TEXT("conduto "), TEXT("conduit ") })
+		if (Label.StartsWith(TEXT("conduit "), ESearchCase::IgnoreCase))
 		{
-			if (Label.StartsWith(Prefix, ESearchCase::IgnoreCase))
-			{
-				OutName = Label.Mid(FCString::Strlen(Prefix)).TrimStartAndEnd();
-				return !OutName.IsEmpty();
-			}
+			OutName = Label.Mid(8).TrimStartAndEnd();
+			return !OutName.IsEmpty();
 		}
 		return false;
 	}
 
-	/** `Parado -> Correndo`, com ou sem `transicao` na frente. */
+	/** `Idle -> Running`, with or without `transition` in front. */
 	bool ParseTransitionLabel(const FString& Label, FString& OutFrom, FString& OutTo)
 	{
 		FString Rest = Label;
-		for (const TCHAR* Prefix : { TEXT("transicao "), TEXT("transi\u00e7\u00e3o "), TEXT("transition ") })
+		if (Rest.StartsWith(TEXT("transition "), ESearchCase::IgnoreCase))
 		{
-			if (Rest.StartsWith(Prefix, ESearchCase::IgnoreCase))
-			{
-				Rest = Rest.Mid(FCString::Strlen(Prefix));
-				break;
-			}
+			Rest = Rest.Mid(11);
 		}
 
 		if (!Rest.Split(TEXT("->"), &OutFrom, &OutTo))
@@ -3912,7 +3877,7 @@ namespace
 		return !OutFrom.IsEmpty() && !OutTo.IsEmpty();
 	}
 
-	/** Onde os estados ficam no sub-grafo: uma fila, com folga para os fios. */
+	/** Where the states go in the sub-graph: a row, with room for the wires. */
 	constexpr int32 StateColumnWidth = 320;
 }
 
@@ -3930,10 +3895,10 @@ UEdGraphNode* FNodeScribeBuildContext::BuildSubGraph(UEdGraph* SubGraph, const T
 		Body.Add(Statements[Index]);
 	}
 
-	// Contexto proprio: o sub-grafo tem outro schema, outro Output Pose e outra
-	// arvore de layout. Compartilhar o nosso faria os dois grafos disputarem o
-	// mesmo estado -- e as `$referencias` de um vazariam para o outro, onde os
-	// pinos nem existem.
+	// A context of its own: the sub-graph has another schema, another Output
+	// Pose and another layout tree. Sharing ours would make both graphs fight
+	// over the same state -- and one's `$references` would leak into the other,
+	// where the pins do not even exist.
 	FNodeScribeBuildContext Nested(SubGraph, Blueprint, FVector2D::ZeroVector);
 	Nested.Run(Body);
 
@@ -3942,9 +3907,9 @@ UEdGraphNode* FNodeScribeBuildContext::BuildSubGraph(UEdGraph* SubGraph, const T
 	Result.WarningCount += Nested.Result.WarningCount;
 	NestedNodes.Append(Nested.Result.CreatedNodes);
 
-	// Frames[0] e' o nivel raiz do bloco, e o LastNode dele e' o node da ultima
-	// linha -- inclusive quando essa linha e' um node puro, que nao entra na
-	// cadeia de fluxo e por isso nao aparece no PendingExec.
+	// Frames[0] is the block's root level, and its LastNode is the node of the
+	// last line -- even when that line is a pure node, which does not enter the
+	// flow chain and so does not show up in PendingExec.
 	return Nested.Frames.Num() > 0 ? Nested.Frames[0].LastNode : nullptr;
 }
 
@@ -3962,15 +3927,15 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 	if (!MachineGraph)
 	{
 		AddError(Statements[First].LineNumber,
-			TEXT("A maquina de estados entrou sem sub-grafo. Nao da' para criar estado dentro dela."));
+			TEXT("The state machine went in without a sub-graph. States cannot be created inside it."));
 		return End;
 	}
 
-	// --- 1a passagem: os estados ------------------------------------------
+	// --- 1st pass: the states ---------------------------------------------
 	//
-	// Todos antes de qualquer transicao. Assim `Parado -> Correndo` pode vir
-	// escrito antes de `estado Correndo`, e um nome errado numa transicao vira
-	// erro em vez de um estado vazio criado por engano.
+	// All of them before any transition. That way `Idle -> Running` can be
+	// written before `state Running`, and a wrong name in a transition becomes
+	// an error instead of an empty state created by mistake.
 	TMap<FString, UAnimStateNodeBase*> States;
 	TArray<FString> DeclaredOrder;
 
@@ -3996,14 +3961,14 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 		if (States.Contains(Key))
 		{
 			AddError(Statement.LineNumber, FString::Printf(
-				TEXT("O estado `%s` ja' foi declarado nesta maquina."), *Name));
+				TEXT("State `%s` was already declared in this machine."), *Name));
 			continue;
 		}
 
-		// Estado, conduto e alias nascem na mesma lista: os tres sao ponta de
-		// transicao. O que muda e' o que vive dentro -- pose no estado, regra no
-		// conduto, uma lista de nomes no alias --, e quem decide isso e' a
-		// classe do node.
+		// State, conduit and alias are born in the same list: all three are
+		// transition ends. What changes is what lives inside -- a pose in the
+		// state, a rule in the conduit, a list of names in the alias --, and the
+		// node's class decides that.
 		UAnimStateNodeBase* State = nullptr;
 		if (bIsAlias)
 		{
@@ -4021,9 +3986,9 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 		FinalizeNode(State);
 		ApplyLabelSettings(State, Statement);
 
-		// O nome de um estado e' o do sub-grafo dele; o de um alias e' um campo,
-		// porque alias nao tem sub-grafo. Pelo virtual, e nao pelo campo:
-		// `BoundGraph` e' declarado em cada subclasse, nao na base.
+		// A state's name is its sub-graph's; an alias's is a field, because an
+		// alias has no sub-graph. Through the virtual, not the field:
+		// `BoundGraph` is declared in each subclass, not in the base.
 		if (UEdGraph* Bound = State->GetBoundGraph())
 		{
 			FBlueprintEditorUtils::RenameGraph(Bound, Name);
@@ -4044,12 +4009,13 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 	if (States.Num() == 0)
 	{
 		AddWarning(Statements[First].LineNumber,
-			TEXT("Esta maquina de estados nao declarou nenhum estado. Use `estado Nome:`."));
+			TEXT("This state machine declared no states. Use `state Name:`."));
 		return End;
 	}
 
-	// O primeiro declarado e' onde a maquina comeca. E' a unica leitura possivel
-	// sem inventar sintaxe: no grafo o Entry aponta para um estado so'.
+	// The first one declared is where the machine starts. It is the only
+	// possible reading without inventing syntax: in the graph the Entry points
+	// at a single state.
 	if (MachineGraph->EntryNode)
 	{
 		if (UEdGraphPin* EntryPin = MachineGraph->EntryNode->GetOutputPin())
@@ -4063,7 +4029,7 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 		}
 	}
 
-	// --- 2a passagem: o conteudo de cada estado e cada transicao ----------
+	// --- 2nd pass: the contents of each state and each transition ---------
 	for (int32 Index = First; Index < End; ++Index)
 	{
 		const FNodeScribeStatement& Statement = Statements[Index];
@@ -4100,15 +4066,16 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 
 				UAnimStateNodeBase* Target = States.FindRef(FNodeScribeCatalog::Normalize(Wanted));
 
-				// So' estado de verdade. A Engine varre o grafo por
-				// `UAnimStateNode` ao reconstruir as referencias do alias, entao
-				// um conduto ou outro alias na lista some no proximo save -- sem
-				// erro, sem aviso, e a transicao que saia dali para de existir.
+				// Only real states. The Engine sweeps the graph for
+				// `UAnimStateNode` when rebuilding the alias's references, so a
+				// conduit or another alias in the list vanishes on the next save --
+				// no error, no warning, and the transition that left from there
+				// stops existing.
 				if (!Target || !Target->IsA<UAnimStateNode>())
 				{
 					AddError(Line.LineNumber, FString::Printf(
-						TEXT("`%s` nao e' um estado desta maquina, entao nao entra no alias `%s`. ")
-						TEXT("Alias so' aponta para `estado`, nao para conduto nem para outro alias."),
+						TEXT("`%s` is not a state of this machine, so it does not go into alias `%s`. ")
+						TEXT("An alias only points at a `state`, not at a conduit nor at another alias."),
 						*Wanted, *Name));
 					continue;
 				}
@@ -4130,10 +4097,11 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 
 			UEdGraphNode* Last = BuildSubGraph(Bound, Statements, Index + 1, BodyEnd);
 
-			// Num estado o bloco e' pose, e ela se liga no Output Pose de dentro
-			// do proprio sub-grafo. Num conduto o bloco e' regra: termina num
-			// bool que precisa chegar no Can Enter Transition, igual ao de uma
-			// transicao. Sem isso o conduto compila e nunca deixa passar.
+			// In a state the block is a pose, and it links into the Output Pose
+			// inside its own sub-graph. In a conduit the block is a rule: it ends
+			// in a bool that needs to reach Can Enter Transition, just like a
+			// transition's. Without this the conduit compiles and never lets
+			// anything through.
 			if (bIsConduit)
 			{
 				WireRule(Bound, Last, Statement, BodyEnd > Index + 1, false);
@@ -4146,9 +4114,9 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 		if (!ParseTransitionLabel(Statement.Label, From, To))
 		{
 			AddError(Statement.LineNumber, FString::Printf(
-				TEXT("`%s:` nao e' estado, conduto, alias nem transicao. Dentro de uma maquina de ")
-				TEXT("estados so' ha' `estado Nome:`, `conduto Nome:`, `alias Nome:` e ")
-				TEXT("`Origem -> Destino:`."), *Statement.Label));
+				TEXT("`%s:` is not a state, conduit, alias nor transition. Inside a state machine ")
+				TEXT("there are only `state Name:`, `conduit Name:`, `alias Name:` and ")
+				TEXT("`From -> To:`."), *Statement.Label));
 			continue;
 		}
 
@@ -4164,7 +4132,7 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 			}
 
 			AddError(Statement.LineNumber, FString::Printf(
-				TEXT("A transicao `%s` fala de um estado que nao existe (`%s`). Estados desta maquina: %s"),
+				TEXT("Transition `%s` mentions a state that does not exist (`%s`). States of this machine: %s"),
 				*Statement.Label, *(FromState ? To : From), *FString::Join(Known, TEXT(", "))));
 			continue;
 		}
@@ -4172,7 +4140,7 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 		if (FromState == ToState)
 		{
 			AddError(Statement.LineNumber, FString::Printf(
-				TEXT("A transicao `%s` sai e chega no mesmo estado."), *Statement.Label));
+				TEXT("Transition `%s` leaves and arrives at the same state."), *Statement.Label));
 			continue;
 		}
 
@@ -4181,7 +4149,7 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 		ApplyLabelSettings(Transition, Statement);
 		Transition->CreateConnections(FromState, ToState);
 
-		// Em cima do fio, que e' onde o editor a desenha.
+		// On top of the wire, which is where the editor draws it.
 		Transition->NodePosX = (FromState->NodePosX + ToState->NodePosX) / 2;
 		Transition->NodePosY = FromState->NodePosY - 120;
 
@@ -4191,12 +4159,12 @@ int32 FNodeScribeBuildContext::BuildStateMachine(UAnimGraphNode_StateMachineBase
 			? BuildSubGraph(Transition->BoundGraph, Statements, Index + 1, BodyEnd)
 			: nullptr;
 
-		// Com a regra automatica ligada a transicao dispara quando a animacao do
-		// estado de origem esta' acabando, e por isso nasce sem condicao
-		// nenhuma. Sem essa ressalva, toda transicao automatica lida da Epic
-		// voltava com um aviso de que nunca dispararia -- o que era falso, e
-		// ensinava a ignorar justamente o aviso que existe para o caso em que e'
-		// verdade.
+		// With the automatic rule on, the transition fires when the source
+		// state's animation is ending, and that is why it is born with no
+		// condition at all. Without this exception, every automatic transition
+		// read from Epic came back with a warning that it would never fire --
+		// which was false, and taught people to ignore precisely the warning that
+		// exists for the case where it is true.
 		WireRule(Transition->BoundGraph, RuleResult, Statement,
 			BodyEnd > Index + 1, Transition->bAutomaticRuleBasedOnSequencePlayerInState);
 	}
@@ -4210,13 +4178,13 @@ void FNodeScribeBuildContext::WireRule(UEdGraph* RuleGraph, UEdGraphNode* RuleRe
 	if (!RuleGraph)
 	{
 		AddWarning(Statement.LineNumber, FString::Printf(
-			TEXT("`%s` nasceu sem sub-grafo. A regra nao foi ligada."), *Statement.Label));
+			TEXT("`%s` was born without a sub-graph. The rule was not linked."), *Statement.Label));
 		return;
 	}
 
-	// A regra e' um grafo de dado que termina num bool. Ligar o resultado e'
-	// trabalho do plugin, como qualquer outra ligacao que o texto nao escreve --
-	// e sem isso a transicao nunca dispara.
+	// The rule is a data graph that ends in a bool. Linking the result is the
+	// plugin's job, like any other link the text does not write -- and without
+	// it the transition never fires.
 	UAnimGraphNode_TransitionResult* ResultNode = nullptr;
 	for (UEdGraphNode* Node : RuleGraph->Nodes)
 	{
@@ -4227,29 +4195,30 @@ void FNodeScribeBuildContext::WireRule(UEdGraph* RuleGraph, UEdGraphNode* RuleRe
 		}
 	}
 
-	// Estes calavam. Uma transicao sem regra compila, roda, e nunca dispara --
-	// o pino vazio parece um `false` deliberado, e nada na tela distingue "o
-	// texto nao pediu regra" de "o plugin nao conseguiu ligar".
+	// These used to stay silent. A transition without a rule compiles, runs,
+	// and never fires -- the empty pin looks like a deliberate `false`, and
+	// nothing on screen tells "the text asked for no rule" apart from "the
+	// plugin could not link it".
 	if (!ResultNode)
 	{
 		AddWarning(Statement.LineNumber, FString::Printf(
-			TEXT("`%s` nasceu sem node de resultado. A regra nao foi ligada."), *Statement.Label));
+			TEXT("`%s` was born without a result node. The rule was not linked."), *Statement.Label));
 		return;
 	}
 
 	UEdGraphPin* CanEnter = ResultNode->FindPin(TEXT("bCanEnterTransition"));
 	if (!CanEnter)
 	{
-		TArray<FString> Pinos;
+		TArray<FString> Pins;
 		for (const UEdGraphPin* Pin : ResultNode->Pins)
 		{
-			Pinos.Add(Pin->PinName.ToString());
+			Pins.Add(Pin->PinName.ToString());
 		}
 
 		AddWarning(Statement.LineNumber, FString::Printf(
-			TEXT("O resultado de `%s` nao tem pino `bCanEnterTransition`. Tem: %s"),
+			TEXT("The result of `%s` has no `bCanEnterTransition` pin. It has: %s"),
 			*Statement.Label,
-			Pinos.Num() > 0 ? *FString::Join(Pinos, TEXT(", ")) : TEXT("nenhum")));
+			Pins.Num() > 0 ? *FString::Join(Pins, TEXT(", ")) : TEXT("none")));
 		return;
 	}
 
@@ -4260,59 +4229,59 @@ void FNodeScribeBuildContext::WireRule(UEdGraph* RuleGraph, UEdGraphNode* RuleRe
 
 	if (!bHasBody)
 	{
-		// Bloco vazio. Com a regra automatica isso e' o certo: a transicao
-		// dispara pelo fim da animacao do estado de origem, e uma condicao
-		// escrita ali seria ignorada. Sem ela, e' uma transicao que nunca
-		// dispara -- e nada na tela diz isso.
+		// Empty block. With the automatic rule that is correct: the transition
+		// fires at the end of the source state's animation, and a condition
+		// written there would be ignored. Without it, it is a transition that
+		// never fires -- and nothing on screen says so.
 		if (!bRuleOptional)
 		{
 			AddWarning(Statement.LineNumber, FString::Printf(
-				TEXT("`%s` ficou sem regra. Ela compila e nunca dispara -- se a intencao era ")
-				TEXT("disparar no fim da animacao, escreva ")
+				TEXT("`%s` has no rule. It compiles and never fires -- if the intent was ")
+				TEXT("to fire at the end of the animation, write ")
 				TEXT("`(Automatic Rule Based on Sequence Player in State = true)`."),
 				*Statement.Label));
 		}
 		return;
 	}
 
-	// O ultimo node do bloco e' o resultado da regra, do mesmo jeito que o
-	// ultimo node de um galho de pose e' o resultado do galho.
+	// The block's last node is the rule's result, the same way the last node of
+	// a pose branch is the branch's result.
 	//
-	// Quem diz qual e' esse node e' o percurso do bloco, nao a ordem em que os
-	// nodes cairam no grafo: o argumento de um node nasce *depois* dele, entao
-	// varrer `Nodes` de tras para frente pega o `$Ground Speed` da regra em vez
-	// da comparacao que o consome -- e ai a transicao fica sem regra, com um
-	// aviso de tipo trocado no lugar.
+	// What says which node that is, is the walk of the block, not the order in
+	// which the nodes landed in the graph: a node's argument is born *after* it,
+	// so sweeping `Nodes` backwards picks the rule's `$Ground Speed` instead of
+	// the comparison that consumes it -- and then the transition ends up without
+	// a rule, with a wrong-type warning in its place.
 	UEdGraphPin* Output = RuleResult ? FindPrimaryOutput(RuleResult) : nullptr;
 	if (!Output)
 	{
 		AddWarning(Statement.LineNumber, FString::Printf(
-			TEXT("A regra de `%s` nao terminou num valor. Ela nunca dispara."), *Statement.Label));
+			TEXT("The rule of `%s` did not end in a value. It never fires."), *Statement.Label));
 		return;
 	}
 
-	// Os dois pinos vivem no grafo da regra, nao no da maquina. Ligar pelo
-	// schema de fora produz um fio que o grafo de la' nao reconhece: ele
-	// aparece, e some no primeiro refresh do Blueprint -- que e' logo ali, no
-	// MarkBlueprintAsStructurallyModified. Quem valida a ligacao tem que ser o
-	// schema do grafo onde os pinos moram.
+	// Both pins live in the rule's graph, not the machine's. Linking through the
+	// outer schema produces a wire the inner graph does not recognise: it shows
+	// up, and vanishes on the Blueprint's first refresh -- which comes right
+	// away, in MarkBlueprintAsStructurallyModified. The one validating the link
+	// has to be the schema of the graph where the pins live.
 	if (const UEdGraphSchema* RuleSchema = RuleGraph->GetSchema())
 	{
 		RuleSchema->TryCreateConnection(Output, CanEnter);
 	}
 
-	// Conferir em vez de confiar.
+	// Check instead of trusting.
 	if (CanEnter->LinkedTo.Num() == 0)
 	{
 		AddWarning(Statement.LineNumber, FString::Printf(
-			TEXT("A regra de `%s` (`%s`) nao entrou no Can Enter Transition. Ela nunca dispara."),
+			TEXT("The rule of `%s` (`%s`) did not reach Can Enter Transition. It never fires."),
 			*Statement.Label,
 			*RuleResult->GetNodeTitle(ENodeTitleType::ListView).ToString()));
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Percurso
+// Walk
 // ---------------------------------------------------------------------------
 
 void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements)
@@ -4325,14 +4294,14 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 	PreCreateCustomEvents(Statements);
 
-	// Por indice, e nao por range-for, porque a maquina de estados nao le' o
-	// bloco dela linha a linha: pega o bloco inteiro e devolve onde parou.
+	// By index, not by range-for, because the state machine does not read its
+	// block line by line: it takes the whole block and returns where it stopped.
 	for (int32 Index = 0; Index < Statements.Num(); ++Index)
 	{
 		const FNodeScribeStatement& Statement = Statements[Index];
 
-		// Declaracao nao cria node nem participa da cadeia: e' so' uma variavel
-		// passando a existir antes das linhas que a usam.
+		// A declaration creates no node and takes no part in the chain: it is
+		// just a variable coming into existence before the lines that use it.
 		if (Statement.bIsVariable)
 		{
 			CreateDeclaredVariable(Statement);
@@ -4341,8 +4310,8 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 		if (Statement.bIsLabel)
 		{
-			// Um rotulo fecha qualquer bloco no mesmo nivel ou mais fundo,
-			// para que `verdadeiro:` e `falso:` sejam irmaos, nao aninhados.
+			// A label closes any block at the same level or deeper, so that
+			// `true:` and `false:` are siblings, not nested.
 			while (Frames.Num() > 1 && Frames.Top().Indent >= Statement.Indent)
 			{
 				Frames.Pop();
@@ -4354,30 +4323,31 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 			if (!Owner)
 			{
 				AddError(Statement.LineNumber, FString::Printf(
-					TEXT("O rotulo `%s:` nao tem node antes dele."), *Statement.Label));
+					TEXT("Label `%s:` has no node before it."), *Statement.Label));
 				continue;
 			}
 
-			// O node anterior nao resolveu e virou comentario. Reclamar que o
-			// rotulo nao casa com as saidas dele mandaria procurar o problema
-			// na linha errada -- a causa ja' foi relatada uma linha acima.
+			// The previous node did not resolve and became a comment. Complaining
+			// that the label does not match its outputs would send people looking
+			// for the problem on the wrong line -- the cause was already reported
+			// one line above.
 			if (Owner->IsA<UEdGraphNode_Comment>())
 			{
 				continue;
 			}
 
-			// Debaixo de uma maquina de estados o rotulo nao nomeia pino nenhum:
-			// nomeia um estado ou uma transicao, e o corpo dele vive noutro
-			// grafo. O bloco sai inteiro do percurso aqui.
+			// Under a state machine a label names no pin: it names a state or a
+			// transition, and its body lives in another graph. The whole block
+			// leaves the walk here.
 			if (UAnimGraphNode_StateMachineBase* Machine = Cast<UAnimGraphNode_StateMachineBase>(Owner))
 			{
 				Index = BuildStateMachine(Machine, Statements, Index) - 1;
 				continue;
 			}
 
-			// No AnimGraph o rotulo nomeia uma *entrada* de pose: `True Pose:` de
-			// um blend abre o galho que alimenta aquele pino. A arvore de um
-			// AnimGraph e' de quem entra, nao de quem continua.
+			// In the AnimGraph a label names a pose *input*: `True Pose:` of a
+			// blend opens the branch that feeds that pin. An AnimGraph's tree is
+			// about what goes in, not what comes next.
 			const bool bLabelsAreInputs = bAnimGraph && GetExecOutputs(Owner).Num() == 0;
 
 			const TArray<UEdGraphPin*> ExecOutputs = bLabelsAreInputs
@@ -4412,15 +4382,16 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 				}
 
 				AddError(Statement.LineNumber, FString::Printf(
-					TEXT("`%s:` nao e' %s deste node. %s: %s"),
+					TEXT("`%s:` is not %s of this node. %s: %s"),
 					*Statement.Label,
-					bLabelsAreInputs ? TEXT("uma entrada de pose") : TEXT("uma saida"),
-					bLabelsAreInputs ? TEXT("Entradas") : TEXT("Saidas"),
+					bLabelsAreInputs ? TEXT("a pose input") : TEXT("an output"),
+					bLabelsAreInputs ? TEXT("Inputs") : TEXT("Outputs"),
 					*FString::Join(Available, TEXT(", "))));
 				continue;
 			}
 
-			// Este node ganhou rotulo: sai da lista de "parou sem escolher ramo".
+			// This node got a label: it leaves the "stopped without choosing a
+			// branch" list.
 			UnbranchedNodes.RemoveAll([Owner](const FUnbranchedNode& Entry)
 			{
 				return Entry.Node == Owner;
@@ -4431,8 +4402,8 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 			if (bLabelsAreInputs)
 			{
-				// O bloco comeca sem nada antes dele: o primeiro node do galho e'
-				// uma ponta da arvore, nao a continuacao do blend.
+				// The block starts with nothing before it: the branch's first node
+				// is a tip of the tree, not the blend's continuation.
 				Branch.FlowSink = FPinRef(Chosen);
 			}
 			else
@@ -4440,8 +4411,8 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 				Branch.PendingExec = FPinRef(Chosen);
 			}
 
-			// O galho de pose desenha a' esquerda: ali o fluxo anda para o
-			// Output Pose, e o que alimenta um node fica antes dele.
+			// A pose branch draws to the left: there the flow walks towards the
+			// Output Pose, and what feeds a node comes before it.
 			Branch.BaseX = bLabelsAreInputs
 				? Owner->NodePosX - ColumnWidth
 				: Owner->NodePosX + ColumnWidth;
@@ -4465,13 +4436,13 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 		FFrame& Frame = Frames.Top();
 
-		// Node adotado ja' estava no grafo -- o Output Pose e' o caso. Mover e'
-		// mexer no que o usuario arrumou, e contar seria dizer que criamos algo
-		// que sempre esteve la'.
+		// An adopted node was already in the graph -- the Output Pose is the
+		// case. Moving it is touching what the user arranged, and counting it
+		// would be saying we created something that was always there.
 		const bool bAdopted = AdoptedNodes.Contains(Node);
 
-		// Nodes de dado nao ocupam coluna: eles descem em pilha embaixo de quem
-		// os consome, e quem cuida disso e' LayoutDataNodes(), no fim.
+		// Data nodes take no column: they stack below whoever consumes them, and
+		// LayoutDataNodes() takes care of that, at the end.
 		if (!bAdopted && !IsPureDataNode(Node))
 		{
 			Node->NodePosX = Frame.BaseX + (Frame.Column * ColumnWidth);
@@ -4484,8 +4455,8 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 			Result.CreatedNodes.Add(Node);
 		}
 
-		// Um comentario ocupa o lugar de uma linha que nao resolveu; aplicar os
-		// argumentos dela geraria uma segunda leva de erros sobre o mesmo problema.
+		// A comment takes the place of a line that did not resolve; applying its
+		// arguments would produce a second batch of errors about the same problem.
 		if (!Node->IsA<UEdGraphNode_Comment>())
 		{
 			ApplyArguments(Node, Statement);
@@ -4500,9 +4471,9 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		{
 			if (Node->IsA<UEdGraphNode_Comment>())
 			{
-				// A linha nao virou node. Guardar o nome evita duas mensagens
-				// que nao ajudam ninguem: "nao tem saida de dado" aqui, e
-				// "`$nome` nao existe" em toda linha que o usasse depois.
+				// The line did not become a node. Keeping the name avoids two
+				// messages that help nobody: "has no data output" here, and
+				// "`$name` does not exist" on every later line that used it.
 				FailedOutputs.Add(Statement.OutputName, Statement.LineNumber);
 			}
 			else
@@ -4523,24 +4494,24 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		}
 		else if (ExecOutputs.Num() == 0)
 		{
-			// Node puro: e' so' um valor, nao um passo. Ja' esta' na fila de
-			// posicionamento e nao participa da cadeia de execucao.
+			// Pure node: it is just a value, not a step. It is already queued for
+			// positioning and takes no part in the execution chain.
 			Frame.LastNode = Node;
 			continue;
 		}
-		// Sem entrada mas com saida = evento. Comeca uma cadeia nova em vez de
-		// continuar a anterior, entao nao ha nada a ligar antes dele.
+		// No input but an output = event. It starts a new chain instead of
+		// continuing the previous one, so there is nothing to link before it.
 
-		// O bloco alimenta uma entrada de pose la' em cima. Cada node liga por
-		// cima do anterior; o pino so' aceita um fio, entao sobra o ultimo --
-		// que e' o resultado do bloco.
+		// The block feeds a pose input up there. Each node links over the
+		// previous one; the pin only accepts one wire, so the last one remains --
+		// which is the block's result.
 		if (ExecOutputs.Num() == 1)
 		{
 			if (UEdGraphPin* Sink = Frame.FlowSink.Resolve())
 			{
-				// Quebrar antes de ligar, em vez de contar que o pino recuse o
-				// segundo fio: se a saida de pose aceitar varios destinos, o node
-				// anterior ficaria alimentando o blend *e* o node seguinte.
+				// Break before linking, instead of counting on the pin refusing
+				// the second wire: if the pose output accepts several targets, the
+				// previous node would keep feeding the blend *and* the next node.
 				Sink->BreakAllPinLinks();
 				Connect(ExecOutputs[0], Sink, Statement.LineNumber);
 			}
@@ -4552,8 +4523,8 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		}
 		else if (ExecOutputs.Num() > 1)
 		{
-			// Varias saidas: escolher uma seria adivinhar por qual caminho o
-			// usuario quer seguir. A cadeia para aqui ate ele abrir um rotulo.
+			// Several outputs: choosing one would be guessing which path the user
+			// wants to follow. The chain stops here until they open a label.
 			Frame.PendingExec = FPinRef();
 
 			TArray<FString> Names;
@@ -4572,17 +4543,17 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		Frame.LastNode = Node;
 	}
 
-	// So' agora da' para saber quais ficaram mesmo sem rotulo.
+	// Only now is it possible to know which ones really stayed without a label.
 	for (const FUnbranchedNode& Entry : UnbranchedNodes)
 	{
 		AddInfo(Entry.Line, FString::Printf(
-			TEXT("Este node tem varias saidas (%s) e nenhum rotulo indentado. A cadeia parou aqui."),
+			TEXT("This node has several outputs (%s) and no indented label. The chain stopped here."),
 			*Entry.Outputs));
 	}
 
-	// Get que o plugin criou por conta propria e que nao ligou em nada nao
-	// representa nenhuma linha do texto: e' resto de uma ligacao que falhou.
-	// O aviso da falha ja' saiu; deixar o node so' encheria o grafo.
+	// A Get the plugin created on its own and that linked to nothing stands for
+	// no line of the text: it is the leftover of a link that failed. The failure
+	// warning already came out; keeping the node would only clutter the graph.
 	for (UEdGraphNode* GetNode : AutoCreatedGets)
 	{
 		bool bConnected = false;
@@ -4609,8 +4580,8 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 	LayoutDataNodes();
 	ReportEmptyPoseInputs();
 
-	// Depois do layout: eles vivem noutro grafo e nada aqui tem o que posicionar
-	// neles. Entram so' para a contagem e para o Ctrl+Z pegar tudo.
+	// After the layout: they live in another graph and there is nothing here to
+	// position in them. They go in only for the count and so Ctrl+Z catches all.
 	Result.CreatedNodes.Append(NestedNodes);
 }
 

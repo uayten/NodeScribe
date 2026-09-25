@@ -14,7 +14,7 @@ namespace NodeScribeBlendSpace
 namespace
 {
 
-/** `X` -> 0, `Y` -> 1, `Z` -> 2. INDEX_NONE para qualquer outra coisa. */
+/** `X` -> 0, `Y` -> 1, `Z` -> 2. INDEX_NONE for anything else. */
 int32 AxisIndexFromLetter(const FString& Letter)
 {
 	const FString Upper = Letter.TrimStartAndEnd().ToUpper();
@@ -27,11 +27,12 @@ int32 AxisIndexFromLetter(const FString& Letter)
 }
 
 /**
- * O eixo N do BlendSpace, por reflexao.
+ * The BlendSpace's axis N, through reflection.
  *
- * `BlendParameters` e' protegido, mas e' UPROPERTY -- e como array fixo de tres,
- * nao TArray, o indice vai no `ContainerPtrToValuePtr`. Ir por reflexao aqui
- * custa tres linhas e evita depender de a Engine abrir o membro um dia.
+ * `BlendParameters` is protected, but it is a UPROPERTY -- and as a fixed
+ * array of three, not a TArray, the index goes into `ContainerPtrToValuePtr`.
+ * Going through reflection here costs three lines and avoids depending on the
+ * Engine opening the member some day.
  */
 FBlendParameter* FindAxis(UBlendSpace* BlendSpace, int32 Index)
 {
@@ -46,26 +47,15 @@ FBlendParameter* FindAxis(UBlendSpace* BlendSpace, int32 Index)
 	return Property ? Property->ContainerPtrToValuePtr<FBlendParameter>(BlendSpace, Index) : nullptr;
 }
 
-/** `eixo X : Speed = 0 .. 600` ou `axis Y : Direction = -180 .. 180`. */
+/** `axis X : Speed = 0 .. 600` or `axis Y : Direction = -180 .. 180`. */
 bool ParseAxisLine(const FString& Line, int32& OutIndex, FString& OutName, float& OutMin, float& OutMax)
 {
-	FString Rest = Line;
-
-	bool bIsAxis = false;
-	for (const TCHAR* Prefix : { TEXT("eixo "), TEXT("axis ") })
-	{
-		if (Rest.StartsWith(Prefix, ESearchCase::IgnoreCase))
-		{
-			Rest = Rest.Mid(FCString::Strlen(Prefix));
-			bIsAxis = true;
-			break;
-		}
-	}
-
-	if (!bIsAxis)
+	if (!Line.StartsWith(TEXT("axis "), ESearchCase::IgnoreCase))
 	{
 		return false;
 	}
+
+	const FString Rest = Line.Mid(5);
 
 	FString Letter, AfterColon;
 	if (!Rest.Split(TEXT(":"), &Letter, &AfterColon))
@@ -99,7 +89,7 @@ bool ParseAxisLine(const FString& Line, int32& OutIndex, FString& OutName, float
 	return true;
 }
 
-/** `MM_Idle = 0` ou `MF_Unarmed_Walk_Fwd = 0, 300`. */
+/** `MM_Idle = 0` or `MF_Unarmed_Walk_Fwd = 0, 300`. */
 bool ParseSampleLine(const FString& Line, FString& OutAsset, FVector& OutPosition)
 {
 	FString Values;
@@ -131,24 +121,27 @@ bool ParseSampleLine(const FString& Line, FString& OutAsset, FVector& OutPositio
 	return true;
 }
 
-/** Quantos eixos este BlendSpace usa: 1 num BlendSpace1D, 2 nos outros. */
+/** How many axes this BlendSpace uses: 1 in a BlendSpace1D, 2 in the others. */
 int32 AxisCount(const UBlendSpace* BlendSpace)
 {
 	return BlendSpace && BlendSpace->IsA<UBlendSpace1D>() ? 1 : 2;
 }
 
-/** `X=0` ou `X=0, Y=300`, so' com os eixos que o BlendSpace tem. */
-FString DescribePosition(const FVector& Position)
+/** `X=0` or `X=0 Y=300`, only with the axes the BlendSpace has. */
+FString DescribePosition(const UBlendSpace* BlendSpace, const FVector& Position)
 {
-	return FString::Printf(TEXT("X=%g Y=%g"), Position.X, Position.Y);
+	return AxisCount(BlendSpace) > 1
+		? FString::Printf(TEXT("X=%g Y=%g"), Position.X, Position.Y)
+		: FString::Printf(TEXT("X=%g"), Position.X);
 }
 
 /**
- * O sample que ja' ocupa esta posicao, se houver.
+ * The sample already taking this position, if any.
  *
- * A Engine tem `IsTooCloseToExistingSamplePoint`, que responde sim ou nao. Aqui
- * queremos *qual*, para poder dizer o nome dele na mensagem -- saber que ha'
- * algo no lugar sem saber o que e' deixa a pessoa exatamente onde estava.
+ * The Engine has `IsTooCloseToExistingSamplePoint`, which answers yes or no.
+ * Here we want *which one*, to be able to name it in the message -- knowing
+ * there is something in the spot without knowing what leaves the person
+ * exactly where they were.
  */
 const FBlendSample* FindSampleAt(const UBlendSpace* BlendSpace, const FVector& Position)
 {
@@ -192,29 +185,29 @@ FString Read(const UBlendSpace* BlendSpace)
 	{
 		const FBlendParameter& Axis = BlendSpace->GetBlendParameter(Index);
 
-		// Eixo sem nome e' eixo que ninguem configurou. Escrever `eixo Y : None`
-		// sugeriria que ha' um eixo Y para preencher num BlendSpace 1D.
+		// An axis without a name is an axis nobody configured. Writing
+		// `axis Y : None` would suggest there is a Y axis to fill in a 1D BlendSpace.
 		if (Axis.DisplayName.IsEmpty() || Axis.DisplayName == TEXT("None"))
 		{
 			continue;
 		}
 
-		Lines.Add(FString::Printf(TEXT("eixo %s : %s = %g .. %g"),
+		Lines.Add(FString::Printf(TEXT("axis %s : %s = %g .. %g"),
 			Letters[Index], *Axis.DisplayName, Axis.Min, Axis.Max));
 	}
 
-	// A malha vazia e' o buraco silencioso deste asset: os samples estao todos
-	// la', o editor desenha os pontos nos lugares certos, e o BlendSpace Player
-	// devolve pose de referencia porque quem interpola e' a malha, nao a lista.
-	// Nada mais na leitura denuncia isso -- e sem esta linha o texto de um
-	// BlendSpace morto e' identico ao de um vivo.
+	// An empty grid is this asset's silent hole: the samples are all there, the
+	// editor draws the points in the right places, and the BlendSpace Player
+	// returns the reference pose because what interpolates is the grid, not the
+	// list. Nothing else in the reading gives that away -- and without this line
+	// the text of a dead BlendSpace is identical to that of a live one.
 	if (BlendSpace->GetBlendSamples().Num() > 0
 		&& BlendSpace->GetBlendSpaceData().IsEmpty()
 		&& BlendSpace->GetGridSamples().Num() == 0)
 	{
-		Lines.Add(TEXT("# [aviso]: a malha de interpolacao esta' vazia. Os samples abaixo existem, ")
-			TEXT("mas este BlendSpace devolve pose de referencia. Chame write_blendspace com este ")
-			TEXT("mesmo texto para reconstrui-la."));
+		Lines.Add(TEXT("# [warning]: the interpolation grid is empty. The samples below exist, ")
+			TEXT("but this BlendSpace returns the reference pose. Call write_blendspace with this ")
+			TEXT("same text to rebuild it."));
 	}
 
 	for (const FBlendSample& Sample : BlendSpace->GetBlendSamples())
@@ -224,9 +217,9 @@ FString Read(const UBlendSpace* BlendSpace)
 			continue;
 		}
 
-		// O caminho completo, e nao o nome curto: e' o que Write aceita sem
-		// perguntar, e um nome curto que hoje e' unico deixa de ser no dia em
-		// que alguem duplicar a animacao -- e ai o texto lido para de colar.
+		// The full path, not the short name: it is what Write accepts without
+		// asking, and a short name that is unique today stops being so the day
+		// someone duplicates the animation -- and then the text read stops pasting.
 		FString Position = FString::Printf(TEXT("%g"), Sample.SampleValue.X);
 		if (AxisCount(BlendSpace) > 1)
 		{
@@ -246,16 +239,16 @@ FResult Write(UBlendSpace* BlendSpace, const FString& Text)
 
 	if (!BlendSpace)
 	{
-		Result.Diagnostics.Add(TEXT("[erro]: nenhum BlendSpace."));
+		Result.Diagnostics.Add(TEXT("[error]: no BlendSpace."));
 		return Result;
 	}
 
 	TArray<FString> Lines;
 	Text.ParseIntoArrayLines(Lines);
 
-	// Duas passagens, e nao uma: um sample fora do intervalo do eixo e' recusado
-	// pela Engine, e definir o intervalo depois nao o traz de volta. Assim a
-	// ordem em que as linhas aparecem no texto deixa de importar.
+	// Two passes, not one: a sample outside the axis range is refused by the
+	// Engine, and setting the range afterwards does not bring it back. That way
+	// the order in which the lines appear in the text stops mattering.
 	struct FPendingSample
 	{
 		int32 Line = 0;
@@ -285,14 +278,14 @@ FResult Write(UBlendSpace* BlendSpace, const FString& Text)
 			if (!Axis)
 			{
 				Result.Diagnostics.Add(FString::Printf(
-					TEXT("[erro] linha %d: nao consegui alcancar o eixo."), LineNumber));
+					TEXT("[error] line %d: could not reach the axis."), LineNumber));
 				continue;
 			}
 
 			if (Max <= Min)
 			{
 				Result.Diagnostics.Add(FString::Printf(
-					TEXT("[erro] linha %d: o intervalo `%g .. %g` esta' invertido ou vazio."),
+					TEXT("[error] line %d: the range `%g .. %g` is inverted or empty."),
 					LineNumber, Min, Max));
 				continue;
 			}
@@ -310,8 +303,8 @@ FResult Write(UBlendSpace* BlendSpace, const FString& Text)
 		if (!ParseSampleLine(Line, Sample.Asset, Sample.Position))
 		{
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("[erro] linha %d: nao entendi `%s`. Esperava `eixo X : Nome = min .. max` ")
-				TEXT("ou `Animacao = posicao`."),
+				TEXT("[error] line %d: did not understand `%s`. Expected `axis X : Name = min .. max` ")
+				TEXT("or `Animation = position`."),
 				LineNumber, *Line));
 			continue;
 		}
@@ -327,7 +320,7 @@ FResult Write(UBlendSpace* BlendSpace, const FString& Text)
 		if (Lookup.IsAmbiguous())
 		{
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("[erro] linha %d: ha' mais de uma animacao chamada `%s`. Escreva o caminho: %s"),
+				TEXT("[error] line %d: there is more than one animation called `%s`. Write the path: %s"),
 				Sample.Line, *Sample.Asset, *FString::Join(Lookup.Candidates, TEXT(", "))));
 			continue;
 		}
@@ -335,67 +328,68 @@ FResult Write(UBlendSpace* BlendSpace, const FString& Text)
 		if (!Lookup.IsConfident())
 		{
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("[erro] linha %d: nao achei a animacao `%s`."), Sample.Line, *Sample.Asset));
+				TEXT("[error] line %d: could not find animation `%s`."), Sample.Line, *Sample.Asset));
 			continue;
 		}
 
-		// BlendSpace so' toca AnimSequence. Um BlendSpace, um Montage ou um
-		// AimOffset aqui dentro nao existe -- e recusar dizendo o tipo poupa a
-		// pergunta seguinte.
+		// A BlendSpace only plays AnimSequences. A BlendSpace, a Montage or an
+		// AimOffset in here does not exist -- and refusing while naming the type
+		// spares the next question.
 		UAnimSequence* Sequence = Cast<UAnimSequence>(Lookup.Asset);
 		if (!Sequence)
 		{
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("[erro] linha %d: `%s` e' um %s. BlendSpace so' aceita AnimSequence."),
+				TEXT("[error] line %d: `%s` is a %s. A BlendSpace only accepts AnimSequence."),
 				Sample.Line, *Sample.Asset, *Lookup.Asset->GetClass()->GetName()));
 			continue;
 		}
 
 		if (Sequence->GetSkeleton() != BlendSpace->GetSkeleton())
 		{
-			// Deixar a Engine recusar daria so' um indice invalido, sem dizer por
-			// que -- e esqueleto trocado e' de longe a causa mais comum.
+			// Letting the Engine refuse would give only an invalid index, without
+			// saying why -- and a swapped skeleton is by far the most common cause.
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("[erro] linha %d: `%s` e' do esqueleto `%s`, e este BlendSpace e' do `%s`."),
+				TEXT("[error] line %d: `%s` belongs to skeleton `%s`, and this BlendSpace to `%s`."),
 				Sample.Line, *Sample.Asset,
-				Sequence->GetSkeleton() ? *Sequence->GetSkeleton()->GetName() : TEXT("(nenhum)"),
-				BlendSpace->GetSkeleton() ? *BlendSpace->GetSkeleton()->GetName() : TEXT("(nenhum)")));
+				Sequence->GetSkeleton() ? *Sequence->GetSkeleton()->GetName() : TEXT("(none)"),
+				BlendSpace->GetSkeleton() ? *BlendSpace->GetSkeleton()->GetName() : TEXT("(none)")));
 			continue;
 		}
 
-		// A Engine recusa um sample por dois motivos, e devolve o mesmo
-		// INDEX_NONE nos dois. Perguntar antes e' o que separa "a posicao nao
-		// cabe no eixo" de "ja' tem um sample ai'" -- e a segunda, dita como se
-		// fosse a primeira, manda conferir um intervalo que esta' certo. Foi
-		// exatamente o que aconteceu: `MM_Idle = 0` recusado num BlendSpace cujo
-		// eixo ia de 0 a 600, porque o sample ja' estava la'.
+		// The Engine refuses a sample for two reasons, and returns the same
+		// INDEX_NONE for both. Asking first is what separates "the position does
+		// not fit the axis" from "there is already a sample there" -- and the
+		// second, told as if it were the first, sends you to check a range that
+		// is right. That is exactly what happened: `MM_Idle = 0` refused in a
+		// BlendSpace whose axis went from 0 to 600, because the sample was
+		// already there.
 		if (!BlendSpace->IsSampleWithinBounds(Sample.Position))
 		{
 			const FBlendParameter& Axis = BlendSpace->GetBlendParameter(0);
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("[erro] linha %d: %s esta' fora do intervalo dos eixos (o X vai de %g a %g)."),
-				Sample.Line, *DescribePosition(Sample.Position), Axis.Min, Axis.Max));
+				TEXT("[error] line %d: %s is outside the axes' range (X goes from %g to %g)."),
+				Sample.Line, *DescribePosition(BlendSpace, Sample.Position), Axis.Min, Axis.Max));
 			continue;
 		}
 
 		if (const FBlendSample* Occupant = FindSampleAt(BlendSpace, Sample.Position))
 		{
-			// Mesma animacao, mesmo lugar: ja' esta' como o texto pede. Repetir a
-			// chamada nao deve virar erro, pelo mesmo motivo que `variavel X`
-			// duas vezes nao vira -- colar o mesmo texto de novo e' rotina.
+			// Same animation, same place: it already is as the text asks.
+			// Repeating the call should not become an error, for the same reason
+			// `variable X` twice does not -- pasting the same text again is routine.
 			if (Occupant->Animation == Sequence)
 			{
 				continue;
 			}
 
-			// Trocar por conta propria seria decidir. O sample que esta' la' foi
-			// posto por alguem, e substituir calado troca a animacao de um
-			// BlendSpace inteiro sem nada no retorno dizendo o que sumiu.
+			// Swapping on its own would be deciding. The sample that is there was
+			// put there by someone, and replacing it silently swaps the animation
+			// of a whole BlendSpace with nothing in the return saying what vanished.
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("[erro] linha %d: %s ja' tem `%s`. Nao troco por `%s` sozinho -- ")
-				TEXT("apague o sample no editor, ou escreva outra posicao."),
-				Sample.Line, *DescribePosition(Sample.Position),
-				Occupant->Animation ? *Occupant->Animation->GetName() : TEXT("(sem animacao)"),
+				TEXT("[error] line %d: %s already has `%s`. I will not replace it with `%s` on my own -- ")
+				TEXT("delete the sample in the editor, or write another position."),
+				Sample.Line, *DescribePosition(BlendSpace, Sample.Position),
+				Occupant->Animation ? *Occupant->Animation->GetName() : TEXT("(no animation)"),
 				*Sample.Asset));
 			continue;
 		}
@@ -403,26 +397,27 @@ FResult Write(UBlendSpace* BlendSpace, const FString& Text)
 		if (BlendSpace->AddSample(Sequence, Sample.Position) == INDEX_NONE)
 		{
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("[erro] linha %d: a Engine recusou `%s` em %s, e nem a posicao nem o ")
-				TEXT("esqueleto explicam. Confira o tipo da animacao (aditiva x normal)."),
-				Sample.Line, *Sample.Asset, *DescribePosition(Sample.Position)));
+				TEXT("[error] line %d: the Engine refused `%s` at %s, and neither the position nor the ")
+				TEXT("skeleton explain it. Check the animation's type (additive vs normal)."),
+				Sample.Line, *Sample.Asset, *DescribePosition(BlendSpace, Sample.Position)));
 			continue;
 		}
 
 		++Result.SamplesAdded;
 	}
 
-	// A malha de interpolacao e' reconstruida aqui, e quem reconstroi e'
-	// `ResampleData`. `ValidateSampleData` sozinho nao serve, e o nome engana:
-	// quando os samples mudam ele *apaga* a malha (`GridSamples.Empty()`) e para
-	// ali. Quem a preenche de novo -- a malha e o `BlendSpaceData` da
-	// triangulacao, que e' o que o BlendSpace Player le' ao rodar -- e'
-	// `ResampleData`, que ja' chama `ValidateSampleData` no caminho.
+	// The interpolation grid is rebuilt here, and what rebuilds it is
+	// `ResampleData`. `ValidateSampleData` alone does not work, and the name is
+	// misleading: when the samples change it *erases* the grid
+	// (`GridSamples.Empty()`) and stops there. What fills it again -- the grid
+	// and the triangulation's `BlendSpaceData`, which is what the BlendSpace
+	// Player reads at runtime -- is `ResampleData`, which already calls
+	// `ValidateSampleData` on the way.
 	//
-	// Sem isto o asset guarda os samples, abre no editor, mostra os pontos, e
-	// nao interpola nada: o node entra no AnimGraph, o Blueprint compila sem um
-	// aviso sequer, e o personagem fica na pose de referencia. E' o buraco mais
-	// silencioso que este arquivo sabe abrir.
+	// Without this the asset keeps the samples, opens in the editor, shows the
+	// points, and interpolates nothing: the node goes into the AnimGraph, the
+	// Blueprint compiles without a single warning, and the character stays in
+	// the reference pose. It is the most silent hole this file knows how to open.
 	BlendSpace->ResampleData();
 	BlendSpace->PostEditChange();
 	BlendSpace->MarkPackageDirty();

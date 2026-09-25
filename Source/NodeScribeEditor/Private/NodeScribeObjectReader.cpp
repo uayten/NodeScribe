@@ -22,15 +22,15 @@ namespace
 {
 	using namespace NodeScribePropertyText;
 
-	/** Uma linha de propriedade antes de virar texto alinhado. */
+	/** One property line before it becomes aligned text. */
 	struct FEntry
 	{
-		FString Left;      // `Max Walk Speed = 250`, ou com o tipo no modo filtrado
-		FString Default;   // valor de fabrica, vazio quando nao mudou ou nao ha'
-		int32 Depth = 0;   // membro de struct entra recuado sob ela
+		FString Left;      // `Max Walk Speed = 250`, or with the type in filtered mode
+		FString Default;   // factory value, empty when it did not change or there is none
+		int32 Depth = 0;   // a struct member goes indented under it
 	};
 
-	/** `BP_Golem_C` -> `BP_Golem`. O sufixo e' da compilacao, nao do nome. */
+	/** `BP_Golem_C` -> `BP_Golem`. The suffix belongs to compilation, not to the name. */
 	FString CleanClassName(const UClass* Class)
 	{
 		FString Name = Class->GetName();
@@ -39,11 +39,11 @@ namespace
 	}
 
 	/**
-	 * Como chamar o alvo no cabecalho.
+	 * What to call the target in the header.
 	 *
-	 * O que o usuario reconhece e' o nome do asset -- `BT_Golem`, nao
-	 * `BehaviorTree`. Quando o alvo veio como CDO de um Blueprint, o CDO se
-	 * chama `Default__BP_Golem_C`, entao vale o nome do que foi pedido.
+	 * What the user recognises is the asset's name -- `BT_Golem`, not
+	 * `BehaviorTree`. When the target came as a Blueprint's CDO, the CDO is
+	 * called `Default__BP_Golem_C`, so the name of what was asked for wins.
 	 */
 	FString DescribeTargetName(const UObject* Requested, const UObject* Target)
 	{
@@ -61,10 +61,10 @@ namespace
 	}
 
 	/**
-	 * A cadeia de heranca ate' Object, sem ele.
+	 * The inheritance chain up to Object, without it.
 	 *
-	 * Todo mundo herda de Object; dizer isso em toda ficha e' uma linha que
-	 * nunca informa nada.
+	 * Everyone inherits from Object; saying so in every sheet is a line that
+	 * never informs anything.
 	 */
 	FString DescribeAncestry(const UClass* Class)
 	{
@@ -83,11 +83,12 @@ namespace
 	}
 
 	/**
-	 * O valor de fabrica desta propriedade, se houver com o que comparar.
+	 * This property's factory value, if there is something to compare with.
 	 *
-	 * O arquetipo pode ser de uma classe que nem conhece a propriedade -- e' o
-	 * caso das variaveis que o proprio Blueprint declara, que nao existem no
-	 * pai. Ler o mesmo deslocamento la' seria ler memoria de outra coisa.
+	 * The archetype may belong to a class that does not even know the property
+	 * -- it is the case of the variables the Blueprint itself declares, which
+	 * do not exist in the parent. Reading the same offset there would be reading
+	 * the memory of something else.
 	 */
 	const void* FindDefaultValuePtr(const FProperty* Property, const UObject* Archetype)
 	{
@@ -108,17 +109,18 @@ namespace
 	}
 
 	/**
-	 * Alinha os comentarios numa coluna so'.
+	 * Aligns the comments in a single column.
 	 *
-	 * O ponto da ficha e' voce bater o olho e ver o que mudou; com os `# padrao`
-	 * em posicoes diferentes, a coluna que importa fica serrilhada e some.
+	 * The point of the sheet is for you to glance and see what changed; with the
+	 * `# default` comments in different positions, the column that matters gets
+	 * jagged and disappears.
 	 */
 	void AppendAligned(TArray<FString>& OutLines, const TArray<FEntry>& Entries)
 	{
-		// Teto na coluna. Sem ele, uma linha larga empurra o comentario de todas
-		// as outras para a mesma distancia -- e uma struct de colisao produz
-		// linhas de milhares de caracteres, entao as vizinhas ganhavam milhares
-		// de espacos. Alinhamento e' para ler; passou disso, atrapalha e custa.
+		// A cap on the column. Without it, one wide line pushes the comment of
+		// all the others to the same distance -- and a collision struct produces
+		// lines thousands of characters long, so the neighbours got thousands of
+		// spaces. Alignment is for reading; beyond that it gets in the way and costs.
 		const int32 MaxColumn = 64;
 
 		auto Indented = [](const FEntry& Entry)
@@ -148,14 +150,14 @@ namespace
 
 			const int32 Padding = FMath::Max(1, Widest - Left.Len() + 1);
 			OutLines.Add(Left + FString::ChrN(Padding, TEXT(' '))
-				+ TEXT("# padrao ") + Entry.Default);
+				+ TEXT("# default ") + Entry.Default);
 		}
 	}
 }
 
 namespace
 {
-	/** O que uma passada de propriedades produziu, alem das linhas. */
+	/** What a pass over the properties produced, besides the lines. */
 	struct FCollectStats
 	{
 		int32 AtDefault = 0;
@@ -165,34 +167,34 @@ namespace
 	};
 
 	/**
-	 * Acima disto o valor deixa de informar e passa a esconder.
+	 * Above this the value stops informing and starts hiding.
 	 *
-	 * `Body Instance` de uma capsula sai com a tabela inteira de resposta de
-	 * colisao: ~2.000 caracteres, mais outros ~2.000 do valor de fabrica ao
-	 * lado. Sozinho, era maior que toda a ficha do BP_Golem -- exatamente o
-	 * despejo que este formato existe para nao fazer.
+	 * A capsule's `Body Instance` comes out with the whole collision response
+	 * table: ~2,000 characters, plus another ~2,000 of the factory value next
+	 * to it. On its own it was bigger than BP_Golem's whole sheet -- exactly the
+	 * dump this format exists not to do.
 	 *
-	 * O corte vale so' na visao geral. Quem filtra pelo nome da propriedade
-	 * esta' pedindo aquilo, e ai' sai inteiro.
+	 * The cut only applies to the overview. Whoever filters by the property's
+	 * name is asking for that, and then it comes out whole.
 	 */
 	const int32 MaxSurveyValueLength = 160;
 
-	/** Ate' onde abrir struct dentro de struct antes de desistir e so' avisar. */
+	/** How far to open a struct inside a struct before giving up and just warning. */
 	const int32 MaxStructDepth = 3;
 
 	/**
-	 * Abre uma struct e emite so' os membros que mudaram.
+	 * Opens a struct and emits only the members that changed.
 	 *
-	 * E' o mesmo principio da ficha, um nivel abaixo: `Body Instance` difere do
-	 * padrao em tres campos, nao nos cinquenta que a forma plana despeja.
+	 * It is the sheet's principle, one level down: `Body Instance` differs from
+	 * the default in three fields, not in the fifty the flat form dumps.
 	 *
-	 * So' e' chamada quando a forma plana estourou o teto. Abrir sempre custaria
-	 * legibilidade nas structs pequenas -- `Relative Location` vale mais como uma
-	 * linha do que como tres, e o `Z` sozinho perderia a companhia do `X` e do
-	 * `Y` que dizem que aquilo e' uma posicao.
+	 * It is only called when the flat form went over the cap. Always opening
+	 * would cost readability on small structs -- `Relative Location` is worth
+	 * more as one line than as three, and a lone `Z` would lose the company of
+	 * the `X` and `Y` that say it is a position.
 	 *
-	 * @return quantos membros entraram. Zero significa que abrir nao ajudou, e
-	 *         quem chamou desfaz.
+	 * @return how many members went in. Zero means opening did not help, and the
+	 *         caller undoes it.
 	 */
 	int32 CollectStructMembers(const FStructProperty* StructProperty,
 		const void* ValuePtr, const void* DefaultPtr, int32 Depth,
@@ -251,9 +253,9 @@ namespace
 						continue;
 					}
 
-					// Abrir nao ajudou: desfaz tudo, inclusive o que a tentativa
-					// anotou. Sem isto a nota nomeia o membro de dentro e o de
-					// fora, que sao a mesma coisa dita duas vezes.
+					// Opening did not help: undo everything, including what the
+					// attempt recorded. Without this the note names the inner
+					// member and the outer one, which are the same thing said twice.
 					OutEntries.SetNum(Before);
 					Stats.TooLong.SetNum(TooLongBefore);
 					Stats.Unreadable.SetNum(UnreadableBefore);
@@ -282,11 +284,11 @@ namespace
 	}
 
 	/**
-	 * Percorre as propriedades de um objeto e devolve as linhas.
+	 * Walks an object's properties and returns the lines.
 	 *
-	 * Uma funcao so' para objeto, componente e variavel: as tres perguntam a
-	 * mesma coisa -- o que aqui foge do padrao -- e responder diferente em cada
-	 * uma seria tres formatos para o leitor aprender.
+	 * A single function for object, component and variable: all three ask the
+	 * same thing -- what here departs from the default -- and answering
+	 * differently in each would be three formats for the reader to learn.
 	 */
 	void CollectEntries(const UObject* Target, const UObject* Archetype,
 		const FString& NormalizedFilter, const TSet<FName>& Skip,
@@ -294,9 +296,9 @@ namespace
 	{
 		const bool bFiltering = !NormalizedFilter.IsEmpty();
 
-		// `Body Instance, Body Instance` num rodape nao diz de quem sao. Toda
-		// capsula e todo mesh tem uma, entao sem o componente na frente a nota
-		// so' confunde.
+		// `Body Instance, Body Instance` in a footer does not say whose they are.
+		// Every capsule and every mesh has one, so without the component in front
+		// the note only confuses.
 		auto Qualify = [&Context](const FString& Name)
 		{
 			return Context.IsEmpty() ? Name : Context + TEXT(".") + Name;
@@ -332,15 +334,16 @@ namespace
 			FString Value;
 			if (!ValueToText(Property, ValuePtr, Value))
 			{
-				// Nao inventar uma linha que parece certa e volta diferente. Some da
-				// ficha e aparece no aviso, com nome, para a ausencia ser visivel.
+				// Do not invent a line that looks right and comes back different. It
+				// leaves the sheet and shows up in the warning, by name, so its
+				// absence is visible.
 				Stats.Unreadable.Add(Qualify(Name));
 				continue;
 			}
 
 			if (!bFiltering && Value.Len() > MaxSurveyValueLength)
 			{
-				// Longa demais plana: tenta abrir e mostrar so' o que mudou.
+				// Too long flat: try opening it and showing only what changed.
 				if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 				{
 					const int32 Before = OutEntries.Num();
@@ -362,8 +365,8 @@ namespace
 					Stats.Unreadable.SetNum(UnreadableBefore);
 				}
 
-				// Nomeado, nao sumido: quem le' fica sabendo que aquilo mudou e
-				// que da' para pedir. Some em silencio seria mentir por omissao.
+				// Named, not vanished: the reader learns that it changed and that
+				// it can be asked for. Vanishing silently would be lying by omission.
 				Stats.TooLong.Add(Qualify(Name));
 				continue;
 			}
@@ -373,8 +376,8 @@ namespace
 				? FString::Printf(TEXT("%s : %s = %s"), *Name, *DescribeType(Property), *Value)
 				: FString::Printf(TEXT("%s = %s"), *Name, *Value);
 
-			// O valor de fabrica so' entra onde houve mudanca. Nas outras linhas ele
-			// seria uma repeticao do que ja' esta' escrito.
+			// The factory value only goes in where there was a change. On the other
+			// lines it would repeat what is already written.
 			FString DefaultText;
 			if (bChanged && DefaultPtr && ValueToText(Property, DefaultPtr, DefaultText)
 				&& DefaultText.Len() <= MaxSurveyValueLength)
@@ -386,7 +389,7 @@ namespace
 		}
 	}
 
-	/** Os nomes das variaveis que o proprio Blueprint declara. */
+	/** The names of the variables the Blueprint itself declares. */
 	TSet<FName> CollectOwnVariableNames(const UBlueprint* Blueprint)
 	{
 		TSet<FName> Names;
@@ -406,15 +409,15 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 {
 	if (!Object)
 	{
-		return TEXT("[erro]: nenhum objeto informado.");
+		return TEXT("[error]: no object given.");
 	}
 
-	// Asset de IA tem forma propria: a informacao dele nao esta nas propriedades
-	// do objeto de cima, e sim na estrutura pendurada nele. Uma ficha generica
-	// de blackboard diz `Keys` e mais nada.
+	// AI assets have a shape of their own: their information is not in the top
+	// object's properties, but in the structure hanging from it. A generic sheet
+	// of a blackboard says `Keys` and nothing more.
 	//
-	// Fica na mesma ferramenta de proposito: duas portas parecidas fazem quem
-	// chama escolher errado e gastar um turno descobrindo isso.
+	// It stays in the same tool on purpose: two similar doors make the caller
+	// choose wrong and spend a turn finding out.
 	if (FNodeScribeAIReader::Handles(Object))
 	{
 		return FNodeScribeAIReader::ReadAsset(Object);
@@ -424,7 +427,7 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 	if (!Target)
 	{
 		return FString::Printf(
-			TEXT("[erro]: `%s` nao tem classe compilada -- compile o Blueprint antes."),
+			TEXT("[error]: `%s` has no compiled class -- compile the Blueprint first."),
 			*Object->GetName());
 	}
 
@@ -440,8 +443,8 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 
 	FCollectStats Stats;
 
-	// As variaveis do proprio Blueprint saem em bloco proprio, com `variavel` e
-	// o tipo, entao ficam de fora da passada comum.
+	// The Blueprint's own variables come out in a block of their own, with
+	// `variable` and the type, so they stay out of the regular pass.
 	TArray<FEntry> Entries;
 	CollectEntries(Target, Archetype, NormalizedFilter, OwnVariables,
 		FString(), Entries, Stats);
@@ -464,22 +467,24 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 			continue;
 		}
 
-		// Variavel declarada aqui aparece sempre, mesmo no valor de fabrica: ela
-		// nao existe na classe pai, entao a existencia dela ja' e' a informacao.
+		// A variable declared here always shows up, even at its factory value: it
+		// does not exist in the parent class, so its existence already is the
+		// information.
 		FString Value;
 		const void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Target);
 		const bool bHasValue = ValueToText(Property, ValuePtr, Value);
 
 		FEntry Entry;
-		Entry.Left = FString::Printf(TEXT("variavel %s : %s"), *Name, *DescribeType(Property));
+		Entry.Left = FString::Printf(TEXT("variable %s : %s"), *Name, *DescribeType(Property));
 
-		// Instance Editable e' o que faz a variavel aparecer no painel de quem
-		// usa o Blueprint -- e' assim que uma BTTask ganha parametro por node.
-		// Sem sair aqui, uma ida e volta apagaria a marcacao calada.
+		// Instance Editable is what makes the variable show up in the panel of
+		// whoever uses the Blueprint -- it is how a BTTask gets a per-node
+		// parameter. Without it coming out here, a round trip would silently
+		// erase the flag.
 		if (Property->HasAnyPropertyFlags(CPF_Edit)
 			&& !Property->HasAnyPropertyFlags(CPF_DisableEditOnInstance))
 		{
-			Entry.Left += TEXT(" editavel");
+			Entry.Left += TEXT(" editable");
 		}
 
 		if (bHasValue && Value != TEXT("None") && Value != TEXT("0") && Value != TEXT("false"))
@@ -492,10 +497,10 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 
 	TArray<FString> Lines;
 
-	// O nome do asset, e entre parenteses a classe -- `ficha BT_Golem
-	// (BehaviorTree)`. Em Blueprint os dois sao a mesma palavra, e repetir nao
-	// diz nada; ali vale a classe pai, que e' a informacao que falta:
-	// `ficha BP_Golem (Character)`.
+	// The asset's name, and the class in parentheses -- `sheet BT_Golem
+	// (BehaviorTree)`. In a Blueprint both are the same word, and repeating it
+	// says nothing; there the parent class wins, which is the missing
+	// information: `sheet BP_Golem (Character)`.
 	const FString TargetName = DescribeTargetName(Object, Target);
 	FString ClassName = CleanClassName(Class);
 	if (ClassName == TargetName && Class->GetSuperClass())
@@ -503,19 +508,20 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 		ClassName = CleanClassName(Class->GetSuperClass());
 	}
 
-	Lines.Add(FString::Printf(TEXT("ficha %s (%s)"), *TargetName, *ClassName));
+	Lines.Add(FString::Printf(TEXT("sheet %s (%s)"), *TargetName, *ClassName));
 
 	const FString Ancestry = DescribeAncestry(Class);
 	if (!Ancestry.IsEmpty())
 	{
-		Lines.Add(TEXT("# herda: ") + Ancestry);
+		Lines.Add(TEXT("# inherits: ") + Ancestry);
 	}
 
-	// Os grafos, pelo nome com que `read_graph` os encontra.
+	// The graphs, by the name `read_graph` finds them with.
 	//
-	// Sem esta linha o nome do grafo e' adivinhacao: `EventGraph` funciona quase
-	// sempre e falha sem dizer por que, e nao havia como descobrir o certo --
-	// ficava-se tentando nomes ate' acertar, ou desistindo do asset.
+	// Without this line the graph's name is guesswork: `EventGraph` works almost
+	// always and fails without saying why, and there was no way to find the
+	// right one -- people kept trying names until they got it, or gave up on
+	// the asset.
 	if (Blueprint && !bFiltering)
 	{
 		TArray<FString> GraphNames;
@@ -537,24 +543,24 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 
 		if (GraphNames.Num() > 0)
 		{
-			Lines.Add(TEXT("# grafos: ") + FString::Join(GraphNames, TEXT(", ")));
+			Lines.Add(TEXT("# graphs: ") + FString::Join(GraphNames, TEXT(", ")));
 		}
 	}
 
-	// O esqueleto de um AnimBlueprint nao aparece na ficha por si so': ela le' o
-	// CDO da classe, e `TargetSkeleton` mora no asset, um nivel acima. Sem esta
-	// linha, `read_object` num AnimBlueprint filtrando por "Skeleton" devolve
-	// zero propriedades -- o que se le como "nao tem", e nao como "esta' noutro
-	// objeto". E' a primeira coisa que se quer conferir quando um personagem
-	// aparece na pose de referencia, porque esqueleto trocado da' exatamente
-	// isso.
+	// An AnimBlueprint's skeleton does not show up in the sheet by itself: the
+	// sheet reads the class's CDO, and `TargetSkeleton` lives in the asset, one
+	// level up. Without this line, `read_object` on an AnimBlueprint filtering by
+	// "Skeleton" returns zero properties -- which reads as "it has none", not as
+	// "it is in another object". It is the first thing you want to check when a
+	// character shows up in the reference pose, because a swapped skeleton gives
+	// exactly that.
 	if (const UAnimBlueprint* AnimBlueprint = Cast<UAnimBlueprint>(Blueprint))
 	{
 		const USkeleton* Skeleton = AnimBlueprint->TargetSkeleton;
 
-		Lines.Add(FString::Printf(TEXT("# esqueleto: %s"),
+		Lines.Add(FString::Printf(TEXT("# skeleton: %s"),
 			Skeleton ? *Skeleton->GetPathName()
-				: (AnimBlueprint->bIsTemplate ? TEXT("nenhum (e' um template)") : TEXT("nenhum"))));
+				: (AnimBlueprint->bIsTemplate ? TEXT("none (it is a template)") : TEXT("none"))));
 	}
 
 	const int32 HeaderIndex = 0;
@@ -564,8 +570,8 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 
 	int32 Shown = VariableEntries.Num() + Entries.Num();
 
-	// Componente e' onde mora metade do que se pergunta de um ator: `Max Walk
-	// Speed` nao esta' no Character, esta' no CharacterMovement dele.
+	// Components are where half of what gets asked about an actor lives: `Max
+	// Walk Speed` is not on the Character, it is on its CharacterMovement.
 	for (const TPair<FString, UObject*>& Pair : CollectComponents(Target, Blueprint))
 	{
 		UObject* Component = Pair.Value;
@@ -592,11 +598,11 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 		Shown += ComponentEntries.Num();
 	}
 
-	// O BlendSpace guarda o que ele e' em dois arrays de struct que o
-	// formatador generico nao abre -- e a ficha dizia `nao sei escrever o valor
-	// de: Sample Data`, que e' o mesmo que nao dizer nada. As linhas saem no
-	// formato que `write_blendspace` aceita, entao ler e escrever falam a mesma
-	// lingua.
+	// The BlendSpace keeps what it is in two struct arrays the generic formatter
+	// does not open -- and the sheet said `I do not know how to write the value
+	// of: Sample Data`, which is the same as saying nothing. The lines come out
+	// in the format `write_blendspace` accepts, so reading and writing speak the
+	// same language.
 	if (const UBlendSpace* BlendSpace = Cast<UBlendSpace>(Target))
 	{
 		const FString Samples = NodeScribeBlendSpace::Read(BlendSpace);
@@ -608,7 +614,8 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 
 			Shown += SampleLines.Num();
 
-			// Ja' saiu, e melhor: nao vale sair de novo como pendencia.
+			// It already came out, and better: it should not come out again as a
+			// pending item.
 			Stats.Unreadable.Remove(TEXT("Sample Data"));
 			Stats.Unreadable.Remove(TEXT("Blend Parameters"));
 		}
@@ -616,27 +623,28 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 
 	if (bFiltering)
 	{
-		Lines[HeaderIndex] += FString::Printf(TEXT("  ~ \"%s\" (%d de %d)"),
+		Lines[HeaderIndex] += FString::Printf(TEXT("  ~ \"%s\" (%d of %d)"),
 			*Filter, Shown, Stats.Considered);
 	}
 	else
 	{
-		// O silencio precisa ser explicito: sem esta linha, "nao apareceu" fica
-		// ambiguo entre estar no padrao e o plugin nao saber ler.
-		Lines.Add(FString::Printf(TEXT("~ %d propriedades no padrao"), Stats.AtDefault));
+		// The silence needs to be explicit: without this line, "did not show up"
+		// is ambiguous between being at the default and the plugin not knowing
+		// how to read it.
+		Lines.Add(FString::Printf(TEXT("~ %d properties at default"), Stats.AtDefault));
 	}
 
 	if (Stats.TooLong.Num() > 0)
 	{
 		Lines.Add(FString::Printf(
-			TEXT("# [nota]: mudou, mas o valor e' longo demais para a visao geral -- ")
-			TEXT("peca pelo nome para ver: %s"),
+			TEXT("# [note]: changed, but the value is too long for the overview -- ")
+			TEXT("ask for it by name to see it: %s"),
 			*FString::Join(Stats.TooLong, TEXT(", "))));
 	}
 
 	if (Stats.Unreadable.Num() > 0)
 	{
-		Lines.Add(FString::Printf(TEXT("# [aviso]: nao sei escrever o valor de: %s"),
+		Lines.Add(FString::Printf(TEXT("# [warning]: I do not know how to write the value of: %s"),
 			*FString::Join(Stats.Unreadable, TEXT(", "))));
 	}
 

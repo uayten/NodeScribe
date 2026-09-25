@@ -7,7 +7,7 @@
 
 namespace
 {
-	/** Uma tag por linha, sem comentario e sem linha vazia. */
+	/** One tag per line, without comments and without empty lines. */
 	TArray<FString> ReadTagLines(const FString& Text)
 	{
 		TArray<FString> Lines;
@@ -24,16 +24,17 @@ namespace
 
 			Line.TrimStartAndEndInline();
 
-			// O cabecalho que o leitor emite (`tags (8)`) nao e' tag. Sem pular,
-			// colar de volta a saida de ReadTags -- o teste de ida e volta, que
-			// e' o que mais pega defeito aqui -- falhava numa linha escrita pelo
-			// proprio plugin. Nao ha' ambiguidade: tag nao tem espaco no nome.
+			// The header the reader emits (`tags (8)`) is not a tag. Without
+			// skipping it, pasting back the output of ReadTags -- the round-trip
+			// test, which is what catches the most defects here -- failed on a line
+			// written by the plugin itself. There is no ambiguity: a tag has no
+			// space in its name.
 			if (Line.StartsWith(TEXT("tags "), ESearchCase::IgnoreCase))
 			{
 				continue;
 			}
 
-			// Aceita a linha como o leitor a escreve, com `tag ` na frente.
+			// Accepts the line as the reader writes it, with `tag ` in front.
 			Line.RemoveFromStart(TEXT("tag "), ESearchCase::IgnoreCase);
 			Line.TrimStartInline();
 
@@ -46,7 +47,7 @@ namespace
 		return Tags;
 	}
 
-	/** As fontes onde da' para gravar, pelo nome que aparece no editor. */
+	/** The sources that can be written to, by the name shown in the editor. */
 	FString KnownSources(const UGameplayTagsManager& Manager)
 	{
 		const EGameplayTagSourceType Writable[] =
@@ -94,7 +95,7 @@ FString FNodeScribeTags::ReadTags(const FString& Filter)
 	TArray<FString> Lines;
 	Lines.Add(Wanted.IsEmpty()
 		? FString::Printf(TEXT("tags (%d)"), Names.Num())
-		: FString::Printf(TEXT("tags  ~ \"%s\" (%d de %d)"), *Wanted, Names.Num(), All.Num()));
+		: FString::Printf(TEXT("tags  ~ \"%s\" (%d of %d)"), *Wanted, Names.Num(), All.Num()));
 
 	for (const FString& Name : Names)
 	{
@@ -103,7 +104,7 @@ FString FNodeScribeTags::ReadTags(const FString& Filter)
 
 	if (Names.Num() == 0)
 	{
-		Lines.Add(TEXT("# nenhuma"));
+		Lines.Add(TEXT("# none"));
 	}
 
 	return FString::Join(Lines, TEXT("\n"));
@@ -115,15 +116,15 @@ FString FNodeScribeTags::WriteTags(const FString& Text, const FString& Source)
 
 	if (Tags.Num() == 0)
 	{
-		return TEXT("[erro]: nenhuma tag no texto. Uma por linha.");
+		return TEXT("[error]: no tag in the text. One per line.");
 	}
 
 	UGameplayTagsManager& Manager = UGameplayTagsManager::Get();
 
-	// Fonte que nao existe a Engine cria como arquivo novo em `Config/Tags/`.
-	// Um erro de digitacao viraria um ini a mais que ninguem pediu e ninguem
-	// percebe -- entao recusa listando as que existem, como o blackboard faz
-	// com tipo de chave desconhecido.
+	// A source that does not exist is created by the Engine as a new file under
+	// `Config/Tags/`. A typo would become an extra ini nobody asked for and
+	// nobody notices -- so it refuses, listing the ones that exist, the way the
+	// blackboard does with an unknown key type.
 	const FString WantedSource = Source.TrimStartAndEnd();
 	FName SourceName = NAME_None;
 
@@ -133,7 +134,7 @@ FString FNodeScribeTags::WriteTags(const FString& Text, const FString& Source)
 
 		if (!Manager.FindTagSource(SourceName))
 		{
-			return FString::Printf(TEXT("[erro]: nao conheco a fonte `%s`. As que existem: %s"),
+			return FString::Printf(TEXT("[error]: unknown source `%s`. The existing ones: %s"),
 				*WantedSource, *KnownSources(Manager));
 		}
 	}
@@ -150,25 +151,27 @@ FString FNodeScribeTags::WriteTags(const FString& Text, const FString& Source)
 	{
 		const FName TagName(*Tag);
 
-		// `IsDictionaryTag`, e nao `RequestGameplayTag`: a pergunta e' se a tag
-		// foi *declarada*, nao se ela resolve. `Cooldown.Golem` resolve porque
-		// `Cooldown.Golem.Salto` existe, mas nao esta' declarada em ini nenhum
-		// -- e o leitor, que so' lista as declaradas, nunca a mostraria. Pular
-		// por resolver deixava a tag pedida sem aparecer na listagem, calado.
+		// `IsDictionaryTag`, not `RequestGameplayTag`: the question is whether
+		// the tag was *declared*, not whether it resolves. `Cooldown.Golem`
+		// resolves because `Cooldown.Golem.Jump` exists, but it is not declared
+		// in any ini -- and the reader, which only lists declared ones, would
+		// never show it. Skipping it because it resolved left the requested tag
+		// missing from the listing, silently.
 		if (Manager.IsDictionaryTag(TagName))
 		{
 			Skipped.Add(Tag);
 			continue;
 		}
 
-		// A Engine tem o motivo e ate' um nome corrigido para sugerir. Chutar a
-		// causa aqui ja' deu conselho errado: acento e' aceito -- este projeto
-		// tem `Facção.Inimigos` -- e a mensagem antiga mandava tirar.
+		// The Engine has the reason and even a corrected name to suggest.
+		// Guessing the cause here already gave wrong advice: accents are accepted
+		// -- a tag like `Facção.Inimigos` is valid -- and the old message said to
+		// remove them.
 		FText Error;
 		FString Fixed;
 		if (!Manager.IsValidGameplayTagString(Tag, &Error, &Fixed))
 		{
-			Failed.Add(FString::Printf(TEXT("%s (%s tente `%s`)"),
+			Failed.Add(FString::Printf(TEXT("%s (%s try `%s`)"),
 				*Tag, *Error.ToString(), *Fixed));
 			continue;
 		}
@@ -181,10 +184,11 @@ FString FNodeScribeTags::WriteTags(const FString& Text, const FString& Source)
 
 		++Created;
 
-		// Em que arquivo caiu sai da propria Engine, depois do fato, em vez de
-		// repetir aqui a regra dela para escolher a fonte. Com `Source` vazio o
-		// destino e' `DefaultGameplayTags.ini`, que neste projeto **nao** e'
-		// onde moram as outras tags -- entao dizer o arquivo nao e' detalhe.
+		// Which file it landed in comes from the Engine itself, after the fact,
+		// instead of repeating its rule for choosing the source here. With an
+		// empty `Source` the destination is `DefaultGameplayTags.ini`, which in a
+		// project that keeps its tags elsewhere is **not** where the others live
+		// -- so naming the file is not a detail.
 		if (WroteTo.IsNone())
 		{
 			FString Comment;
@@ -197,18 +201,18 @@ FString FNodeScribeTags::WriteTags(const FString& Text, const FString& Source)
 
 	TArray<FString> Report;
 	Report.Add(WroteTo.IsNone()
-		? FString::Printf(TEXT("%d tag(s) criada(s)."), Created)
-		: FString::Printf(TEXT("%d tag(s) criada(s) em %s."), Created, *WroteTo.ToString()));
+		? FString::Printf(TEXT("%d tag(s) created."), Created)
+		: FString::Printf(TEXT("%d tag(s) created in %s."), Created, *WroteTo.ToString()));
 
 	if (Skipped.Num() > 0)
 	{
-		Report.Add(FString::Printf(TEXT("[nota]: ja' declaradas: %s"),
+		Report.Add(FString::Printf(TEXT("[note]: already declared: %s"),
 			*FString::Join(Skipped, TEXT(", "))));
 	}
 
 	if (Failed.Num() > 0)
 	{
-		Report.Add(FString::Printf(TEXT("[erro]: a Engine recusou: %s"),
+		Report.Add(FString::Printf(TEXT("[error]: the Engine refused: %s"),
 			*FString::Join(Failed, TEXT(", "))));
 	}
 

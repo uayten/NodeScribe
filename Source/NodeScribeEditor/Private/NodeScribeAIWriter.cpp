@@ -15,12 +15,12 @@
 namespace
 {
 	/**
-	 * A classe de tipo de chave pelo nome curto: `Object` ->
+	 * The key type class by short name: `Object` ->
 	 * `UBlackboardKeyType_Object`.
 	 *
-	 * Varre as classes em vez de manter uma tabela, pelo mesmo motivo do leitor:
-	 * qualquer projeto pode escrever o seu tipo de chave, e uma tabela fixa
-	 * responderia "nao conheco" para o tipo que o proprio projeto criou.
+	 * Sweeps the classes instead of keeping a table, for the same reason as the
+	 * reader: any project can write its own key type, and a fixed table would
+	 * answer "unknown" for the type the project itself created.
 	 */
 	UClass* FindKeyTypeClass(const FString& Name, TArray<FString>& OutKnown)
 	{
@@ -52,8 +52,8 @@ namespace
 	}
 
 	/**
-	 * Poe o detalhe que qualifica a chave -- classe base de Object, enum de
-	 * Enum -- por reflexao, espelhando o leitor.
+	 * Sets the detail that qualifies the key -- an Object's base class, an
+	 * Enum's enum -- through reflection, mirroring the reader.
 	 */
 	bool ApplyKeyTypeDetail(UBlackboardKeyType* KeyType, const FString& Detail, FString& OutError)
 	{
@@ -74,8 +74,8 @@ namespace
 
 			void* ValuePtr = Property->ContainerPtrToValuePtr<void>(KeyType);
 
-			// O leitor escreve o nome curto (`Actor`), que nao carrega caminho.
-			// Aqui vale procurar a classe pelo nome antes de desistir.
+			// The reader writes the short name (`Actor`), which carries no path.
+			// Here it is worth looking the class up by name before giving up.
 			FString Text = Detail;
 			if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
 			{
@@ -86,7 +86,7 @@ namespace
 						ObjectProperty->SetObjectPropertyValue(ValuePtr, Resolved);
 						return true;
 					}
-					OutError = FString::Printf(TEXT("nao achei a classe `%s`"), *Detail);
+					OutError = FString::Printf(TEXT("could not find class `%s`"), *Detail);
 					return false;
 				}
 			}
@@ -95,7 +95,7 @@ namespace
 		}
 
 		OutError = FString::Printf(
-			TEXT("o tipo %s nao aceita detalhe entre parenteses"), *KeyType->GetClass()->GetName());
+			TEXT("type %s does not take a detail in parentheses"), *KeyType->GetClass()->GetName());
 		return false;
 	}
 
@@ -114,7 +114,7 @@ FNodeScribeAIWriter::FResult FNodeScribeAIWriter::WriteAsset(UObject* Object, co
 	}
 
 	FResult Result;
-	Result.Diagnostics.Add(TEXT("[erro]: nao sei escrever neste tipo de asset."));
+	Result.Diagnostics.Add(TEXT("[error]: I do not know how to write into this kind of asset."));
 	return Result;
 }
 
@@ -127,7 +127,7 @@ FNodeScribeAIWriter::FResult FNodeScribeAIWriter::WriteBlackboard(
 	Text.ParseIntoArrayLines(Lines, /*bCullEmpty*/ false);
 
 	const FScopedTransaction Transaction(
-		LOCTEXT("WriteBlackboardTransaction", "NodeScribe: escrever blackboard"));
+		LOCTEXT("WriteBlackboardTransaction", "NodeScribe: write blackboard"));
 
 	bool bChanged = false;
 
@@ -141,36 +141,34 @@ FNodeScribeAIWriter::FResult FNodeScribeAIWriter::WriteBlackboard(
 			continue;
 		}
 
-		if (!Line.RemoveFromStart(TEXT("chave "), ESearchCase::IgnoreCase))
+		if (!Line.RemoveFromStart(TEXT("key "), ESearchCase::IgnoreCase))
 		{
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("linha %d [erro]: esperava `chave Nome : Tipo`, veio `%s`."),
+				TEXT("line %d [error]: expected `key Name : Type`, got `%s`."),
 				LineNumber, *Line));
 			continue;
 		}
 
-		// Sincronizada e' comportamento, e sai do fim da linha antes do resto.
+		// Synced is behaviour, and it comes off the end of the line before the rest.
 		bool bInstanceSynced = false;
-		if (Line.EndsWith(TEXT(" sincronizada"), ESearchCase::IgnoreCase)
-			|| Line.EndsWith(TEXT(" synced"), ESearchCase::IgnoreCase))
+		if (Line.EndsWith(TEXT(" synced"), ESearchCase::IgnoreCase))
 		{
 			bInstanceSynced = true;
-			Line = Line.Left(Line.Find(TEXT(" "), ESearchCase::CaseSensitive,
-				ESearchDir::FromEnd)).TrimEnd();
+			Line = Line.LeftChop(7).TrimEnd();
 		}
 
 		int32 Colon = INDEX_NONE;
 		if (!Line.FindChar(TEXT(':'), Colon))
 		{
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("linha %d [erro]: falta o `:` entre o nome e o tipo."), LineNumber));
+				TEXT("line %d [error]: the `:` between the name and the type is missing."), LineNumber));
 			continue;
 		}
 
 		const FString KeyName = Line.Left(Colon).TrimEnd();
 		FString TypeText = Line.RightChop(Colon + 1).TrimStart();
 
-		// `Object (Actor)` -- o detalhe entre parenteses qualifica o tipo.
+		// `Object (Actor)` -- the detail in parentheses qualifies the type.
 		FString Detail;
 		int32 Open = INDEX_NONE;
 		if (TypeText.FindChar(TEXT('('), Open))
@@ -184,7 +182,7 @@ FNodeScribeAIWriter::FResult FNodeScribeAIWriter::WriteBlackboard(
 		if (KeyName.IsEmpty() || TypeText.IsEmpty())
 		{
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("linha %d [erro]: nome ou tipo vazio."), LineNumber));
+				TEXT("line %d [error]: empty name or type."), LineNumber));
 			continue;
 		}
 
@@ -193,7 +191,7 @@ FNodeScribeAIWriter::FResult FNodeScribeAIWriter::WriteBlackboard(
 		if (!KeyTypeClass)
 		{
 			Result.Diagnostics.Add(FString::Printf(
-				TEXT("linha %d [erro]: nao conheco o tipo `%s`. Conheco: %s."),
+				TEXT("line %d [error]: unknown type `%s`. Known: %s."),
 				LineNumber, *TypeText, *FString::Join(Known, TEXT(", "))));
 			continue;
 		}
@@ -213,8 +211,8 @@ FNodeScribeAIWriter::FResult FNodeScribeAIWriter::WriteBlackboard(
 			Entry = &Blackboard->Keys[Blackboard->Keys.Add(NewEntry)];
 		}
 
-		// Trocar o tipo troca o subobjeto. Reaproveitar o antigo deixaria as
-		// propriedades da chave anterior penduradas na nova.
+		// Changing the type changes the subobject. Reusing the old one would
+		// leave the previous key's properties hanging on the new one.
 		if (!Entry->KeyType || Entry->KeyType->GetClass() != KeyTypeClass)
 		{
 			Entry->KeyType = NewObject<UBlackboardKeyType>(Blackboard, KeyTypeClass);
@@ -228,7 +226,7 @@ FNodeScribeAIWriter::FResult FNodeScribeAIWriter::WriteBlackboard(
 			if (!ApplyKeyTypeDetail(Entry->KeyType, Detail, Error))
 			{
 				Result.Diagnostics.Add(FString::Printf(
-					TEXT("linha %d [aviso]: chave `%s` criada, mas %s."),
+					TEXT("line %d [warning]: key `%s` created, but %s."),
 					LineNumber, *KeyName, *Error));
 			}
 		}
@@ -239,8 +237,8 @@ FNodeScribeAIWriter::FResult FNodeScribeAIWriter::WriteBlackboard(
 
 	if (bChanged)
 	{
-		// Sem isto o asset fica alterado em memoria e limpo em disco: fecha o
-		// editor e o trabalho some sem ninguem avisar.
+		// Without this the asset stays changed in memory and clean on disk: the
+		// editor closes and the work vanishes without anyone warning.
 		Blackboard->MarkPackageDirty();
 	}
 

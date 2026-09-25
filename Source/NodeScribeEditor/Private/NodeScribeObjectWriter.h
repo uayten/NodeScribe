@@ -5,20 +5,22 @@
 class UObject;
 
 /**
- * O espelho da ficha: texto entra, propriedade muda.
+ * The sheet's mirror: text goes in, properties change.
  *
- * Aceita o que `FNodeScribeObjectReader` produz, sem os comentarios -- bloco de
- * componente, membro de struct recuado, e `= padrao` para voltar ao valor de
- * fabrica.
+ * Accepts what `FNodeScribeObjectReader` produces, without the comments --
+ * component block, indented struct member, and `= default` to go back to the
+ * factory value.
  *
- * So' mexe no que a linha pede. Nao cria variavel, nao cria componente, nao
- * apaga nada: o texto e' uma lista de mudancas, nao uma descricao do estado
- * final. Colar uma ficha inteira de volta nao deve mexer em nada.
+ * It only touches what the line asks for. The text is a list of changes, not a
+ * description of the final state: pasting a whole sheet back should change
+ * nothing. The one thing it creates is a Blueprint variable, from a
+ * `variable Name : Type` line, and the one thing it removes is a variable,
+ * from `delete variable Name`. It never creates components.
  *
- * Nada aqui adivinha. Nome de propriedade que nao resolve vira diagnostico com
- * os candidatos parecidos, e as outras linhas continuam sendo aplicadas -- uma
- * propriedade escrita no lugar errado e' o erro caro aqui, porque grava no
- * asset e so' aparece rodando.
+ * Nothing here guesses. A property name that does not resolve becomes a
+ * diagnostic with the similar candidates, and the other lines keep being
+ * applied -- a property written in the wrong place is the expensive mistake
+ * here, because it saves into the asset and only shows up at runtime.
  */
 class FNodeScribeObjectWriter
 {

@@ -9,50 +9,50 @@ class UEdGraphNode;
 class UEdGraphPin;
 
 /**
- * Suporte a AnimGraph.
+ * AnimGraph support.
  *
- * Um AnimGraph nao e' um grafo de execucao: os nodes nao "continuam" um no
- * outro, eles alimentam uma pose. O fluxo e' invertido em relacao ao
- * EventGraph -- a cadeia termina no Output Pose, que ja' existe no grafo e
- * nunca e' criado.
+ * An AnimGraph is not an execution graph: nodes do not "continue" into each
+ * other, they feed a pose. The flow is reversed compared to the EventGraph --
+ * the chain ends at the Output Pose, which already exists in the graph and is
+ * never created.
  *
- * O catalogo de funcoes nao serve aqui: node de anim e' subclasse de
- * `UAnimGraphNode_Base`, nao `UFunction`. Por isso este arquivo mantem o
- * proprio indice, montado do mesmo jeito -- uma vez, por nome normalizado.
+ * The function catalog does not work here: an anim node is a subclass of
+ * `UAnimGraphNode_Base`, not a `UFunction`. That is why this file keeps its
+ * own index, built the same way -- once, by normalised name.
  */
 namespace NodeScribeAnimGraph
 {
 
-/** true quando o grafo e' um AnimGraph, um sub-grafo de estado ou de transicao. */
+/** true when the graph is an AnimGraph, a state sub-graph or a transition sub-graph. */
 bool IsAnimationGraph(const UEdGraph* Graph);
 
-/** true quando o grafo e' o interior de uma maquina de estado. */
+/** true when the graph is the interior of a state machine. */
 bool IsStateMachineGraph(const UEdGraph* Graph);
 
-/** true para pino de pose, local ou component space. */
+/** true for a pose pin, local or component space. */
 bool IsPosePin(const UEdGraphPin* Pin);
 
-/** O pino de pose de entrada do node, se houver. O primeiro, quando ha' varios. */
+/** The node's pose input pin, if any. The first one, when there are several. */
 UEdGraphPin* FindPoseInput(UEdGraphNode* Node);
 
 /**
- * Todos os pinos de pose de entrada do node.
+ * All of the node's pose input pins.
  *
- * Um blend tem varios, e e' por eles que a arvore se ramifica: no AnimGraph a
- * indentacao abre uma *entrada*, nao uma saida como no EventGraph.
+ * A blend has several, and it is through them that the tree branches: in the
+ * AnimGraph indentation opens an *input*, not an output as in the EventGraph.
  */
 TArray<UEdGraphPin*> GetPoseInputs(UEdGraphNode* Node);
 
-/** Os pinos de pose de saida do node. */
+/** The node's pose output pins. */
 TArray<UEdGraphPin*> GetPoseOutputs(UEdGraphNode* Node);
 
 /**
- * O Output Pose do grafo. Ele nasce com o AnimGraph e e' unico; escrever
- * `Output Pose` numa linha encontra este node em vez de criar outro.
+ * The graph's Output Pose. It is born with the AnimGraph and is unique; writing
+ * `Output Pose` on a line finds this node instead of creating another.
  */
 UEdGraphNode* FindOutputPose(UEdGraph* Graph);
 
-/** Resultado de uma busca por nome de node de anim. */
+/** Result of a lookup by anim node name. */
 struct FLookup
 {
 	UClass* NodeClass = nullptr;
@@ -63,14 +63,14 @@ struct FLookup
 };
 
 /**
- * Procura a classe de node pelo nome escrito pelo usuario.
- * Compara contra o titulo que aparece no menu do grafo -- `Blend Poses by
- * Bool`, `Layered blend per bone` --, que e' o unico nome que o usuario tem
- * como saber.
+ * Looks up the node class by the name the user wrote.
+ * Compares against the title shown in the graph's menu -- `Blend Poses by
+ * Bool`, `Layered blend per bone` --, which is the only name the user has a
+ * way of knowing.
  */
 FLookup FindNodeClass(const FString& Query);
 
-/** Resultado de uma busca por asset de animacao. */
+/** Result of a lookup by animation asset. */
 struct FAssetLookup
 {
 	UAnimationAsset* Asset = nullptr;
@@ -81,22 +81,22 @@ struct FAssetLookup
 };
 
 /**
- * Um asset de animacao pelo nome curto ou caminho completo.
+ * An animation asset by short name or full path.
  *
- * Dois assets com o mesmo nome curto nao viram escolha: sai a lista dos
- * caminhos, e quem decide e' o usuario. Carregar o errado e' um bug que so'
- * aparece rodando, com a animacao certa em cima do personagem errado.
+ * Two assets with the same short name do not become a choice: the list of
+ * paths comes out, and the user decides. Loading the wrong one is a bug that
+ * only shows up at runtime, with the right animation on the wrong character.
  */
 FAssetLookup FindAnimationAsset(const FString& Query);
 
 /**
- * A classe de node que toca um dado asset -- Sequence Player para AnimSequence,
- * BlendSpace Player para BlendSpace, e assim por diante. E' o mesmo mapeamento
- * que o arrastar-e-soltar usa.
+ * The node class that plays a given asset -- Sequence Player for AnimSequence,
+ * BlendSpace Player for BlendSpace, and so on. It is the same mapping
+ * drag-and-drop uses.
  */
 UClass* NodeClassForAsset(const UAnimationAsset* Asset);
 
-/** Forca a reconstrucao do indice. */
+/** Forces the index to be rebuilt. */
 void Invalidate();
 
 } // namespace NodeScribeAnimGraph

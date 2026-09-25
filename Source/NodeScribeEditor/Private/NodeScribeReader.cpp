@@ -23,6 +23,8 @@
 #include "EdGraphNode_Comment.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/Blueprint.h"
+#include "Engine/SCS_Node.h"
+#include "Engine/SimpleConstructionScript.h"
 #include "K2Node_AnimGetter.h"
 #include "K2Node_AsyncAction.h"
 #include "K2Node_BaseAsyncTask.h"
@@ -62,20 +64,20 @@ using namespace NodeScribePropertyText;
 
 namespace
 {
-	/** Dois espacos por nivel: e' o que FNodeScribeParser::MeasureIndent conta. */
+	/** Two spaces per level: it is what FNodeScribeParser::MeasureIndent counts. */
 	const TCHAR* const IndentUnit = TEXT("  ");
 
 	/**
-	 * true para o node que a Unreal insere sozinha ao ligar tipos diferentes.
+	 * true for the node Unreal inserts by itself when linking different types.
 	 *
-	 * Ninguem escolhe esses nodes: eles aparecem no `TryCreateConnection` quando
-	 * o pino de origem nao e' do tipo do pino de destino, e o builder recria cada
-	 * um deles do mesmo jeito, sozinho, ao refazer a ligacao. Por isso sao
-	 * atravessados como reroute em vez de virar linha.
+	 * Nobody chooses these nodes: they show up in `TryCreateConnection` when the
+	 * source pin is not of the target pin's type, and the builder recreates each
+	 * of them the same way, by itself, when redoing the link. That is why they
+	 * are walked through like a reroute instead of becoming a line.
 	 *
-	 * Duas familias, que e' o que `CreateAutomaticConversionNodeAndConnections`
-	 * conhece: a funcao marcada `BlueprintAutocast` (`To Integer64 (Integer)`) e
-	 * os nodes especializados de enum (`Enum to String`).
+	 * Two families, which is what `CreateAutomaticConversionNodeAndConnections`
+	 * knows: the function marked `BlueprintAutocast` (`To Integer64 (Integer)`)
+	 * and the specialised enum nodes (`Enum to String`).
 	 */
 	bool IsImplicitConversionNode(const UEdGraphNode* Node)
 	{
@@ -99,19 +101,19 @@ namespace
 	}
 
 	/**
-	 * Pino que carrega fluxo: execucao no EventGraph, pose no AnimGraph.
+	 * A pin that carries flow: execution in the EventGraph, pose in the AnimGraph.
 	 *
-	 * Nao precisa perguntar em que grafo esta': pino de pose so' existe em
-	 * AnimGraph. O que ele separa e' fluxo de dado -- e ler pose como dado
-	 * escreveria `A = $idle` na linha de um blend, o que ao colar criaria de
-	 * novo um node que ja' saiu na arvore.
+	 * It does not need to ask which graph it is in: pose pins only exist in an
+	 * AnimGraph. What it separates is data flow -- and reading a pose as data
+	 * would write `A = $idle` on a blend's line, which on pasting would create
+	 * again a node that already came out in the tree.
 	 */
 	bool IsFlowPin(const UEdGraphPin* Pin)
 	{
 		return IsExecPin(Pin) || NodeScribeAnimGraph::IsPosePin(Pin);
 	}
 
-	/** O unico pino de dado de entrada de um node de conversao. */
+	/** The single data input pin of a conversion node. */
 	UEdGraphPin* FindSingleDataInput(UEdGraphNode* Node)
 	{
 		UEdGraphPin* Found = nullptr;
@@ -125,7 +127,7 @@ namespace
 
 			if (Found)
 			{
-				// Mais de uma entrada: nao e' a conversao de um valor so'.
+				// More than one input: it is not the conversion of a single value.
 				return nullptr;
 			}
 
@@ -136,14 +138,14 @@ namespace
 	}
 
 	/**
-	 * Nodes de reroute nao existem no formato de texto -- sao decoracao de
-	 * layout. Atravessamos ate' o pino de verdade em vez de emitir uma linha
-	 * que o builder nao saberia recriar. O mesmo vale para o node de conversao
-	 * implicita, que o builder poe de volta sozinho.
+	 * Reroute nodes do not exist in the text format -- they are layout
+	 * decoration. We walk through to the real pin instead of emitting a line the
+	 * builder would not know how to recreate. The same goes for the implicit
+	 * conversion node, which the builder puts back by itself.
 	 *
-	 * @param OutTraversed  recebe os nodes de conversao atravessados, para que a
-	 *                      contagem de orfaos nao os acuse de "nao alimentam
-	 *                      nada" -- eles alimentam, so' nao viraram linha.
+	 * @param OutTraversed  receives the conversion nodes walked through, so that
+	 *                      the orphan count does not accuse them of "feeding
+	 *                      nothing" -- they do feed, they just did not become a line.
 	 */
 	UEdGraphPin* FollowToSourcePin(UEdGraphPin* InputPin, TSet<UEdGraphNode*>* OutTraversed = nullptr)
 	{
@@ -185,17 +187,18 @@ namespace
 	}
 
 	/**
-	 * Idem, no sentido da execucao -- e devolvendo o PINO em que o fio cai, nao
-	 * so' o node dono dele.
+	 * Same, in the direction of execution -- and returning the PIN the wire
+	 * lands on, not only the node that owns it.
 	 *
-	 * O node nao basta. Um fio de execucao pode chegar num pino que nao e' a
-	 * entrada principal do node: o `Reset` de um Do Once, o `Stop` de uma
-	 * Timeline, o `Close` de um Gate. Esses nao continuam a cadeia -- sao um
-	 * comando lateral para um node que ja' esta' em outro lugar do grafo.
+	 * The node is not enough. An execution wire may arrive at a pin that is not
+	 * the node's main input: the `Reset` of a Do Once, the `Stop` of a Timeline,
+	 * the `Close` of a Gate. Those do not continue the chain -- they are a side
+	 * command to a node that already lives elsewhere in the graph.
 	 *
-	 * Enquanto so' o node era seguido, os dois eram a mesma coisa para a leitura,
-	 * e ela descrevia o grafo errado com toda a confianca: dois Do Once que se
-	 * resetam saiam empilhados, um debaixo do outro, como se um chamasse o outro.
+	 * While only the node was followed, both were the same thing to the reader,
+	 * and it described the wrong graph with full confidence: two Do Onces that
+	 * reset each other came out stacked, one under the other, as if one called
+	 * the other.
 	 */
 	UEdGraphPin* FollowExecTargetPin(UEdGraphPin* ExecOutput)
 	{
@@ -221,7 +224,7 @@ namespace
 		return nullptr;
 	}
 
-	/** As entradas de pose ligadas a alguem, na ordem em que aparecem no node. */
+	/** The pose inputs linked to something, in the order they appear on the node. */
 	TArray<UEdGraphPin*> GetLinkedPoseInputs(UEdGraphNode* Node)
 	{
 		TArray<UEdGraphPin*> Linked;
@@ -261,18 +264,18 @@ namespace
 	}
 
 	/**
-	 * A entrada de execucao por onde a cadeia realmente continua: a primeira.
+	 * The execution input through which the chain really continues: the first.
 	 *
-	 * Qualquer outra e' um comando lateral, e o node do outro lado nao pertence a
-	 * esta cadeia -- ele tem vida propria em outro ponto do grafo. Escrever um
-	 * abaixo do outro diria que um leva ao outro.
+	 * Any other one is a side command, and the node on the other side does not
+	 * belong to this chain -- it has a life of its own elsewhere in the graph.
+	 * Writing one under the other would say that one leads to the other.
 	 */
 	bool IsPrimaryExecInput(UEdGraphNode* Node, const UEdGraphPin* Pin)
 	{
 		return Node && Pin && FindExecInput(Node) == Pin;
 	}
 
-	/** A saida que `$nome` sozinho alcanca. Mesma regra do builder. */
+	/** The output a bare `$name` reaches. Same rule as the builder. */
 	UEdGraphPin* FindPrimaryOutput(UEdGraphNode* Node)
 	{
 		for (UEdGraphPin* Pin : Node->Pins)
@@ -295,19 +298,19 @@ namespace
 	}
 
 	/**
-	 * true quando `$nome` sozinho, sem `.Pino`, alcanca esse pino sem chute.
+	 * true when a bare `$name`, without `.Pin`, reaches this pin without guessing.
 	 *
-	 * `FindPrimaryOutput` responde "o primeiro pino de saida" quando nao ha'
-	 * `ReturnValue`, e isso e' uma escolha, nao um fato: num Break de struct os
-	 * pinos so' existem para os campos marcados como visiveis, entao o "primeiro"
-	 * muda de node para node e muda de novo quando alguem marca outro campo.
+	 * `FindPrimaryOutput` answers "the first output pin" when there is no
+	 * `ReturnValue`, and that is a choice, not a fact: in a struct Break the pins
+	 * only exist for the fields marked as visible, so the "first" one changes
+	 * from node to node and changes again when someone ticks another field.
 	 *
-	 * Escrever `$x` puro nesse caso produzia um texto que, colado de volta, ligava
-	 * no primeiro campo do node *recriado* -- que tem todos os campos visiveis, e
-	 * portanto pode ser outro campo. Ligacao plausivel e errada, em silencio.
+	 * Writing a bare `$x` in that case produced a text that, pasted back, linked
+	 * to the first field of the *recreated* node -- which has every field
+	 * visible, and so may be another field. A plausible, wrong link, silently.
 	 *
-	 * Por isso a regra aqui e' mais estreita que a do builder de proposito: so'
-	 * `ReturnValue`, ou saida unica. Qualquer outra coisa sai nomeada.
+	 * That is why the rule here is narrower than the builder's on purpose: only
+	 * `ReturnValue`, or a single output. Anything else comes out named.
 	 */
 	bool IsUnambiguousPrimaryOutput(UEdGraphNode* Node, const UEdGraphPin* Pin)
 	{
@@ -321,11 +324,12 @@ namespace
 			return true;
 		}
 
-		// Break de struct nunca conta como saida unica, mesmo quando so' um campo
-		// esta' visivel -- e' justamente ai' que a armadilha mora. Os pinos de um
-		// Break sao os campos *marcados* no painel do node, e o Break recriado ao
-		// colar nasce com todos marcados: `$x` puro sairia do campo escondido e
-		// entraria no primeiro campo da struct, que e' outro.
+		// A struct Break never counts as a single output, even when only one
+		// field is visible -- that is exactly where the trap lives. A Break's
+		// pins are the fields *ticked* in the node's panel, and the Break
+		// recreated on pasting is born with all of them ticked: a bare `$x` would
+		// come out of the hidden field and go into the struct's first field,
+		// which is another one.
 		if (Node->IsA<UK2Node_BreakStruct>())
 		{
 			return false;
@@ -339,8 +343,8 @@ namespace
 				++DataOutputs;
 			}
 
-			// Um `ReturnValue` em qualquer lugar da lista ja' e' a saida principal,
-			// e este pino nao e' ele.
+			// A `ReturnValue` anywhere in the list is already the main output,
+			// and this pin is not it.
 			if (Other->Direction == EGPD_Output && Other->PinName == UEdGraphSchema_K2::PN_ReturnValue)
 			{
 				return false;
@@ -351,16 +355,18 @@ namespace
 	}
 
 	/**
-	 * true quando o valor precisa mudar de tipo para entrar no pino.
+	 * true when the value needs to change type to go into the pin.
 	 *
-	 * Um `int32` num pino `int64` compila e roda; a diferenca entre ter passado
-	 * por essa conversao ou nao e' a diferenca entre a chave certa de um mapa e
-	 * uma chave que colide. Como o node de conversao e' atravessado, sem esta
-	 * marca a leitura ficaria igual nos dois casos.
+	 * An `int32` in an `int64` pin compiles and runs; the difference between
+	 * having gone through that conversion or not is the difference between the
+	 * right key of a map and a key that collides. Since the conversion node is
+	 * walked through, without this mark the reading would be the same in both
+	 * cases.
 	 *
-	 * Categoria diferente basta. Objeto para objeto de outra classe nao entra:
-	 * passar um `PlayerController` num pino de `Actor` e' heranca, nao conversao,
-	 * e marcaria quase toda linha do grafo sem dizer nada.
+	 * A different category is enough. Object to object of another class does
+	 * not count: passing a `PlayerController` into an `Actor` pin is
+	 * inheritance, not conversion, and it would mark almost every line of the
+	 * graph while saying nothing.
 	 */
 	bool NeedsConversionNote(const UEdGraphPin* Source, const UEdGraphPin* Target)
 	{
@@ -372,8 +378,8 @@ namespace
 		const FEdGraphPinType& From = Source->PinType;
 		const FEdGraphPinType& To = Target->PinType;
 
-		// Wildcard e' o pino que ainda vai virar o tipo de quem se ligar nele
-		// (`Find` num TMap, corpo de macro). Ali nao ha' conversao nenhuma.
+		// A wildcard is the pin that will still become the type of whatever links
+		// to it (`Find` on a TMap, macro body). There is no conversion there.
 		if (From.PinCategory == UEdGraphSchema_K2::PC_Wildcard
 			|| To.PinCategory == UEdGraphSchema_K2::PC_Wildcard)
 		{
@@ -385,7 +391,7 @@ namespace
 			return true;
 		}
 
-		// Struct para struct de outro tipo tambem e' conversao (Vector -> Vector2D).
+		// Struct to struct of another type is also a conversion (Vector -> Vector2D).
 		if (From.PinCategory == UEdGraphSchema_K2::PC_Struct)
 		{
 			return From.PinSubCategoryObject != To.PinSubCategoryObject;
@@ -394,7 +400,7 @@ namespace
 		return false;
 	}
 
-	/** true quando o node participa do fluxo -- fio branco, ou fio de pose. */
+	/** true when the node takes part in the flow -- white wire, or pose wire. */
 	bool IsExecNode(UEdGraphNode* Node)
 	{
 		for (UEdGraphPin* Pin : Node->Pins)
@@ -408,27 +414,28 @@ namespace
 	}
 
 	/**
-	 * Nome de tipo que o builder sabe ler de volta.
+	 * A type name the builder can read back.
 	 *
-	 * `UEdGraphSchema_K2::TypeToText` devolve o que a interface mostra em painel
-	 * de detalhes -- `IntProperty`, `Timer Handle Structure` --, e nenhum desses
-	 * volta: o builder espera `Integer` e `TimerHandle`. Esta funcao e' o espelho
-	 * exato de `ResolvePinTypeFromName`, entao o que sai daqui entra la'.
+	 * `UEdGraphSchema_K2::TypeToText` returns what the interface shows in a
+	 * details panel -- `IntProperty`, `Timer Handle Structure` --, and none of
+	 * those come back: the builder expects `Integer` and `TimerHandle`. This
+	 * function is the exact mirror of `ResolvePinTypeFromName`, so what comes
+	 * out here goes in there.
 	 *
-	 * Mora em NodeScribePropertyText porque a ficha de propriedades precisa
-	 * escrever tipo com o mesmo vocabulario -- dois nomes para o mesmo tipo
-	 * seriam duas linguagens para o usuario aprender.
+	 * It lives in NodeScribePropertyText because the property sheet needs to
+	 * write types with the same vocabulary -- two names for the same type would
+	 * be two languages for the user to learn.
 	 */
 	using NodeScribePropertyText::DescribePinType;
 
 	/**
-	 * true quando separar o nome em palavras vai errar.
+	 * true when splitting the name into words will go wrong.
 	 *
-	 * `NameToDisplayString` decide onde cabe espaco olhando a troca de caixa, e
-	 * sigla quebra essa regra: `JSL4UControllerInfo` sai como `JSL4UController
-	 * Info`, com a divisao no lugar errado. Sigla ou numero no nome e' o sinal de
-	 * que nao da' para saber onde as palavras comecam -- e nesse caso o nome cru
-	 * e' melhor que um chute.
+	 * `NameToDisplayString` decides where a space fits by looking at case
+	 * changes, and an acronym breaks that rule: `JSL4UControllerInfo` comes out
+	 * as `JSL4UController Info`, split in the wrong place. An acronym or a digit
+	 * in the name is the sign that there is no way to know where the words
+	 * start -- and in that case the raw name is better than a guess.
 	 */
 	bool HasAcronymOrDigit(const FString& Name)
 	{
@@ -448,7 +455,7 @@ namespace
 		return false;
 	}
 
-	/** O nome que o usuario ve' e digita, que raramente e' o nome interno. */
+	/** The name the user sees and types, which is rarely the internal name. */
 	FString GetWrittenPinName(const UEdGraphPin* Pin)
 	{
 		if (!Pin->PinFriendlyName.IsEmpty())
@@ -456,14 +463,15 @@ namespace
 			return Pin->PinFriendlyName.ToString();
 		}
 
-		// Sem nome de tela, sobra o nome do parametro em C++: `InString`,
-		// `TargetMap`, `bIsChecked`. A tela mostra `In String`, `Target Map` e
-		// `Is Checked`, e e' assim que alguem escreve ao conferir a linha. A busca
-		// do builder normaliza as duas formas para a mesma coisa, entao o texto
-		// volta igual -- o que muda e' ele parecer o grafo que descreve.
+		// Without a display name, what is left is the C++ parameter name:
+		// `InString`, `TargetMap`, `bIsChecked`. The screen shows `In String`,
+		// `Target Map` and `Is Checked`, and that is how someone writes it when
+		// checking the line. The builder's lookup normalises both forms to the
+		// same thing, so the text comes back the same -- what changes is it
+		// looking like the graph it describes.
 		//
-		// `bIsBool` tira o `b` de `bAimMode`, do mesmo jeito que a interface tira;
-		// o builder tem o caso espelho para reencontrar o pino.
+		// `bIsBool` drops the `b` from `bAimMode`, the same way the interface
+		// does; the builder has the mirror case to find the pin again.
 		const FString Name = Pin->PinName.ToString();
 		if (HasAcronymOrDigit(Name))
 		{
@@ -474,17 +482,18 @@ namespace
 		return FName::NameToDisplayString(Name, bIsBool);
 	}
 
-	/** Aspas: mesma regra para grafo e para ficha, definida uma vez so'. */
+	/** Quotes: same rule for graph and for sheet, defined only once. */
 	using NodeScribePropertyText::NeedsQuotes;
 	using NodeScribePropertyText::TryQuote;
 
 	/**
-	 * true quando o builder resolveria esse nome como struct, nao como funcao.
+	 * true when the builder would resolve this name as a struct, not a function.
 	 *
-	 * `Break Vector` e' o caso: existe a funcao `UKismetMathLibrary::BreakVector`
-	 * e existe o node de Break da struct FVector, com o mesmo nome de tela e
-	 * pinos diferentes. O builder testa a forma de struct antes do catalogo,
-	 * entao escrever o nome puro devolveria o outro node.
+	 * `Break Vector` is the case: there is the function
+	 * `UKismetMathLibrary::BreakVector` and there is the Break node of the
+	 * FVector struct, with the same display name and different pins. The builder
+	 * tries the struct form before the catalog, so writing the bare name would
+	 * give back the other node.
 	 */
 	bool IsShadowedByStructForm(const FString& DisplayName, const UFunction* Function)
 	{
@@ -520,11 +529,12 @@ namespace
 				continue;
 			}
 
-			// Sombra so' existe quando as duas formas dao nodes diferentes.
-			// `Vector` tem break nativo, e o builder, ao ler `Break Vector`,
-			// cria justamente esta funcao -- entao o nome de tela volta igual e
-			// e' o que se le' melhor. Escrever `KismetMathLibrary.BreakVector`
-			// aqui seria fugir de uma colisao que nao acontece mais.
+			// A shadow only exists when the two forms give different nodes.
+			// `Vector` has a native break, and the builder, reading `Break
+			// Vector`, creates exactly this function -- so the display name comes
+			// back the same and is what reads best. Writing
+			// `KismetMathLibrary.BreakVector` here would be dodging a collision
+			// that no longer happens.
 			if (Function && StructIt->HasMetaData(MetaKey)
 				&& FindObject<UFunction>(nullptr, *StructIt->GetMetaData(MetaKey)) == Function)
 			{
@@ -537,7 +547,7 @@ namespace
 		return false;
 	}
 
-	/** Tira o verbo da expressao antes de virar nome: `Get Vida` -> `Vida`. */
+	/** Strips the verb from the expression before it becomes a name: `Get Health` -> `Health`. */
 	FString MakeNameBase(const FString& Expression)
 	{
 		static const TCHAR* const Verbs[] = {
@@ -557,12 +567,12 @@ namespace
 
 		Base.RemoveFromEnd(TEXT("__DelegateSignature"));
 
-		// `OnKeySelected of SelecionarInputKey` vira `onKeySelected`: o dono do
-		// dispatcher ja' esta' na linha, repeti-lo no nome so' faz ruido.
+		// `OnKeySelected of SelectInputKey` becomes `onKeySelected`: the
+		// dispatcher's owner is already on the line, repeating it in the name
+		// only adds noise.
 		FString BeforeOwner;
 		FString Ignored;
-		if (Base.Split(TEXT(" of "), &BeforeOwner, &Ignored, ESearchCase::IgnoreCase)
-			|| Base.Split(TEXT(" de "), &BeforeOwner, &Ignored, ESearchCase::IgnoreCase))
+		if (Base.Split(TEXT(" of "), &BeforeOwner, &Ignored, ESearchCase::IgnoreCase))
 		{
 			Base = BeforeOwner;
 		}
@@ -570,7 +580,7 @@ namespace
 		return Base;
 	}
 
-	/** Primeira letra minuscula, so' alfanumerico: vira um `$nome` legivel. */
+	/** First letter lowercase, alphanumeric only: it becomes a readable `$name`. */
 	FString ToIdentifier(const FString& In)
 	{
 		FString Out;
@@ -602,8 +612,8 @@ namespace
 // ---------------------------------------------------------------------------
 
 /**
- * Estado de uma leitura. Percorre as cadeias de execucao em profundidade, na
- * mesma ordem em que o builder as desenharia, e vai empilhando linhas.
+ * State of one reading. Walks the execution chains depth-first, in the same
+ * order the builder would draw them, and keeps stacking lines.
  */
 class FNodeScribeReadContext
 {
@@ -621,88 +631,90 @@ private:
 	void AddWarning(const FString& Message);
 
 	/**
-	 * Marca, antes de emitir qualquer linha, quais nodes de execucao tem uma
-	 * saida de dado consumida por alguem. Sem essa passagem previa a linha ja'
-	 * teria saido sem o `nome =`, e o consumidor la' na frente acabaria
-	 * emitindo o node de novo -- o que, ao colar de volta, criaria dois.
+	 * Marks, before emitting any line, which execution nodes have a data output
+	 * consumed by someone. Without this pre-pass the line would already have
+	 * gone out without the `name =`, and the consumer further ahead would end
+	 * up emitting the node again -- which, pasted back, would create two.
 	 */
 	void CollectConsumedNodes();
 
 	void EmitExecChain(UEdGraphNode* Node, int32 Indent);
 
 	/**
-	 * A arvore de pose de um AnimGraph, a partir do Output Pose e para tras.
+	 * An AnimGraph's pose tree, from the Output Pose backwards.
 	 *
-	 * Ao contrario da execucao, aqui o texto sai de quem alimenta para quem
-	 * consome: e' assim que o builder o le' de volta. Uma entrada so' vira
-	 * cadeia reta -- as linhas se seguem --, e duas ou mais viram rotulos
-	 * indentados, um por entrada.
+	 * Unlike execution, here the text goes from what feeds to what consumes:
+	 * that is how the builder reads it back. A single input becomes a straight
+	 * chain -- the lines follow each other --, and two or more become indented
+	 * labels, one per input.
 	 */
 	void EmitPoseTree(UEdGraphNode* Node, int32 Indent);
 
-	/** O grafo de anim inteiro: a arvore do Output Pose, e o que sobrou solto. */
+	/** The whole anim graph: the Output Pose tree, and whatever was left loose. */
 	void EmitAnimGraph();
 
-	/** `Nome = State Machine`, com os estados e as transicoes debaixo. */
+	/** `Name = State Machine`, with the states and transitions under it. */
 	void EmitStateMachine(UAnimGraphNode_StateMachineBase* Machine, int32 Indent);
 
-	/** A regra de uma transicao: a cadeia de dado que termina no bool. */
+	/** A transition's rule: the data chain that ends in the bool. */
 	void EmitTransitionRule();
 
 	/**
-	 * Um sub-grafo lido por um contexto proprio, com as linhas indentadas.
+	 * A sub-graph read by a context of its own, with the lines indented.
 	 *
-	 * Contexto proprio pelo mesmo motivo do builder: cada sub-grafo tem o seu
-	 * Output Pose e os seus nomes, e misturar os dois faria `$idle` de um
-	 * estado apontar para um node do outro.
+	 * A context of its own for the same reason as the builder: each sub-graph
+	 * has its own Output Pose and its own names, and mixing both would make one
+	 * state's `$idle` point at a node of the other.
 	 */
 	void EmitSubGraph(UEdGraph* SubGraph, int32 Indent);
 
 	/**
-	 * Um fio de execucao saindo de `ExecOutput`: continua a cadeia, volta para
-	 * uma ancora, ou entra de lado num node que vive em outro lugar do grafo.
+	 * An execution wire leaving `ExecOutput`: it continues the chain, goes back
+	 * to an anchor, or enters sideways into a node that lives elsewhere in the
+	 * graph.
 	 */
 	void EmitExecLink(UEdGraphPin* ExecOutput, int32 Indent);
 
-	/** O numero de ancora de um node, reservando um se ele ainda nao tiver. */
+	/** A node's anchor number, reserving one if it does not have one yet. */
 	int32 AnchorFor(UEdGraphNode* Node);
 
-	/** Escreve `# ancora N` na linha de cada node ancorado, no fim de tudo. */
+	/** Writes `# anchor N` on the line of each anchored node, at the very end. */
 	void StampAnchors();
 
 	void EmitNodeLine(UEdGraphNode* Node, int32 Indent);
 
-	/** Emite a linha de um node puro de dado e devolve o nome dado a ele. */
+	/** Emits the line of a pure data node and returns the name given to it. */
 	FString EmitDataNode(UEdGraphNode* Node, int32 Indent);
 
-	/** O token que aponta para esse pino: `$nome` ou `$nome.Pino`. */
+	/** The token that points at this pin: `$name` or `$name.Pin`. */
 	FString MakeReferenceTo(UEdGraphPin* SourcePin, int32 Indent);
 
-	/** Devolve vazio quando o node volta igual; senao, o motivo de nao voltar. */
+	/** Returns empty when the node comes back the same; otherwise, why it does not. */
 	FString DescribeNode(UEdGraphNode* Node, FString& OutRoundTripIssue);
 	FString BuildArgumentList(UEdGraphNode* Node, int32 Indent);
 
 	/**
-	 * As opcoes do painel de detalhes que diferem do node recem-criado.
+	 * The details panel options that differ from a freshly created node.
 	 *
-	 * Sao argumentos como qualquer outro na linha -- o builder as reconhece pelo
-	 * mesmo nome de tela. Existem porque nem tudo que muda o que um node faz e'
-	 * pino: `Loop Animation` num Sequence Player nao tem fio, nasce ligado, e um
-	 * `MM_Jump` que devia tocar uma vez ficava em loop sem nada no texto.
+	 * They are arguments like any other on the line -- the builder recognises
+	 * them by the same display name. They exist because not everything that
+	 * changes what a node does is a pin: `Loop Animation` on a Sequence Player
+	 * has no wire, is born on, and an `MM_Jump` that should play once kept
+	 * looping with nothing in the text.
 	 */
 	void AppendNodeSettings(UEdGraphNode* Node, TArray<FString>& Args);
 
-	/** ` (A = 1, B = 2)` com o que difere do node novo, ou vazio. */
+	/** ` (A = 1, B = 2)` with what differs from a new node, or empty. */
 	FString DescribeSettings(UEdGraphNode* Node);
 
 	FString DescribeLiteral(UEdGraphPin* Pin, bool& bOutRepresentable);
 
-	/** Rotulo de saida de execucao que volta como o mesmo pino ao ser lido. */
+	/** An execution output label that comes back as the same pin when read. */
 	FString DescribeExecLabel(UEdGraphPin* Pin);
 
 	FString MakeUniqueName(const FString& Base);
 
-	/** Nome curto e estavel para o titulo do node, usado em diagnostico. */
+	/** Short, stable name for the node's title, used in diagnostics. */
 	FString ShortTitle(UEdGraphNode* Node) const;
 
 	TArray<UEdGraphNode*> Nodes;
@@ -714,24 +726,25 @@ private:
 	TMap<UEdGraphNode*, FString> DataNames;
 	TSet<FString> UsedNames;
 
-	/** Em que linha do texto cada node de execucao saiu, para ancorar a volta. */
+	/** On which line of the text each execution node came out, to anchor the way back. */
 	TMap<UEdGraphNode*, int32> ExecLineIndex;
 
-	/** Numero da ancora de cada node que recebe execucao de mais de um lugar. */
+	/** Anchor number of each node that receives execution from more than one place. */
 	TMap<UEdGraphNode*, int32> AnchorOf;
 	int32 NextAnchor = 1;
 
-	/** Conversoes implicitas que foram atravessadas: nao sao orfas. */
+	/** Implicit conversions that were walked through: they are not orphans. */
 	TSet<UEdGraphNode*> TraversedConversions;
 
 	TArray<FString> Lines;
 
 	/**
-	 * Sub-grafo lido de dentro de outra leitura: sai sem cabecalho.
+	 * A sub-graph read from inside another reading: it comes out without a header.
 	 *
-	 * O cabecalho diz de onde o texto veio e declara as variaveis do Blueprint.
-	 * Repetir isso no meio do bloco de um estado nao ajuda ninguem -- e as
-	 * declaracoes sairiam indentadas, onde o parser nao as le' como declaracao.
+	 * The header says where the text came from and declares the Blueprint's
+	 * variables. Repeating that in the middle of a state's block helps nobody --
+	 * and the declarations would come out indented, where the parser does not
+	 * read them as declarations.
 	 */
 	bool bNested = false;
 
@@ -744,7 +757,7 @@ FNodeScribeReadContext::FNodeScribeReadContext(const TArray<UEdGraphNode*>& InNo
 {
 	for (UEdGraphNode* Node : Nodes)
 	{
-		// Reroute nao vira linha: e' atravessado na hora de seguir os fios.
+		// A reroute does not become a line: it is walked through when following wires.
 		if (Node && !Node->IsA<UK2Node_Knot>())
 		{
 			Scope.Add(Node);
@@ -796,32 +809,32 @@ FString FNodeScribeReadContext::MakeUniqueName(const FString& Base)
 }
 
 // ---------------------------------------------------------------------------
-// Nome do node
+// Node name
 // ---------------------------------------------------------------------------
 
 FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRoundTripIssue)
 {
 	OutRoundTripIssue.Reset();
 
-	// Node de anim. O titulo da instancia nao serve de nome: ele muda com o
-	// asset e com os pinos. O que volta e' o titulo do *menu*, lido do CDO --
-	// que e' exatamente o que o indice do builder guarda.
+	// Anim node. The instance's title does not work as a name: it changes with
+	// the asset and with the pins. What comes back is the *menu* title, read
+	// from the CDO -- which is exactly what the builder's index keeps.
 	if (const UAnimGraphNode_Base* AnimNode = Cast<UAnimGraphNode_Base>(Node))
 	{
 		UAnimationAsset* Asset = AnimNode->GetAnimationAsset();
 
-		// Nome de asset so' volta igual quando o mapeamento asset -> node leva
-		// de volta a esta mesma classe. `BS_Locomotion` vira um BlendSpace
-		// Player; num BlendSpace *Evaluator* a mesma linha voltaria como Player,
-		// que e' outro node -- entao ali o nome do asset nao serve.
+		// An asset name only comes back the same when the asset -> node mapping
+		// leads back to this same class. `BS_Locomotion` becomes a BlendSpace
+		// Player; on a BlendSpace *Evaluator* the same line would come back as a
+		// Player, which is another node -- so there the asset name does not work.
 		if (Asset && NodeScribeAnimGraph::NodeClassForAsset(Asset) == Node->GetClass())
 		{
-			// Nome curto so' se ele bastar para achar este asset, e nao outro.
-			// Num projeto que retargeta ha' duas `MM_Jump` -- a do Manny e a
-			// nova --, e o leitor escrevia o nome curto que o escritor recusa na
-			// linha seguinte: "ha' mais de uma animacao chamada MM_Jump". O
-			// texto de ida e volta precisa colar de volta, e quem sabe se o nome
-			// basta e' a mesma busca que o builder faz.
+			// Short name only if it is enough to find this asset, and not another.
+			// In a project that retargets there are two `MM_Jump`s -- Manny's and
+			// the new one --, and the reader wrote the short name that the writer
+			// refuses on the next line: "there is more than one animation called
+			// MM_Jump". The round-trip text needs to paste back, and what knows
+			// whether the name is enough is the same lookup the builder does.
 			const NodeScribeAnimGraph::FAssetLookup Lookup =
 				NodeScribeAnimGraph::FindAnimationAsset(Asset->GetName());
 
@@ -837,16 +850,16 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		if (Asset)
 		{
 			OutRoundTripIssue = FString::Printf(
-				TEXT("`%s` toca `%s`, e o texto nao carrega esse asset: a linha volta como o node vazio, ")
-				TEXT("para voce escolher a animacao de novo."),
+				TEXT("`%s` plays `%s`, and the text does not carry that asset: the line comes back as the empty node, ")
+				TEXT("for you to pick the animation again."),
 				*Written, *Asset->GetName());
 		}
 
 		return Written;
 	}
 
-	// Evento vinculado ao dispatcher de outro objeto: "On Key Selected
-	// (SelecionarInputKey)" no grafo. Vem antes de Event porque deriva dele.
+	// Event bound to another object's dispatcher: "On Key Selected
+	// (SelectInputKey)" in the graph. Comes before Event because it derives from it.
 	if (const UK2Node_ComponentBoundEvent* BoundEvent = Cast<UK2Node_ComponentBoundEvent>(Node))
 	{
 		return FString::Printf(TEXT("event %s of %s"),
@@ -854,7 +867,7 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 			*BoundEvent->GetComponentPropertyName().ToString());
 	}
 
-	// CustomEvent antes de Event: o primeiro deriva do segundo.
+	// CustomEvent before Event: the first derives from the second.
 	if (const UK2Node_CustomEvent* CustomEvent = Cast<UK2Node_CustomEvent>(Node))
 	{
 		return TEXT("event ") + CustomEvent->CustomFunctionName.ToString();
@@ -865,14 +878,15 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		const FString EventName = FNodeScribeCatalog::StripEventPrefix(
 			Event->EventReference.GetMemberName().ToString());
 
-		// Override de evento da classe pai volta igual. Evento ligado a um
-		// dispatcher ou a um delegate nao: `evento X` recriaria um Custom Event
-		// solto, sem o vinculo, e o node ficaria parecido e morto.
+		// An override of a parent class event comes back the same. An event
+		// bound to a dispatcher or a delegate does not: `event X` would recreate a
+		// loose Custom Event, without the binding, and the node would look alike
+		// and be dead.
 		if (!Event->bOverrideFunction)
 		{
 			OutRoundTripIssue = FString::Printf(
-				TEXT("`%s` esta' ligado a um dispatcher/delegate. O formato ainda nao tem forma para esse vinculo: ")
-				TEXT("colar de volta criaria um Custom Event solto, que nunca dispara. Recrie esse node na mao."),
+				TEXT("`%s` is bound to a dispatcher/delegate. The format has no form for that binding yet: ")
+				TEXT("pasting back would create a loose Custom Event that never fires. Recreate this node by hand."),
 				*ShortTitle(Node));
 		}
 
@@ -909,7 +923,7 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		if (Node->IsA<UK2Node_ClearDelegate>())  { return TEXT("Clear ") + DelegateName; }
 
 		OutRoundTripIssue = FString::Printf(
-			TEXT("`%s` mexe num dispatcher de um jeito que o formato ainda nao tem."), *ShortTitle(Node));
+			TEXT("`%s` touches a dispatcher in a way the format does not have yet."), *ShortTitle(Node));
 
 		return ShortTitle(Node);
 	}
@@ -921,7 +935,7 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 			return TEXT("Switch on ") + Enum->GetName();
 		}
 
-		OutRoundTripIssue = TEXT("Switch de enum sem enum definido.");
+		OutRoundTripIssue = TEXT("Enum switch without an enum set.");
 		return TEXT("Switch on ?");
 	}
 
@@ -949,7 +963,7 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 			return TEXT("Cast to ") + ClassName;
 		}
 
-		OutRoundTripIssue = TEXT("Cast sem classe de destino definida.");
+		OutRoundTripIssue = TEXT("Cast without a target class set.");
 		return TEXT("Cast to ?");
 	}
 
@@ -965,8 +979,8 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 
 	if (Node->IsA<UK2Node_GetSubsystem>())
 	{
-		// `CustomClass` e' protegido no node, mas o tipo do pino de saida
-		// carrega a mesma informacao e e' publico.
+		// `CustomClass` is protected on the node, but the output pin's type
+		// carries the same information and is public.
 		if (const UEdGraphPin* Output = FindPrimaryOutput(Node))
 		{
 			if (const UClass* SubsystemClass = Cast<UClass>(Output->PinType.PinSubCategoryObject.Get()))
@@ -975,12 +989,12 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 			}
 		}
 
-		OutRoundTripIssue = TEXT("Node de subsistema sem classe definida.");
+		OutRoundTripIssue = TEXT("Subsystem node without a class set.");
 		return TEXT("Get ?");
 	}
 
-	// MakeStruct antes de BreakStruct: nao ha' heranca entre eles, mas os dois
-	// carregam StructType e a ordem deixa a leitura obvia.
+	// MakeStruct before BreakStruct: there is no inheritance between them, but
+	// both carry StructType and the order makes the reading obvious.
 	if (const UK2Node_MakeStruct* MakeStruct = Cast<UK2Node_MakeStruct>(Node))
 	{
 		if (const UScriptStruct* Struct = MakeStruct->StructType)
@@ -988,7 +1002,7 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 			return TEXT("Make ") + Struct->GetName();
 		}
 
-		OutRoundTripIssue = TEXT("Make de struct sem struct definida.");
+		OutRoundTripIssue = TEXT("Struct Make without a struct set.");
 		return TEXT("Make ?");
 	}
 
@@ -999,12 +1013,12 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 			return TEXT("Break ") + Struct->GetName();
 		}
 
-		OutRoundTripIssue = TEXT("Break de struct sem struct definida.");
+		OutRoundTripIssue = TEXT("Struct Break without a struct set.");
 		return TEXT("Break ?");
 	}
 
-	// Evento de Input Action. A classe vem por nome porque o modulo dela nao e'
-	// dependencia deste plugin -- Enhanced Input pode nem estar instalado.
+	// Input Action event. The class comes by name because its module is not a
+	// dependency of this plugin -- Enhanced Input may not even be installed.
 	if (Node->GetClass()->GetName() == TEXT("K2Node_EnhancedInputAction"))
 	{
 		if (const FObjectProperty* ActionProperty =
@@ -1012,21 +1026,21 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		{
 			if (const UObject* Action = ActionProperty->GetObjectPropertyValue_InContainer(Node))
 			{
-				// Caminho completo: o nome curto so' resolve se o asset ja'
-				// estiver carregado, e um texto colado dias depois nao garante isso.
+				// Full path: the short name only resolves if the asset is already
+				// loaded, and a text pasted days later does not guarantee that.
 				return TEXT("EnhancedInputAction ") + Action->GetPathName();
 			}
 		}
 
-		OutRoundTripIssue = TEXT("Node de Input Action sem action definida.");
+		OutRoundTripIssue = TEXT("Input Action node without an action set.");
 		return TEXT("EnhancedInputAction ?");
 	}
 
 	if (Node->IsA<UK2Node_ConstructObjectFromClass>())
 	{
-		// O titulo muda com a classe escolhida ("Create WBP_X Widget"), entao
-		// nao serve de nome. A classe do node e' estavel e diz a mesma coisa;
-		// qual classe construir sai no argumento `Class`.
+		// The title changes with the chosen class ("Create WBP_X Widget"), so
+		// it does not work as a name. The node's class is stable and says the
+		// same thing; which class to build comes out in the `Class` argument.
 		const FString NodeClassName = Node->GetClass()->GetName();
 
 		if (NodeClassName == TEXT("K2Node_CreateWidget"))
@@ -1045,31 +1059,31 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		}
 
 		OutRoundTripIssue = FString::Printf(
-			TEXT("`%s` constroi objeto a partir de classe, mas o formato so' conhece Create Widget, ")
-			TEXT("Spawn Actor from Class e Construct Object from Class."),
+			TEXT("`%s` builds an object from a class, but the format only knows Create Widget, ")
+			TEXT("Spawn Actor from Class and Construct Object from Class."),
 			*ShortTitle(Node));
 
 		return ShortTitle(Node);
 	}
 
-	// Node de acao assincrona: `Wait For Any Controller Changes` e companhia.
+	// Async action node: `Wait For Any Controller Changes` and company.
 	//
-	// O titulo ja' era o nome certo -- o que faltava era o leitor saber disso e
-	// parar de avisar que o node nao volta. Um plugin que expoe varios
-	// `UBlueprintAsyncActionBase` tinha todos os grafos marcados como nao
-	// colaveis por causa desta linha.
+	// The title was already the right name -- what was missing was the reader
+	// knowing that and stopping warning that the node does not come back. A
+	// plugin exposing several `UBlueprintAsyncActionBase`s had all its graphs
+	// marked as not pasteable because of this line.
 	if (const UK2Node_BaseAsyncTask* AsyncNode = Cast<UK2Node_BaseAsyncTask>(Node))
 	{
 		if (UFunction* Factory = AsyncNode->GetFactoryFunction())
 		{
-			// Subclasse com node proprio (task de GAS, por exemplo) nao volta: o
-			// builder cria `UK2Node_AsyncAction`, que e' outro node.
+			// A subclass with its own node (a GAS task, for example) does not come
+			// back: the builder creates `UK2Node_AsyncAction`, which is another node.
 			if (Node->GetClass() != UK2Node_AsyncAction::StaticClass())
 			{
 				OutRoundTripIssue = FString::Printf(
-					TEXT("`%s` usa o node `%s`, que tem logica propria. O formato recria acao assincrona ")
-					TEXT("como `UK2Node_AsyncAction`: colar de volta daria um node parecido e diferente. ")
-					TEXT("Recrie esse na mao."),
+					TEXT("`%s` uses node `%s`, which has logic of its own. The format recreates async actions ")
+					TEXT("as `UK2Node_AsyncAction`: pasting back would give a similar, different node. ")
+					TEXT("Recreate this one by hand."),
 					*ShortTitle(Node), *Node->GetClass()->GetName());
 			}
 
@@ -1085,8 +1099,8 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 				return DisplayName;
 			}
 
-			// Ambiguo pelo nome de tela: qualificar pela classe da fabrica e' o
-			// mesmo caminho de `Classe.Funcao` de uma chamada comum.
+			// Ambiguous by display name: qualifying by the factory's class is the
+			// same path as `Class.Function` for a regular call.
 			if (const UClass* Owner = Factory->GetOwnerClass())
 			{
 				return Owner->GetName() + TEXT(".") + Factory->GetName();
@@ -1095,28 +1109,29 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 			return DisplayName;
 		}
 
-		OutRoundTripIssue = TEXT("Node de acao assincrona sem funcao de fabrica definida.");
+		OutRoundTripIssue = TEXT("Async action node without a factory function set.");
 		return ShortTitle(Node);
 	}
 
-	// O `Return Node` de um grafo de funcao. O builder ja' sabia cria-lo; o
-	// leitor e' que nao sabia nomea-lo, e ele saia com aviso de node estranho.
+	// The `Return Node` of a function graph. The builder already knew how to
+	// create it; it was the reader that did not know how to name it, and it came
+	// out with an odd-node warning.
 	if (Node->IsA<UK2Node_FunctionResult>())
 	{
 		return TEXT("Return");
 	}
 
-	// `To Text` de qualquer coisa. E' um node proprio, e nao a funcao de mesmo
-	// nome -- a funcao e' `BlueprintInternalUseOnly` e nao existe para o
-	// catalogo, entao a linha caia no fallback com aviso.
+	// `To Text` of anything. It is a node of its own, and not the function of
+	// the same name -- the function is `BlueprintInternalUseOnly` and does not
+	// exist for the catalog, so the line fell into the fallback with a warning.
 	if (Node->IsA<UK2Node_GenericToText>())
 	{
 		return TEXT("To Text");
 	}
 
-	// A entrada de uma funcao nao se recria por texto: ela nasce com a funcao.
-	// O que da' para fazer e' dizer a assinatura, para quem le' criar a funcao
-	// certa e colar o resto dentro dela.
+	// A function's entry is not recreated from text: it is born with the
+	// function. What can be done is to state the signature, so whoever reads it
+	// creates the right function and pastes the rest inside it.
 	if (Node->IsA<UK2Node_FunctionEntry>())
 	{
 		TArray<FString> Parameters;
@@ -1130,10 +1145,10 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		}
 
 		OutRoundTripIssue = FString::Printf(
-			TEXT("`%s` e' a entrada da funcao, e nasce junto com ela -- nao ha' linha que a crie. ")
-			TEXT("Crie a funcao com os parametros (%s) e cole o resto dentro dela."),
+			TEXT("`%s` is the function's entry, and it is born together with it -- no line creates it. ")
+			TEXT("Create the function with the parameters (%s) and paste the rest inside it."),
 			*ShortTitle(Node),
-			Parameters.Num() > 0 ? *FString::Join(Parameters, TEXT(", ")) : TEXT("nenhum"));
+			Parameters.Num() > 0 ? *FString::Join(Parameters, TEXT(", ")) : TEXT("none"));
 
 		return TEXT("Function Entry");
 	}
@@ -1145,16 +1160,16 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 			return MacroGraph->GetName();
 		}
 
-		OutRoundTripIssue = TEXT("Macro sem grafo definido.");
+		OutRoundTripIssue = TEXT("Macro without a graph set.");
 		return TEXT("Macro ?");
 	}
 
-	// Antes do CallFunction, de quem ele descende: o getter de maquina de estado
-	// nao volta pelo caminho de uma chamada. A funcao que ele embrulha e'
-	// `BlueprintInternalUseOnly` e por isso nao esta' no catalogo, entao o ramo
-	// de baixo cairia na forma qualificada (`AnimInstance.GetRelevantAnim...`),
-	// que ao colar nao acha nada. O nome de tela volta, porque o builder tem um
-	// caminho proprio para ele dentro de uma regra de transicao.
+	// Before CallFunction, which it descends from: the state machine getter
+	// does not come back through the path of a call. The function it wraps is
+	// `BlueprintInternalUseOnly` and so is not in the catalog, so the branch
+	// below would fall into the qualified form (`AnimInstance.GetRelevantAnim...`),
+	// which finds nothing on pasting. The display name comes back, because the
+	// builder has a path of its own for it inside a transition rule.
 	if (const UK2Node_AnimGetter* Getter = Cast<UK2Node_AnimGetter>(Node))
 	{
 		if (UFunction* Function = Getter->GetTargetFunction())
@@ -1171,28 +1186,29 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		{
 			const FString DisplayName = Function->GetDisplayNameText().ToString();
 
-			// O nome curto so' serve se ele voltar para esta mesma funcao.
-			// `Apply Settings` existe em GameUserSettings e em
-			// EnhancedInputUserSettings; escrever o nome ambiguo aqui seria
-			// jogar fora uma informacao que so' nos temos, para o builder
-			// descobrir na hora de colar que nao da' para decidir.
+			// The short name only works if it leads back to this same function.
+			// `Apply Settings` exists in GameUserSettings and in
+			// EnhancedInputUserSettings; writing the ambiguous name here would
+			// throw away information only we have, for the builder to find out at
+			// paste time that it cannot decide.
 			UClass* SelfClass = Blueprint
 				? (Blueprint->GeneratedClass ? Blueprint->GeneratedClass.Get() : Blueprint->ParentClass.Get())
 				: nullptr;
 
 			const FNodeScribeLookup Lookup = FNodeScribeCatalog::Get().FindFunction(DisplayName, SelfClass, nullptr);
 
-			// Nome de tela com parenteses nao volta, e sao comuns: `SetText
-			// (Text)` esta' em todo grafo de UI, `To Integer64 (Integer)` em toda
-			// conversao. O parser corta a linha no primeiro `(` para achar os
-			// argumentos, entao `SetText (Text) (Target = $x)` voltaria como um
-			// node chamado `SetText` recebendo um argumento chamado `Text`.
-			// A forma qualificada nao tem parenteses e resolve para a mesma funcao.
+			// A display name with parentheses does not come back, and they are
+			// common: `SetText (Text)` is in every UI graph, `To Integer64
+			// (Integer)` in every conversion. The parser cuts the line at the
+			// first `(` to find the arguments, so `SetText (Text) (Target = $x)`
+			// would come back as a node called `SetText` getting an argument called
+			// `Text`. The qualified form has no parentheses and resolves to the
+			// same function.
 			const bool bNameBreaksParsing = DisplayName.Contains(TEXT("("))
 				|| DisplayName.Contains(TEXT(")"));
 
-			// O catalogo achar a funcao nao basta: o builder testa as formas
-			// especiais antes dele, e `Break Vector` cairia na struct.
+			// The catalog finding the function is not enough: the builder tries
+			// the special forms before it, and `Break Vector` would fall into the struct.
 			if (Lookup.Function == Function
 				&& !IsShadowedByStructForm(DisplayName, Function)
 				&& !bNameBreaksParsing)
@@ -1202,10 +1218,10 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 
 			if (const UClass* Owner = Function->GetOwnerClass())
 			{
-				// `SKEL_WBP_X_C.PreencherLista` nao volta: essa classe e' um
-				// artefato de compilacao e nao existe para quem le'. Funcao do
-				// proprio Blueprint sai pelo nome puro, que o builder resolve
-				// olhando a classe de destino.
+				// `SKEL_WBP_X_C.FillList` does not come back: that class is a
+				// compilation artifact and does not exist for the reader. A
+				// function of the Blueprint itself comes out by its bare name,
+				// which the builder resolves by looking at the target class.
 				const FString OwnerName = Owner->GetName();
 				const bool bIsCompilationArtifact =
 					OwnerName.StartsWith(TEXT("SKEL_"))
@@ -1224,11 +1240,11 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		}
 	}
 
-	// Sobrou algo que o builder nao sabe recriar a partir do nome.
+	// What is left is something the builder cannot recreate from the name.
 	const FString Title = ShortTitle(Node);
 	OutRoundTripIssue = FString::Printf(
-		TEXT("Nao sei escrever `%s` de um jeito que volte igual: a linha saiu com o titulo do node, ")
-		TEXT("que o builder pode nao encontrar."),
+		TEXT("I do not know how to write `%s` in a way that comes back the same: the line came out with the node's title, ")
+		TEXT("which the builder may not find."),
 		*Title);
 
 	return Title;
@@ -1236,14 +1252,15 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 
 FString FNodeScribeReadContext::DescribeExecLabel(UEdGraphPin* Pin)
 {
-	// O rotulo e' comparado com o nome interno do pino depois de passar pelos
-	// apelidos. `then` aceita `True`, entao preferimos o nome amigavel, que e'
-	// o que aparece na tela -- desde que ele volte para o mesmo pino.
+	// The label is compared with the pin's internal name after going through
+	// the aliases. `then` accepts `True`, so we prefer the friendly name, which
+	// is what shows on screen -- as long as it leads back to the same pin.
 	//
-	// So' no Branch. `then` tambem e' o nome do pino "continua daqui" de um node
-	// de acao assincrona, e ali escrever `True:` inventa uma condicao que nao
-	// existe: quem le' entende que ha' um teste, e o ramo de baixo passa a
-	// parecer o `False` dele. O rotulo `then` volta pelo apelido do formato.
+	// Only on a Branch. `then` is also the name of the "continue from here" pin
+	// of an async action node, and writing `True:` there invents a condition
+	// that does not exist: the reader understands there is a test, and the
+	// branch below starts to look like its `False`. The `then` label comes back
+	// through the format's alias.
 	const FString Friendly = GetWrittenPinName(Pin);
 	const FString Internal = Pin->PinName.ToString();
 
@@ -1264,7 +1281,7 @@ FString FNodeScribeReadContext::DescribeExecLabel(UEdGraphPin* Pin)
 }
 
 // ---------------------------------------------------------------------------
-// Valores
+// Values
 // ---------------------------------------------------------------------------
 
 FString FNodeScribeReadContext::DescribeLiteral(UEdGraphPin* Pin, bool& bOutRepresentable)
@@ -1278,7 +1295,7 @@ FString FNodeScribeReadContext::DescribeLiteral(UEdGraphPin* Pin, bool& bOutRepr
 			return Asset->GetPathName();
 		}
 
-		// Pino de objeto vazio e' exatamente o buraco que `?` declara.
+		// An empty object pin is exactly the hole `?` declares.
 		return TEXT("?");
 	}
 
@@ -1290,16 +1307,17 @@ FString FNodeScribeReadContext::DescribeLiteral(UEdGraphPin* Pin, bool& bOutRepr
 
 	if (Value.IsEmpty())
 	{
-		// Vazio aqui nao e' "nao sei dizer": e' o valor. Quem chama so' chega
-		// nesta funcao quando o pino difere do padrao de fabrica, e nesse caso o
-		// valor foi apagado de proposito. Devolver nada fazia a linha sumir, e o
-		// texto voltava com o padrao de novo no pino -- outro comportamento.
+		// Empty here is not "I cannot say": it is the value. The caller only
+		// reaches this function when the pin differs from its factory default,
+		// and in that case the value was erased on purpose. Returning nothing made
+		// the line vanish, and the text came back with the default on the pin
+		// again -- a different behaviour.
 		return TEXT("\"\"");
 	}
 
-	// `100.000000` no meio de uma linha esconde o numero no ruido. A ficha ja'
-	// formatava assim; o leitor de grafo nao, e era a mesma decisao aplicada em
-	// metade do plugin.
+	// `100.000000` in the middle of a line hides the number in the noise. The
+	// sheet already formatted it this way; the graph reader did not, and it was
+	// the same decision applied to half of the plugin.
 	if (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Real && Value.IsNumeric())
 	{
 		Value = NodeScribePropertyText::FormatFloat(FCString::Atod(*Value));
@@ -1338,8 +1356,8 @@ FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Inde
 			if (!Scope.Contains(SourceNode))
 			{
 				AddWarning(FString::Printf(
-					TEXT("`%s` recebe `%s` de um node que ficou fora da selecao. ")
-					TEXT("Esse pino saiu sem valor -- selecione o grafo inteiro ou ligue na mao."),
+					TEXT("`%s` gets `%s` from a node left out of the selection. ")
+					TEXT("That pin came out without a value -- select the whole graph or link it by hand."),
 					*ShortTitle(Node), *GetWrittenPinName(Pin)));
 				continue;
 			}
@@ -1347,14 +1365,14 @@ FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Inde
 			FString Reference = MakeReferenceTo(SourcePin, Indent);
 			if (!Reference.IsEmpty())
 			{
-				// A conversao entre os dois tipos e' feita por um node que a
-				// Unreal poe sozinha e que nao vira linha. Sem esta marca, um
-				// `Device Id` (int32) promovido e um `Connection Id` (int64)
-				// escrevem exatamente a mesma linha -- e um dos dois faz todo
-				// controle colidir na mesma chave do mapa.
+				// The conversion between the two types is done by a node Unreal
+				// puts in by itself and that does not become a line. Without this
+				// mark, a promoted `Device Id` (int32) and a `Connection Id`
+				// (int64) write exactly the same line -- and one of them makes
+				// every controller collide on the same map key.
 				//
-				// Entre parenteses depois da referencia: e' anotacao de leitura,
-				// e o parser a descarta ao colar de volta.
+				// In parentheses after the reference: it is a reading note, and
+				// the parser discards it when pasting back.
 				if (NeedsConversionNote(SourcePin, Pin))
 				{
 					Reference += FString::Printf(TEXT(" (%s -> %s)"),
@@ -1366,13 +1384,13 @@ FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Inde
 			continue;
 		}
 
-		// Pino do tipo `self` sem ligacao e' o alvo implicito: nao se escreve.
+		// An unlinked `self` pin is the implicit target: it is not written.
 		if (Pin->PinName == UEdGraphSchema_K2::PN_Self)
 		{
 			continue;
 		}
 
-		// Um valor identico ao padrao do pino nao acrescenta nada a' linha.
+		// A value identical to the pin's default adds nothing to the line.
 		if (Pin->DefaultValue == Pin->AutogeneratedDefaultValue && !Pin->DefaultObject)
 		{
 			continue;
@@ -1384,8 +1402,8 @@ FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Inde
 		if (!bRepresentable)
 		{
 			AddWarning(FString::Printf(
-				TEXT("O valor do pino `%s` em `%s` tem aspas dos dois tipos e nao cabe numa linha. ")
-				TEXT("Copie esse valor na mao."),
+				TEXT("The value of pin `%s` on `%s` has both kinds of quotes and does not fit on a line. ")
+				TEXT("Copy that value by hand."),
 				*GetWrittenPinName(Pin), *ShortTitle(Node)));
 			continue;
 		}
@@ -1418,12 +1436,13 @@ FString FNodeScribeReadContext::DescribeSettings(UEdGraphNode* Node)
 
 void FNodeScribeReadContext::AppendNodeSettings(UEdGraphNode* Node, TArray<FString>& Args)
 {
-	// O que o node ajusta fora dos pinos. `Loop Animation` de um Sequence
-	// Player e' o caso que doi: nasce ligado, e um `MM_Jump` que devia tocar uma
-	// vez fica em loop -- sem nada no texto dizendo isso, porque nao ha' pino.
+	// What the node adjusts outside the pins. `Loop Animation` of a Sequence
+	// Player is the case that hurts: it is born on, and an `MM_Jump` that should
+	// play once keeps looping -- with nothing in the text saying so, because
+	// there is no pin.
 	//
-	// So' o que difere do node recem-criado, como faz a ficha: um asset player
-	// tem dezenas de campos, e escrever todos afogaria a linha.
+	// Only what differs from a freshly created node, as the sheet does: an asset
+	// player has dozens of fields, and writing them all would drown the line.
 	const UEdGraphNode* Defaults = Node->GetClass()->GetDefaultObject<UEdGraphNode>();
 	if (!Defaults)
 	{
@@ -1432,9 +1451,9 @@ void FNodeScribeReadContext::AppendNodeSettings(UEdGraphNode* Node, TArray<FStri
 
 	auto Emit = [&](FProperty* Property, const void* ValuePtr, const void* DefaultPtr)
 	{
-		// O asset ja' e' a linha: `MM_Jump` *e'* o `Sequence` deste node.
-		// Escreve-lo de novo como argumento daria uma linha que se repete, e ao
-		// colar de volta o pino nem existe.
+		// The asset already is the line: `MM_Jump` *is* this node's `Sequence`.
+		// Writing it again as an argument would give a line that repeats itself,
+		// and on pasting back the pin does not even exist.
 		if (const FObjectPropertyBase* AsObject = CastField<FObjectPropertyBase>(Property))
 		{
 			if (AsObject->PropertyClass && AsObject->PropertyClass->IsChildOf(UAnimationAsset::StaticClass()))
@@ -1452,8 +1471,8 @@ void FNodeScribeReadContext::AppendNodeSettings(UEdGraphNode* Node, TArray<FStri
 		if (!ValueToText(Property, ValuePtr, Value))
 		{
 			AddWarning(FString::Printf(
-				TEXT("A opcao `%s` de `%s` mudou, e nao sei escrever o valor dela. ")
-				TEXT("Confira no painel de detalhes."),
+				TEXT("Option `%s` of `%s` changed, and I do not know how to write its value. ")
+				TEXT("Check the details panel."),
 				*DisplayName(Property), *ShortTitle(Node)));
 			return;
 		}
@@ -1495,7 +1514,7 @@ void FNodeScribeReadContext::AppendNodeSettings(UEdGraphNode* Node, TArray<FStri
 }
 
 // ---------------------------------------------------------------------------
-// Nodes de dado
+// Data nodes
 // ---------------------------------------------------------------------------
 
 FString FNodeScribeReadContext::EmitDataNode(UEdGraphNode* Node, int32 Indent)
@@ -1508,8 +1527,8 @@ FString FNodeScribeReadContext::EmitDataNode(UEdGraphNode* Node, int32 Indent)
 		AddWarning(RoundTripIssue);
 	}
 
-	// Os argumentos podem emitir mais linhas de dado, que precisam vir antes
-	// desta -- por isso montamos a lista antes de emitir.
+	// The arguments may emit more data lines, which need to come before this
+	// one -- that is why the list is built before emitting.
 	const FString Arguments = BuildArgumentList(Node, Indent);
 
 	const FString Name = MakeUniqueName(MakeNameBase(Expression));
@@ -1533,8 +1552,8 @@ FString FNodeScribeReadContext::MakeReferenceTo(UEdGraphPin* SourcePin, int32 In
 	}
 	else if (const UK2Node_VariableGet* Getter = Cast<UK2Node_VariableGet>(SourceNode))
 	{
-		// Get de variavel propria nao precisa de linha: `$Vida` sozinho ja' faz
-		// o builder criar o node. Uma linha a menos por variavel usada.
+		// A Get of an own variable needs no line: a bare `$Health` already makes
+		// the builder create the node. One line less per variable used.
 		if (Getter->VariableReference.IsSelfContext())
 		{
 			Name = Getter->VariableReference.GetMemberName().ToString();
@@ -1545,14 +1564,14 @@ FString FNodeScribeReadContext::MakeReferenceTo(UEdGraphPin* SourcePin, int32 In
 
 	if (Name.IsEmpty())
 	{
-		// Node de execucao nunca vira linha de dado: ele tem cadeia propria, e
-		// emiti-lo aqui criaria um segundo node ao colar. A pre-passagem ja'
-		// deveria ter dado nome a ele.
+		// An execution node never becomes a data line: it has its own chain, and
+		// emitting it here would create a second node on pasting. The pre-pass
+		// should already have named it.
 		if (IsExecNode(SourceNode))
 		{
 			AddWarning(FString::Printf(
-				TEXT("`%s` participa da execucao e nao recebeu nome. ")
-				TEXT("Essa ligacao de dado saiu do texto -- religue na mao."),
+				TEXT("`%s` takes part in execution and got no name. ")
+				TEXT("That data link left the text -- relink it by hand."),
 				*ShortTitle(SourceNode)));
 			return FString();
 		}
@@ -1562,22 +1581,22 @@ FString FNodeScribeReadContext::MakeReferenceTo(UEdGraphPin* SourcePin, int32 In
 
 	FString Token = TEXT("$") + Name;
 
-	// Node com mais de uma saida de dado precisa dizer qual delas: `$nome.Pino`.
+	// A node with more than one data output needs to say which: `$name.Pin`.
 	if (!IsUnambiguousPrimaryOutput(SourceNode, SourcePin))
 	{
 		const FString PinName = GetWrittenPinName(SourcePin);
 
 		if (PinName.IsEmpty())
 		{
-			// Existe pino sem nome de tela nem nome interno. Dizer isso e' o unico
-			// caminho honesto: escrever `$nome` puro aqui pareceria a saida
-			// principal e ligaria em outro pino ao voltar.
+			// There are pins with neither a display name nor an internal name.
+			// Saying so is the only honest path: writing a bare `$name` here would
+			// look like the main output and link to another pin on the way back.
 			AddWarning(FString::Printf(
-				TEXT("`%s` alimenta `%s` por um pino sem nome. Escrevi `<pino desconhecido>` no lugar: ")
-				TEXT("essa ligacao voce refaz na mao."),
+				TEXT("`%s` feeds `%s` through a pin with no name. I wrote `<unknown pin>` in its place: ")
+				TEXT("redo that link by hand."),
 				*ShortTitle(SourceNode), *Name));
 
-			return Token + TEXT(".<pino desconhecido>");
+			return Token + TEXT(".<unknown pin>");
 		}
 
 		Token += TEXT(".") + PinName;
@@ -1587,7 +1606,7 @@ FString FNodeScribeReadContext::MakeReferenceTo(UEdGraphPin* SourcePin, int32 In
 }
 
 // ---------------------------------------------------------------------------
-// Cadeia de execucao
+// Execution chain
 // ---------------------------------------------------------------------------
 
 void FNodeScribeReadContext::EmitNodeLine(UEdGraphNode* Node, int32 Indent)
@@ -1600,19 +1619,19 @@ void FNodeScribeReadContext::EmitNodeLine(UEdGraphNode* Node, int32 Indent)
 		AddWarning(RoundTripIssue);
 	}
 
-	// O nome ja' foi decidido na pre-passagem, quando se soube que alguem
-	// consome a saida deste node.
+	// The name was already decided in the pre-pass, when it became known that
+	// someone consumes this node's output.
 	const FString AssignedName = DataNames.FindRef(Node);
 
-	// Os argumentos podem emitir linhas de dado, que precisam vir antes desta.
+	// The arguments may emit data lines, which need to come before this one.
 	const FString Arguments = BuildArgumentList(Node, Indent);
 
 	const FString Prefix = AssignedName.IsEmpty()
 		? FString()
 		: AssignedName + TEXT(" = ");
 
-	// Guardado antes de emitir: se outra cadeia cair neste node la' na frente, e'
-	// nesta linha que a ancora vai ser escrita.
+	// Kept before emitting: if another chain lands on this node further ahead,
+	// this is the line the anchor will be written on.
 	ExecLineIndex.Add(Node, Lines.Num());
 
 	EmitLine(Indent, Prefix + Expression + Arguments);
@@ -1628,22 +1647,23 @@ void FNodeScribeReadContext::EmitExecChain(UEdGraphNode* Node, int32 Indent)
 
 	if (EmittedExec.Contains(Node))
 	{
-		// Duas cadeias caindo no mesmo node. O formato e' uma arvore e nao sabe
-		// dizer "volta para aquele ali" -- mas dizer *para onde* volta e' o que
-		// separa "esse ramo nao foi ligado" de "esse ramo continua ali em cima".
+		// Two chains landing on the same node. The format is a tree and cannot
+		// say "go back to that one" -- but saying *where* it goes back to is what
+		// separates "this branch was not linked" from "this branch continues up
+		// there".
 		//
-		// Sem isto o ramo saia com o rotulo e nada embaixo, do jeito que um ramo
-		// vazio de verdade sai, e as duas coisas eram indistinguiveis. A ancora
-		// vai como comentario nas duas pontas: o parser descarta, entao o texto
-		// continua colavel exatamente como estava.
+		// Without this the branch came out with the label and nothing under it,
+		// the way a truly empty branch comes out, and the two were
+		// indistinguishable. The anchor goes as a comment on both ends: the
+		// parser discards it, so the text stays pasteable exactly as it was.
 		const int32 Anchor = AnchorFor(Node);
 
-		EmitLine(Indent, FString::Printf(TEXT("# -> volta para a ancora %d (`%s`)"),
+		EmitLine(Indent, FString::Printf(TEXT("# -> back to anchor %d (`%s`)"),
 			Anchor, *ShortTitle(Node)));
 
 		AddWarning(FString::Printf(
-			TEXT("A execucao volta a `%s` (ancora %d), que ja' apareceu antes. ")
-			TEXT("O formato de texto so' descreve arvore: essa reconvergencia se perde ao colar e voce religa na mao."),
+			TEXT("Execution goes back to `%s` (anchor %d), which already appeared before. ")
+			TEXT("The text format only describes trees: this reconvergence is lost on pasting and you relink it by hand."),
 			*ShortTitle(Node), Anchor));
 		return;
 	}
@@ -1691,25 +1711,25 @@ void FNodeScribeReadContext::EmitExecLink(UEdGraphPin* ExecOutput, int32 Indent)
 		return;
 	}
 
-	// Entrada lateral: `Reset` de um Do Once, `Stop` de uma Timeline, `Close` de
-	// um Gate. O node do outro lado nao e' a continuacao desta cadeia -- ele tem
-	// a propria linha em outro ponto do texto, e o que este fio faz e' mandar um
-	// comando para la'. Descer nele escreveria uma cadeia que nao existe: era
-	// assim que dois Do Once resetando um ao outro saiam empilhados, como se o
-	// primeiro levasse ao segundo.
+	// Side input: the `Reset` of a Do Once, the `Stop` of a Timeline, the
+	// `Close` of a Gate. The node on the other side is not the continuation of
+	// this chain -- it has its own line elsewhere in the text, and what this
+	// wire does is send a command there. Walking into it would write a chain
+	// that does not exist: that is how two Do Onces resetting each other came
+	// out stacked, as if the first led to the second.
 	//
-	// A ancora e' a mesma da reconvergencia, e aqui ela pode apontar para uma
-	// linha que ainda nao saiu -- por isso o numero e' reservado agora e escrito
-	// no node no fim de tudo.
+	// The anchor is the same as the reconvergence one, and here it may point at
+	// a line that has not come out yet -- that is why the number is reserved now
+	// and written on the node at the very end.
 	const int32 Anchor = AnchorFor(Target);
 	const FString PinLabel = GetWrittenPinName(TargetPin);
 
-	EmitLine(Indent, FString::Printf(TEXT("# -> entra em `%s` pelo pino `%s` (ancora %d)"),
+	EmitLine(Indent, FString::Printf(TEXT("# -> enters `%s` through pin `%s` (anchor %d)"),
 		*ShortTitle(Target), *PinLabel, Anchor));
 
 	AddWarning(FString::Printf(
-		TEXT("A execucao entra em `%s` (ancora %d) pelo pino `%s`, que nao e' a entrada principal dele. ")
-		TEXT("O formato de texto so' descreve arvore: essa ligacao se perde ao colar e voce religa na mao."),
+		TEXT("Execution enters `%s` (anchor %d) through pin `%s`, which is not its main input. ")
+		TEXT("The text format only describes trees: this link is lost on pasting and you relink it by hand."),
 		*ShortTitle(Target), Anchor, *PinLabel));
 }
 
@@ -1727,13 +1747,13 @@ int32 FNodeScribeReadContext::AnchorFor(UEdGraphNode* Node)
 
 void FNodeScribeReadContext::StampAnchors()
 {
-	// No fim, quando toda linha ja' existe. Uma entrada lateral pode apontar para
-	// um node que so' vai ser emitido depois -- marcar na hora perderia essas.
+	// At the end, when every line already exists. A side input may point at a
+	// node that only gets emitted later -- marking on the spot would lose those.
 	for (const TTuple<UEdGraphNode*, int32>& Pair : AnchorOf)
 	{
 		if (const int32* LineIndex = ExecLineIndex.Find(Pair.Key))
 		{
-			Lines[*LineIndex] += FString::Printf(TEXT("  # ancora %d"), Pair.Value);
+			Lines[*LineIndex] += FString::Printf(TEXT("  # anchor %d"), Pair.Value);
 		}
 	}
 }
@@ -1759,11 +1779,11 @@ void FNodeScribeReadContext::CollectConsumedNodes()
 
 			UEdGraphNode* SourceNode = SourcePin->GetOwningNode();
 
-			// Node de execucao consumido como dado ganha nome AGORA, antes de
-			// qualquer linha sair. Atribuir na hora da emissao nao bastava:
-			// um evento referenciado por uma cadeia anterior a' dele ainda nao
-			// teria nome, e acabava emitido duas vezes -- uma como dado, outra
-			// como raiz. Colar esse texto de volta dava "o evento ja' existe".
+			// An execution node consumed as data gets a name NOW, before any line
+			// comes out. Assigning it at emission time was not enough: an event
+			// referenced by a chain earlier than its own would not have a name
+			// yet, and ended up emitted twice -- once as data, once as a root.
+			// Pasting that text back gave "the event already exists".
 			if (Scope.Contains(SourceNode) && IsExecNode(SourceNode) && !DataNames.Contains(SourceNode))
 			{
 				NeedsName.Add(SourceNode);
@@ -1789,17 +1809,17 @@ void FNodeScribeReadContext::EmitPoseTree(UEdGraphNode* Node, int32 Indent)
 
 	if (EmittedExec.Contains(Node))
 	{
-		// A mesma pose alimentando dois lugares. O formato e' arvore e nao sabe
-		// dizer "aquela ali de novo" -- entao diz *qual*, do mesmo jeito que a
-		// reconvergencia de execucao, e avisa que essa parte se perde ao colar.
+		// The same pose feeding two places. The format is a tree and cannot say
+		// "that one again" -- so it says *which*, the same way as execution
+		// reconvergence, and warns that this part is lost on pasting.
 		const int32 Anchor = AnchorFor(Node);
 
-		EmitLine(Indent, FString::Printf(TEXT("# -> a mesma pose de `%s` (ancora %d)"),
+		EmitLine(Indent, FString::Printf(TEXT("# -> same pose as `%s` (anchor %d)"),
 			*ShortTitle(Node), Anchor));
 
 		AddWarning(FString::Printf(
-			TEXT("A pose de `%s` (ancora %d) alimenta mais de um lugar. O formato so' descreve arvore: ")
-			TEXT("essa segunda ligacao se perde ao colar e voce religa na mao."),
+			TEXT("The pose of `%s` (anchor %d) feeds more than one place. The format only describes trees: ")
+			TEXT("this second link is lost on pasting and you relink it by hand."),
 			*ShortTitle(Node), Anchor));
 		return;
 	}
@@ -1814,8 +1834,9 @@ void FNodeScribeReadContext::EmitPoseTree(UEdGraphNode* Node, int32 Indent)
 
 	const TArray<UEdGraphPin*> Inputs = GetLinkedPoseInputs(Node);
 
-	// Uma entrada so' e' cadeia reta: quem alimenta vem antes, na mesma coluna.
-	// E' a forma que se le' melhor, e e' a que o builder monta sem rotulo.
+	// A single input is a straight chain: what feeds comes before, in the same
+	// column. It is the form that reads best, and the one the builder assembles
+	// without a label.
 	if (Inputs.Num() == 1)
 	{
 		if (UEdGraphPin* Source = FollowToSourcePin(Inputs[0]))
@@ -1827,9 +1848,9 @@ void FNodeScribeReadContext::EmitPoseTree(UEdGraphNode* Node, int32 Indent)
 		return;
 	}
 
-	// Duas ou mais: o node vem primeiro e cada entrada abre um rotulo. E' o
-	// inverso do EventGraph, onde o rotulo abre uma *saida* -- aqui a arvore e'
-	// de quem alimenta.
+	// Two or more: the node comes first and each input opens a label. It is the
+	// reverse of the EventGraph, where the label opens an *output* -- here the
+	// tree is about what feeds.
 	EmitNodeLine(Node, Indent);
 
 	for (UEdGraphPin* Pin : Inputs)
@@ -1849,9 +1870,9 @@ void FNodeScribeReadContext::EmitAnimGraph()
 
 	if (UEdGraphNode* Root = SourceGraph ? NodeScribeAnimGraph::FindOutputPose(SourceGraph) : nullptr)
 	{
-		// O Output Pose nao vira linha: ele ja' existe no grafo de destino, e a
-		// ultima linha do texto liga nele sozinha. Marcar como emitido e' o que
-		// o tira da contagem de nodes que a leitura perdeu.
+		// The Output Pose does not become a line: it already exists in the target
+		// graph, and the text's last line links into it by itself. Marking it as
+		// emitted is what takes it out of the count of nodes the reading lost.
 		EmittedExec.Add(Root);
 
 		if (UEdGraphPin* Pose = NodeScribeAnimGraph::FindPoseInput(Root))
@@ -1863,11 +1884,12 @@ void FNodeScribeReadContext::EmitAnimGraph()
 		}
 	}
 
-	// Galho que nao chega no Output Pose. Sai mesmo assim: omitir seria perder
-	// node sem dizer, que e' o unico resultado pior que um texto incompleto.
+	// A branch that does not reach the Output Pose. It comes out anyway:
+	// omitting it would be losing a node without saying so, which is the only
+	// result worse than an incomplete text.
 	//
-	// So' a ponta de cada galho -- quem alimenta alguem de dentro do escopo sai
-	// por recursao, junto com o dono.
+	// Only the tip of each branch -- whatever feeds something inside the scope
+	// comes out by recursion, together with its owner.
 	for (UEdGraphNode* Node : Scope)
 	{
 		if (EmittedExec.Contains(Node) || !Node->IsA<UAnimGraphNode_Base>())
@@ -1897,7 +1919,7 @@ void FNodeScribeReadContext::EmitAnimGraph()
 		EmitPoseTree(Node, 0);
 
 		AddWarning(FString::Printf(
-			TEXT("`%s` nao chega no Output Pose. Saiu no texto, mas solto, como esta' no grafo."),
+			TEXT("`%s` does not reach the Output Pose. It came out in the text, but loose, as it is in the graph."),
 			*ShortTitle(Node)));
 	}
 }
@@ -1906,8 +1928,8 @@ void FNodeScribeReadContext::EmitStateMachine(UAnimGraphNode_StateMachineBase* M
 {
 	UAnimationStateMachineGraph* MachineGraph = Machine->EditorStateMachineGraph;
 
-	// O nome de uma maquina de estados e' o do sub-grafo dela, e o builder o le'
-	// de volta do `nome =`.
+	// A state machine's name is its sub-graph's, and the builder reads it back
+	// from the `name =`.
 	const FString Name = MachineGraph ? MachineGraph->GetName() : FString();
 
 	EmitLine(Indent, Name.IsEmpty()
@@ -1918,25 +1940,26 @@ void FNodeScribeReadContext::EmitStateMachine(UAnimGraphNode_StateMachineBase* M
 
 	if (!MachineGraph)
 	{
-		AddWarning(TEXT("Esta maquina de estados esta' sem sub-grafo; os estados dela nao sairam."));
+		AddWarning(TEXT("This state machine has no sub-graph; its states did not come out."));
 		return;
 	}
 
-	// O estado de entrada primeiro, porque e' assim que o texto o declara: o
-	// builder liga o Entry no primeiro `estado` que aparece. Sair fora de ordem
-	// mudaria por onde a maquina comeca -- e isso so' apareceria rodando.
-	// Estado e conduto na mesma lista. Os dois sao no' de onde uma transicao sai
-	// e onde ela chega, e ler so' o estado deixava toda transicao que passa por
-	// um conduto falando de um nome que o texto nunca declarava -- o
-	// `To Falling -> Jump` do ABP_Unarmed da Epic e' exatamente isso. Ao colar,
-	// aquilo virava erro de "estado que nao existe", com a lista dos que
-	// existem, e a maquina saia sem metade das transicoes.
+	// The entry state first, because that is how the text declares it: the
+	// builder links the Entry to the first `state` that appears. Coming out of
+	// order would change where the machine starts -- and that would only show
+	// up at runtime.
+	// State and conduit in the same list. Both are nodes a transition leaves
+	// from and arrives at, and reading only the state left every transition
+	// going through a conduit talking about a name the text never declared --
+	// the `To Falling -> Jump` of Epic's ABP_Unarmed is exactly that. On pasting,
+	// that became a "state that does not exist" error, with the list of the ones
+	// that do, and the machine came out missing half its transitions.
 	TArray<UAnimStateNodeBase*> States;
 
 	auto IsStateOrConduit = [](UEdGraphNode* Node) -> UAnimStateNodeBase*
 	{
-		// `UAnimStateNodeBase` tambem e' pai da transicao e do Entry. Um Cast
-		// direto para ele traria os dois para dentro da lista de estados.
+		// `UAnimStateNodeBase` is also the parent of the transition and of the
+		// Entry. A direct Cast to it would bring both into the list of states.
 		if (UAnimStateNode* State = Cast<UAnimStateNode>(Node))
 		{
 			return State;
@@ -1964,8 +1987,8 @@ void FNodeScribeReadContext::EmitStateMachine(UAnimGraphNode_StateMachineBase* M
 
 	if (States.Num() == 0)
 	{
-		AddWarning(TEXT("Esta maquina de estados nao tem estado de entrada ligado; ")
-			TEXT("ao colar, o primeiro estado do texto vira a entrada."));
+		AddWarning(TEXT("This state machine has no linked entry state; ")
+			TEXT("on pasting, the text's first state becomes the entry."));
 	}
 
 	for (UEdGraphNode* Node : MachineGraph->Nodes)
@@ -1978,17 +2001,17 @@ void FNodeScribeReadContext::EmitStateMachine(UAnimGraphNode_StateMachineBase* M
 
 	for (UAnimStateNodeBase* State : States)
 	{
-		// O alias nao tem sub-grafo: ele e' um apelido para um punhado de
-		// estados, e existe para uma transicao sair de todos eles de uma vez sem
-		// repetir a regra. O bloco dele e' a lista desses estados.
+		// The alias has no sub-graph: it is a nickname for a handful of states,
+		// and it exists for a transition to leave all of them at once without
+		// repeating the rule. Its block is the list of those states.
 		if (UAnimStateAliasNode* Alias = Cast<UAnimStateAliasNode>(State))
 		{
 			EmitLine(Indent + 1, FString::Printf(TEXT("alias %s%s:"),
 				*Alias->GetStateName(), *DescribeSettings(Alias)));
 
-			// Ordenado pelo nome: um TSet nao tem ordem estavel, e sem isto duas
-			// leituras do mesmo grafo dariam textos diferentes -- o suficiente
-			// para uma comparacao de ida e volta acusar diferenca que nao existe.
+			// Sorted by name: a TSet has no stable order, and without this two
+			// readings of the same graph would give different texts -- enough for
+			// a round-trip comparison to flag a difference that does not exist.
 			TArray<FString> Aliased;
 			for (const TWeakObjectPtr<UAnimStateNodeBase>& Target : Alias->GetAliasedStates())
 			{
@@ -1999,20 +2022,20 @@ void FNodeScribeReadContext::EmitStateMachine(UAnimGraphNode_StateMachineBase* M
 			}
 			Aliased.Sort();
 
-			for (const FString& Apelidado : Aliased)
+			for (const FString& AliasedName : Aliased)
 			{
-				EmitLine(Indent + 2, Apelidado);
+				EmitLine(Indent + 2, AliasedName);
 			}
 
 			continue;
 		}
 
-		const TCHAR* Palavra = State->IsA<UAnimStateConduitNode>() ? TEXT("conduto") : TEXT("estado");
+		const TCHAR* Keyword = State->IsA<UAnimStateConduitNode>() ? TEXT("conduit") : TEXT("state");
 
 		EmitLine(Indent + 1, FString::Printf(TEXT("%s %s%s:"),
-			Palavra, *State->GetStateName(), *DescribeSettings(State)));
+			Keyword, *State->GetStateName(), *DescribeSettings(State)));
 
-		// Pelo virtual: `BoundGraph` e' campo de cada subclasse, nao da base.
+		// Through the virtual: `BoundGraph` is a field of each subclass, not of the base.
 		EmitSubGraph(State->GetBoundGraph(), Indent + 2);
 	}
 
@@ -2029,17 +2052,17 @@ void FNodeScribeReadContext::EmitStateMachine(UAnimGraphNode_StateMachineBase* M
 
 		if (!From || !To)
 		{
-			AddWarning(TEXT("Ha' uma transicao sem origem ou sem destino nesta maquina; ela nao saiu no texto."));
+			AddWarning(TEXT("There is a transition without a source or a target in this machine; it did not come out in the text."));
 			continue;
 		}
 
-		// As opcoes da transicao saem na linha, e a que mais importa e'
-		// `Automatic Rule Based on Sequence Player in State`. Com ela ligada a
-		// transicao dispara quando a animacao do estado de origem acaba, e por
-		// isso nasce sem regra nenhuma -- que e' visualmente identico a uma
-		// transicao que ninguem terminou de escrever. Sem esta linha, o
-		// `Land -> Locomotion` da Epic voltava como transicao vazia, e colar
-		// aquilo dava uma transicao morta com aviso da Engine.
+		// The transition's options go out on the line, and the one that matters
+		// most is `Automatic Rule Based on Sequence Player in State`. With it on,
+		// the transition fires when the source state's animation ends, and that
+		// is why it is born with no rule at all -- which looks identical to a
+		// transition nobody finished writing. Without this line, Epic's
+		// `Land -> Locomotion` came back as an empty transition, and pasting that
+		// gave a dead transition with an Engine warning.
 		EmitLine(Indent + 1, FString::Printf(TEXT("%s -> %s%s:"),
 			*From->GetStateName(), *To->GetStateName(), *DescribeSettings(Transition)));
 
@@ -2064,8 +2087,9 @@ void FNodeScribeReadContext::EmitTransitionRule()
 		return;
 	}
 
-	// O Result nao vira linha pelo mesmo motivo do Output Pose: ele nasce com o
-	// grafo, e o builder liga o fim do bloco nele sozinho.
+	// The Result does not become a line for the same reason as the Output
+	// Pose: it is born with the graph, and the builder links the block's end
+	// into it by itself.
 	EmittedExec.Add(ResultNode);
 
 	UEdGraphPin* CanEnter = ResultNode->FindPin(TEXT("bCanEnterTransition"));
@@ -2073,9 +2097,9 @@ void FNodeScribeReadContext::EmitTransitionRule()
 
 	if (!Source)
 	{
-		// Nada ligado: a regra e' o valor de fabrica do pino. Bloco vazio e' a
-		// leitura honesta disso -- inventar uma linha aqui seria escrever uma
-		// condicao que o grafo nao tem.
+		// Nothing linked: the rule is the pin's factory value. An empty block is
+		// the honest reading of that -- inventing a line here would be writing a
+		// condition the graph does not have.
 		return;
 	}
 
@@ -2094,8 +2118,8 @@ void FNodeScribeReadContext::EmitSubGraph(UEdGraph* SubGraph, int32 Indent)
 
 	for (const FString& Line : Nested.Lines)
 	{
-		// Linha em branco separa cadeias no nivel de cima; dentro de um bloco
-		// indentado ela so' abre buraco.
+		// A blank line separates chains at the top level; inside an indented
+		// block it only opens a gap.
 		if (!Line.IsEmpty())
 		{
 			EmitLine(Indent, Line);
@@ -2113,50 +2137,51 @@ void FNodeScribeReadContext::Run()
 {
 	if (Scope.Num() == 0)
 	{
-		AddInfo(TEXT("Nada para ler: nenhum node selecionado."));
+		AddInfo(TEXT("Nothing to read: no node selected."));
 		return;
 	}
 
 	CollectConsumedNodes();
 
-	// Cabecalho: quem le' esse texto num chat nao tem como saber de onde ele
-	// veio, e "qual asset e' esse" e' a primeira pergunta. Sai como comentario,
-	// entao o parser ignora quando o texto volta.
+	// Header: whoever reads this text in a chat has no way to know where it
+	// came from, and "which asset is this" is the first question. It comes out
+	// as a comment, so the parser ignores it when the text comes back.
 	if (UEdGraph* SourceGraph = !bNested && Nodes.Num() > 0 && Nodes[0] ? Nodes[0]->GetGraph() : nullptr)
 	{
 		FString Header = FString::Printf(TEXT("# %s -> %s"),
 			Blueprint ? *Blueprint->GetName() : TEXT("?"),
 			*SourceGraph->GetName());
 
-		// Sem isso, um trecho parece um grafo inteiro com nodes faltando.
+		// Without this, an excerpt looks like a whole graph with missing nodes.
 		if (Nodes.Num() < SourceGraph->Nodes.Num())
 		{
-			Header += TEXT(" (selecao parcial)");
+			Header += TEXT(" (partial selection)");
 		}
 
 		Lines.Add(Header);
 
-		// O caminho exato de volta, pronto para copiar.
+		// The exact way back, ready to copy.
 		//
-		// O nome do grafo nao e' adivinhavel (`EventGraph` num asset,
-		// `Gameplay Ability Graph` em outro), e a raiz de conteudo tambem nao: um
-		// asset de plugin mora em `/NomeDoPlugin/`, nao em `/Game/`. Errar
-		// qualquer um dos dois da' a mesma mensagem seca de objeto invalido, que
-		// vem da Engine antes deste plugin rodar -- entao a unica forma de nao
-		// gastar turnos adivinhando e' o caminho certo estar aqui.
+		// The graph's name cannot be guessed (`EventGraph` in one asset,
+		// `Gameplay Ability Graph` in another), and neither can the content root:
+		// a plugin asset lives in `/PluginName/`, not in `/Game/`. Getting either
+		// one wrong gives the same terse invalid-object message, which comes from
+		// the Engine before this plugin runs -- so the only way not to spend turns
+		// guessing is for the right path to be here.
 		if (const UObject* Outer = SourceGraph->GetOuter())
 		{
 			Lines.Add(FString::Printf(TEXT("# refPath: %s:%s"),
 				*Outer->GetPathName(), *SourceGraph->GetName()));
 		}
 
-		// As variaveis do Blueprint junto. Sem elas, quem le' o texto nao tem
-		// como saber se `$Slot` existe, qual o tipo dele, nem que outras ha' --
-		// e acaba escrevendo texto que referencia coisa que nao existe.
+		// The Blueprint's variables along with it. Without them, whoever reads the
+		// text has no way to know whether `$Slot` exists, what its type is, or
+		// what others there are -- and ends up writing text that references
+		// things that do not exist.
 		UClass* OwnClass = nullptr;
 		if (Blueprint)
 		{
-			// O esqueleto tem as variaveis criadas sem compilar ainda.
+			// The skeleton has the variables created without compiling yet.
 			if (Blueprint->SkeletonGeneratedClass)
 			{
 				OwnClass = Blueprint->SkeletonGeneratedClass;
@@ -2169,8 +2194,9 @@ void FNodeScribeReadContext::Run()
 
 		if (OwnClass)
 		{
-			// Widget do Designer nao se declara: sai como comentario, para quem
-			// le' saber que existe sem o texto tentar recria-la ao voltar.
+			// A Designer widget is not declared: it comes out as a comment, so the
+			// reader knows it exists without the text trying to recreate it on the
+			// way back.
 			const UClass* WidgetClass = FindObject<UClass>(nullptr, TEXT("/Script/UMG.Widget"));
 			const UClass* UserWidgetClass = FindObject<UClass>(nullptr, TEXT("/Script/UMG.UserWidget"));
 
@@ -2180,9 +2206,28 @@ void FNodeScribeReadContext::Run()
 
 			TArray<FString> Declarations;
 			TArray<FString> DesignerWidgets;
+			TArray<FString> Components;
 
-			// ExcludeSuper: so' o que este Blueprint declara. Com a heranca
-			// junto seriam centenas de linhas da Engine, e nenhuma util aqui.
+			// A component added in the Components panel is also a property of the
+			// generated class, and it used to come out as `variable Mesh :
+			// StaticMeshComponent`. Pasted into another Blueprint, that line
+			// creates a plain variable of that type -- it compiles and never
+			// points at any component, the same trap as a Designer widget. So it
+			// comes out the same way: as a comment, for the reader to know.
+			TSet<FName> ComponentVariables;
+			if (const USimpleConstructionScript* SCS = Blueprint ? Blueprint->SimpleConstructionScript : nullptr)
+			{
+				for (const USCS_Node* Node : SCS->GetAllNodes())
+				{
+					if (Node)
+					{
+						ComponentVariables.Add(Node->GetVariableName());
+					}
+				}
+			}
+
+			// ExcludeSuper: only what this Blueprint declares. With the
+			// inheritance it would be hundreds of Engine lines, none useful here.
 			for (TFieldIterator<FProperty> PropertyIt(OwnClass, EFieldIteratorFlags::ExcludeSuper);
 				PropertyIt; ++PropertyIt)
 			{
@@ -2192,10 +2237,10 @@ void FNodeScribeReadContext::Run()
 					continue;
 				}
 
-				// GetDefault, nao construcao na pilha: classe UObject nao pode
-				// ser instanciada assim -- o construtor chama
-				// FObjectInitializer::Get(), que so' vale dentro de um
-				// construtor de UObject, e derruba o editor na hora.
+				// GetDefault, not construction on the stack: a UObject class cannot
+				// be instantiated that way -- the constructor calls
+				// FObjectInitializer::Get(), which is only valid inside a UObject
+				// constructor, and brings the editor down on the spot.
 				FEdGraphPinType PinType;
 				if (!GetDefault<UEdGraphSchema_K2>()->ConvertPropertyToPinType(Property, PinType))
 				{
@@ -2222,14 +2267,18 @@ void FNodeScribeReadContext::Run()
 				{
 					DesignerWidgets.Add(FString::Printf(TEXT("#   %s : %s"), *Property->GetName(), *TypeName));
 				}
+				else if (ComponentVariables.Contains(Property->GetFName()))
+				{
+					Components.Add(FString::Printf(TEXT("#   %s : %s"), *Property->GetName(), *TypeName));
+				}
 				else
 				{
-					// O valor padrao vive no CDO da classe compilada -- e' de la'
-					// que o painel de detalhes le'. `NewVariables[].DefaultValue`
-					// so' serve de semente na criacao e fica vazio depois.
+					// The default value lives in the compiled class's CDO -- that is
+					// where the details panel reads it from. `NewVariables[].DefaultValue`
+					// is only a seed at creation and is empty afterwards.
 					//
-					// Sem ele, colar num Blueprint vazio cria tudo zerado e o
-					// grafo se comporta diferente sem nenhum aviso.
+					// Without it, pasting into an empty Blueprint creates everything
+					// zeroed and the graph behaves differently without any warning.
 					FString DefaultValue;
 					if (UClass* CompiledClass = Blueprint->GeneratedClass.Get())
 					{
@@ -2239,8 +2288,8 @@ void FNodeScribeReadContext::Run()
 							{
 								const void* Value = Compiled->ContainerPtrToValuePtr<void>(DefaultObject);
 
-								// Zero do tipo nao acrescenta nada a' linha, e
-								// escreveria `= 0` em toda variavel intocada.
+								// The type's zero adds nothing to the line, and
+								// would write `= 0` on every untouched variable.
 								void* Zero = FMemory::Malloc(Compiled->GetSize(), Compiled->GetMinAlignment());
 								Compiled->InitializeValue(Zero);
 								const bool bIsZero = Compiled->Identical(Value, Zero);
@@ -2255,7 +2304,7 @@ void FNodeScribeReadContext::Run()
 						}
 					}
 
-					FString Line = FString::Printf(TEXT("variavel %s : %s"), *Property->GetName(), *TypeName);
+					FString Line = FString::Printf(TEXT("variable %s : %s"), *Property->GetName(), *TypeName);
 
 					if (!DefaultValue.IsEmpty())
 					{
@@ -2274,9 +2323,15 @@ void FNodeScribeReadContext::Run()
 				}
 			}
 
+			if (Components.Num() > 0)
+			{
+				Lines.Add(TEXT("# components (add them in the Components panel):"));
+				Lines.Append(Components);
+			}
+
 			if (DesignerWidgets.Num() > 0)
 			{
-				Lines.Add(TEXT("# do Designer (crie na tela, marcando Is Variable):"));
+				Lines.Add(TEXT("# from the Designer (create them there, ticking Is Variable):"));
 				Lines.Append(DesignerWidgets);
 			}
 
@@ -2286,7 +2341,7 @@ void FNodeScribeReadContext::Run()
 		Lines.Add(FString());
 	}
 
-	// Caixas de comentario primeiro: sao contexto, nao passo de execucao.
+	// Comment boxes first: they are context, not an execution step.
 	TArray<UEdGraphNode*> Comments;
 	for (UEdGraphNode* Node : Nodes)
 	{
@@ -2320,18 +2375,18 @@ void FNodeScribeReadContext::Run()
 		Lines.Add(FString());
 	}
 
-	// Grafo de animacao nao tem raiz de execucao: tem uma arvore que converge
-	// no Output Pose, e ela se le' ao contrario -- de quem alimenta para quem
-	// consome. Regra de transicao nao tem nem isso: e' uma cadeia de dado que
-	// termina num bool.
+	// An animation graph has no execution root: it has a tree converging on the
+	// Output Pose, and it reads backwards -- from what feeds to what consumes. A
+	// transition rule does not even have that: it is a data chain that ends in
+	// a bool.
 	UEdGraph* CurrentGraph = Nodes.Num() > 0 && Nodes[0] ? Nodes[0]->GetGraph() : nullptr;
 
-	// A regra de transicao nao entra por IsAnimationGraph. O schema dela e'
-	// UAnimationTransitionSchema, que desce de UEdGraphSchema_K2 e nao de
-	// UAnimationGraphSchema -- coerente, porque a regra e' uma cadeia de dado
-	// que termina num bool, sem pino de pose nenhum. Perguntar so' ao schema
-	// deixava a regra fora do texto e ainda contava os nodes dela como orfaos:
-	// a transicao lida voltava sempre vazia, mesmo com a regra ligada no grafo.
+	// The transition rule does not go through IsAnimationGraph. Its schema is
+	// UAnimationTransitionSchema, which descends from UEdGraphSchema_K2 and not
+	// from UAnimationGraphSchema -- consistent, because the rule is a data chain
+	// ending in a bool, with no pose pin at all. Asking only the schema left the
+	// rule out of the text and still counted its nodes as orphans: a transition
+	// that was read always came back empty, even with the rule linked in the graph.
 	const bool bTransitionRule = CurrentGraph && CurrentGraph->IsA<UAnimationTransitionGraph>();
 	const bool bAnimPath = bTransitionRule || NodeScribeAnimGraph::IsAnimationGraph(CurrentGraph);
 
@@ -2344,23 +2399,23 @@ void FNodeScribeReadContext::Run()
 		EmitAnimGraph();
 	}
 
-	// Raizes: quem tem fio branco mas nao recebe execucao de ninguem. Eventos
-	// caem aqui naturalmente, porque nao tem pino de entrada de execucao.
+	// Roots: whatever has a white wire but receives execution from nobody.
+	// Events land here naturally, because they have no execution input pin.
 	TArray<UEdGraphNode*> Roots;
 	for (UEdGraphNode* Node : Scope)
 	{
-		// No caminho de anim as linhas ja' sairam; o resto daqui existe so' para
-		// a contagem de orfaos, que vale nos dois caminhos.
+		// On the anim path the lines already came out; the rest here only exists
+		// for the orphan count, which applies on both paths.
 		if (bAnimPath || !IsExecNode(Node))
 		{
 			continue;
 		}
 
-		// Raiz e' quem nao recebe execucao de dentro do que foi selecionado.
+		// A root is whatever receives no execution from inside the selection.
 		//
-		// Olhar so' "o pino esta' ligado?" quebrava Copiar selecionado: numa
-		// selecao no meio da cadeia, o primeiro node recebe execucao de fora
-		// dela, entao nenhum node era raiz e o texto saia vazio.
+		// Looking only at "is the pin linked?" broke Copy Selected: in a
+		// selection in the middle of the chain, the first node receives execution
+		// from outside it, so no node was a root and the text came out empty.
 		UEdGraphPin* ExecInput = FindExecInput(Node);
 		if (!ExecInput)
 		{
@@ -2375,17 +2430,18 @@ void FNodeScribeReadContext::Run()
 		}
 	}
 
-	// Evento sem nada ligado nao diz nada, e colar o texto de volta esbarraria
-	// no guard de evento duplicado. Os stubs desabilitados que todo Blueprint
-	// novo traz -- BeginPlay, Tick, ActorBeginOverlap -- caem exatamente aqui.
+	// An event with nothing linked says nothing, and pasting the text back would
+	// run into the duplicate event guard. The disabled stubs every new Blueprint
+	// brings -- BeginPlay, Tick, ActorBeginOverlap -- land exactly here.
 	//
-	// Sao anotados porque a contagem de orfaos, la' embaixo, pega tudo que nao
-	// virou linha: sem isto eles apareciam como "3 nodes de dado nao alimentam
-	// nada" -- que os descreve errado (nao sao de dado) e conta como perda o que
-	// foi omitido de proposito. Um evento vazio nao carrega comportamento nenhum.
-	TSet<UEdGraphNode*> EventosVazios;
+	// They are recorded because the orphan count, further down, catches
+	// everything that did not become a line: without this they showed up as "3
+	// data nodes feed nothing" -- which describes them wrong (they are not data)
+	// and counts as a loss what was left out on purpose. An empty event carries
+	// no behaviour at all.
+	TSet<UEdGraphNode*> EmptyEvents;
 
-	Roots.RemoveAll([this, &EventosVazios](UEdGraphNode* Node)
+	Roots.RemoveAll([this, &EmptyEvents](UEdGraphNode* Node)
 	{
 		if (!Node->IsA<UK2Node_Event>() || NeedsName.Contains(Node))
 		{
@@ -2400,16 +2456,16 @@ void FNodeScribeReadContext::Run()
 			}
 		}
 
-		EventosVazios.Add(Node);
+		EmptyEvents.Add(Node);
 		return true;
 	});
 
-	// Quem e' referenciado por outra cadeia sai primeiro: `$aterrissar` so'
-	// existe depois da linha que nomeia aquele evento, entao a ordem no texto
-	// tem que respeitar a dependencia -- se nao, o texto nao volta.
+	// Whatever is referenced by another chain goes first: `$land` only exists
+	// after the line that names that event, so the order in the text has to
+	// respect the dependency -- otherwise the text does not come back.
 	//
-	// Depois disso, eventos antes do resto e de cima para baixo, que e' a ordem
-	// de leitura de quem olha o grafo.
+	// After that, events before the rest and top to bottom, which is the
+	// reading order of someone looking at the graph.
 	Roots.Sort([this](const UEdGraphNode& A, const UEdGraphNode& B)
 	{
 		const bool bAReferenced = NeedsName.Contains(const_cast<UEdGraphNode*>(&A));
@@ -2440,11 +2496,10 @@ void FNodeScribeReadContext::Run()
 		EmitExecChain(Roots[Index], 0);
 	}
 
-	// Nodes de dado que ninguem consome nao entram em cadeia nenhuma. Dizer
-	// *quais* e' o que transforma a nota em diagnostico: sete getters de widget
-	// ligados num pino `Target`, que aceita uma ligacao so', deixam seis soltos
-	// -- e a lista de nomes mostra isso na hora, sem uma ida e volta para
-	// descobrir quem eram.
+	// Data nodes nobody consumes enter no chain. Saying *which* is what turns
+	// the note into a diagnostic: seven widget getters linked to a `Target` pin,
+	// which accepts a single link, leave six loose -- and the list of names
+	// shows that at once, without a round trip to find out who they were.
 	TArray<FString> Orphans;
 	for (UEdGraphNode* Node : Scope)
 	{
@@ -2453,14 +2508,14 @@ void FNodeScribeReadContext::Run()
 			continue;
 		}
 
-		// Conversao atravessada alimenta sim -- ela so' nao virou linha.
+		// A walked-through conversion does feed -- it just did not become a line.
 		if (TraversedConversions.Contains(Node))
 		{
 			continue;
 		}
 
-		// Evento vazio foi omitido de proposito, e nao ha' o que perder nele.
-		if (EventosVazios.Contains(Node))
+		// An empty event was left out on purpose, and there is nothing to lose in it.
+		if (EmptyEvents.Contains(Node))
 		{
 			continue;
 		}
@@ -2468,14 +2523,15 @@ void FNodeScribeReadContext::Run()
 		Orphans.Add(ShortTitle(Node));
 	}
 
-	// Contados a' parte da nota: quem quer apagar o grafo e recolar precisa saber
-	// que estes nao voltam, e uma nota nao e' verificavel por codigo.
+	// Counted apart from the note: whoever wants to erase the graph and paste it
+	// back needs to know these do not come back, and a note cannot be checked
+	// by code.
 	Result.LostNodeCount = Orphans.Num();
 
 	if (Orphans.Num() > 0)
 	{
-		// Uma tela cheia de nomes nao ajuda mais que os primeiros; o que importa
-		// e' reconhecer o grupo.
+		// A screen full of names does not help more than the first ones; what
+		// matters is recognising the group.
 		TArray<FString> Shown = Orphans;
 		if (Shown.Num() > 8)
 		{
@@ -2485,11 +2541,11 @@ void FNodeScribeReadContext::Run()
 		FString Names = FString::Join(Shown, TEXT(", "));
 		if (Orphans.Num() > Shown.Num())
 		{
-			Names += FString::Printf(TEXT(" e mais %d"), Orphans.Num() - Shown.Num());
+			Names += FString::Printf(TEXT(" and %d more"), Orphans.Num() - Shown.Num());
 		}
 
 		AddInfo(FString::Printf(
-			TEXT("%d node(s) de dado nao alimentam nada e ficaram de fora do texto: %s."),
+			TEXT("%d data node(s) feed nothing and were left out of the text: %s."),
 			Orphans.Num(), *Names));
 	}
 
@@ -2512,7 +2568,7 @@ FNodeScribeReader::FResult FNodeScribeReader::ReadGraph(UEdGraph* Graph, UBluepr
 	if (!Graph)
 	{
 		FResult Empty;
-		Empty.Diagnostics.Emplace(ENodeScribeSeverity::Error, 0, TEXT("Nenhum grafo aberto."));
+		Empty.Diagnostics.Emplace(ENodeScribeSeverity::Error, 0, TEXT("No graph open."));
 		Empty.ErrorCount = 1;
 		return Empty;
 	}

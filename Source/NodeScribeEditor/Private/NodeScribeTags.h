@@ -3,32 +3,32 @@
 #include "CoreMinimal.h"
 
 /**
- * Gameplay Tags: ler e criar.
+ * Gameplay Tags: read and create.
  *
- * Tag nao e' asset nem propriedade -- vive num ini, `DefaultGameplayTags.ini`
- * ou um arquivo de `Config/Tags/` --, entao nao cabia em `create_asset` nem na
- * ficha. E' o ultimo tipo de coisa que ainda dependia de alguem abrir uma
- * janela de configuracao: um cooldown novo precisa da tag existir antes de o
- * Gameplay Effect poder concede-la.
+ * A tag is neither an asset nor a property -- it lives in an ini,
+ * `DefaultGameplayTags.ini` or a file under `Config/Tags/` --, so it did not
+ * fit in `create_asset` nor in the sheet. It was the last kind of thing that
+ * still depended on someone opening a settings window: a new cooldown needs
+ * the tag to exist before the Gameplay Effect can grant it.
  *
- * Capacidade, nao economia. Aqui nao havia nem ferramenta nativa para comparar.
+ * Capability, not savings. There was not even a native tool to compare with.
  */
 class FNodeScribeTags
 {
 public:
-	/** As tags declaradas, filtradas por trecho do nome. Vazio traz todas. */
+	/** The declared tags, filtered by a piece of the name. Empty brings them all. */
 	static FString ReadTags(const FString& Filter);
 
 	/**
-	 * Cria uma tag por linha do texto. Tag que ja' foi declarada e' pulada sem
-	 * erro -- colar a mesma lista duas vezes nao deve doer.
+	 * Creates one tag per line of the text. A tag already declared is skipped
+	 * without error -- pasting the same list twice should not hurt.
 	 *
-	 * Nao apaga nem renomeia: as duas coisas quebram todo asset que usa a tag, e
-	 * isso pede uma decisao, nao um efeito de formatacao.
+	 * It neither deletes nor renames: both break every asset that uses the tag,
+	 * and that calls for a decision, not a formatting side effect.
 	 *
-	 * @param Source  o arquivo de destino, pelo nome que aparece no editor
-	 *                (`BossRush.ini`). Vazio deixa a Engine escolher, que hoje
-	 *                da' `DefaultGameplayTags.ini`.
+	 * @param Source  the target file, by the name shown in the editor
+	 *                (`BossRush.ini`). Empty lets the Engine choose, which today
+	 *                gives `DefaultGameplayTags.ini`.
 	 */
 	static FString WriteTags(const FString& Text, const FString& Source);
 };

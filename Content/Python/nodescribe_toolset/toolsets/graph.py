@@ -1,10 +1,9 @@
-"""Grafo de Blueprint como texto compacto.
+"""Blueprint graphs as compact text.
 
-O motivo deste toolset existir e' custo. Montar um grafo pelas ferramentas
-convencionais gasta a maior parte dos tokens *descobrindo* identificadores de
-node -- uma chamada por tipo, cada uma devolvendo dezenas de resultados. O
-NodeScribe resolve os nomes localmente, com busca tolerante, entao um grafo
-inteiro cabe em uma chamada.
+This toolset exists because of cost. Building a graph with the conventional
+tools spends most of the tokens *discovering* node identifiers -- one call per
+type, each returning dozens of results. NodeScribe resolves the names
+locally, with tolerant lookup, so a whole graph fits in one call.
 """
 
 import unreal
@@ -14,257 +13,270 @@ import toolset_registry
 
 @unreal.uclass()
 class NodeScribeTools(unreal.ToolsetDefinition):
-    """Grafos de Blueprint e propriedades de objeto como texto, em uma chamada."""
+    """Blueprint graphs and object properties as text, in one call."""
 
     @toolset_registry.tool_call
     @staticmethod
     def write_graph(graph: unreal.EdGraph, text: str,
-                    substituir: bool | None = None) -> str:
-        """Cria nodes num grafo a partir de texto no formato NodeScribe.
+                    replace: bool | None = None) -> str:
+        """Creates nodes in a graph from text in the NodeScribe format.
 
-        Uma linha por node. Chame get_format_docs() antes da primeira vez.
+        One line per node. Call get_format_docs() before the first time.
 
-        Nao levanta excecao: linha que nao resolve vira comentario vermelho no
-        grafo, e o resto continua sendo criado. O retorno diz o que houve.
+        Does not raise: a line that does not resolve becomes a red comment in
+        the graph, and the rest keeps being created. The return says what
+        happened.
 
         Args:
-            graph: O grafo a popular.
-            text: O script no formato NodeScribe.
-            substituir: Omitido acrescenta ao que ja' existe. True apaga o grafo
-                        antes de escrever -- e **so' se o grafo atual voltar
-                        limpo na leitura**. Havendo aviso de "isso nao volta
-                        igual", ou node de dado que ninguem consome, a
-                        substituicao e' recusada e nada muda: apagar a partir de
-                        um texto que perdeu algo destruiria justamente o que o
-                        texto nao soube dizer. Nao ha' modo forcado; para isso,
-                        apague na mao no editor.
+            graph: The graph to populate.
+            text: The script in the NodeScribe format.
+            replace: Omitted appends to what already exists. True erases the
+                     graph before writing -- and **only if the current graph
+                     comes back clean when read**. If there is a "this does not
+                     come back the same" warning, or a data node nobody
+                     consumes, the replacement is refused and nothing changes:
+                     erasing from a text that lost something would destroy
+                     precisely what the text could not say. There is no forced
+                     mode; for that, use clear_graph.
         Returns:
-            Quantos nodes entraram, e uma linha por diagnostico.
+            How many nodes went in, and one line per diagnostic.
         """
-        return unreal.NodeScribeLibrary.write_graph(graph, text, bool(substituir))
+        return unreal.NodeScribeLibrary.write_graph(graph, text, bool(replace))
 
     @toolset_registry.tool_call
     @staticmethod
     def read_graph(graph: unreal.EdGraph) -> str:
-        """Le' um grafo inteiro como texto no formato NodeScribe.
+        """Reads a whole graph as text in the NodeScribe format.
 
-        O texto volta colavel em write_graph. O cabecalho traz o asset, o grafo,
-        o caminho exato do grafo (`refPath:`) e as variaveis declaradas. Avisos
-        sobre o que nao volta igual saem comentados no fim.
+        The text comes back pasteable into write_graph. The header carries the
+        asset, the graph, the graph's exact path (`refPath:`) and the declared
+        variables. Warnings about what does not come back the same come out
+        commented at the end.
 
-        O caminho e' `/Raiz/Pasta/Asset.Asset:NomeDoGrafo`. A raiz de um asset de
-        plugin e' o nome do plugin (`/JoyShockLibrary4Unreal/...`), nao `/Game/`,
-        e o nome do grafo nao e' adivinhavel -- `read_object` no Blueprint lista
-        os grafos que ele tem.
+        The path is `/Root/Folder/Asset.Asset:GraphName`. A plugin asset's root
+        is the plugin's name (`/JoyShockLibrary4Unreal/...`), not `/Game/`, and
+        the graph's name cannot be guessed -- `read_object` on the Blueprint
+        lists the graphs it has.
 
         Args:
-            graph: O grafo a ler.
+            graph: The graph to read.
         Returns:
-            O script equivalente ao grafo.
+            The script equivalent to the graph.
         """
         return unreal.NodeScribeLibrary.read_graph(graph)
 
     @toolset_registry.tool_call
     @staticmethod
     def clear_graph(graph: unreal.EdGraph) -> str:
-        """Esvazia o grafo, e devolve como texto o que estava nele.
+        """Empties the graph, and returns as text what was in it.
 
-        E' o gesto que faltava. O `substituir` do write_graph se recusa a apagar
-        um grafo que o texto nao sabe descrever, e essa recusa esta' certa: o
-        que some nao aparece no que sobrou. Mas ha' caso em que a intencao e'
-        justamente jogar fora -- os stubs que um Blueprint novo traz de fabrica,
-        uma tentativa que falhou --, e ali a recusa so' obriga alguem a fazer na
-        mao o que a chamada faria.
+        It is the missing gesture. write_graph's `replace` refuses to erase a
+        graph the text cannot describe, and that refusal is right: what
+        vanishes does not show up in what is left. But there are cases where
+        the intent is precisely to throw it away -- the stubs a new Blueprint
+        brings from the factory, an attempt that failed --, and there the
+        refusal only forces someone to do by hand what the call would do.
 
-        O que muda em relacao a um modo forcado: nada some calado. O grafo volta
-        transcrito na resposta, com os avisos da leitura junto -- inclusive o
-        aviso de que uma parte nao coube em texto. **Guarde esse retorno antes
-        de escrever por cima.**
+        What changes compared to a forced mode: nothing vanishes silently. The
+        graph comes back transcribed in the response, together with the
+        reading's warnings -- including the warning that part of it did not
+        fit in text. **Keep that return before writing over it.**
 
-        Node que a Engine marca como indelevel fica: o Output Pose de um
-        AnimGraph, o Result de uma transicao, a entrada de uma funcao.
+        Nodes the Engine marks as undeletable stay: an AnimGraph's Output Pose,
+        a transition's Result, a function's entry.
 
-        Uma transacao so': o Ctrl+Z devolve o grafo inteiro.
+        A single transaction: Ctrl+Z brings the whole graph back.
 
         Args:
-            graph: O grafo a esvaziar.
+            graph: The graph to empty.
         Returns:
-            Quantos nodes sairam, e o texto do que estava la'.
+            How many nodes left, and the text of what was there.
         """
         return unreal.NodeScribeLibrary.clear_graph(graph)
 
     @toolset_registry.tool_call
     @staticmethod
     def read_object(target: unreal.Object, filter: str | None = None) -> str:
-        """Le' um objeto, classe, CDO, ator ou asset como ficha de propriedades.
+        """Reads an object, class, CDO, actor or asset as a property sheet.
 
-        Uma linha por propriedade, e so' o que difere do valor de fabrica --
-        num CDO tipico isso e' ~5% delas. A contagem no fim confirma que o
-        resto esta' no padrao.
+        One line per property, and only what differs from the factory value --
+        in a typical CDO that is ~5% of them. The count at the end confirms the
+        rest is at its default.
 
-        Nao existe passo separado de listar o esquema. Procurando uma
-        propriedade especifica, passe o filtro nesta mesma chamada e a
-        resposta ja' vem com tipo e valor. Nunca leia tudo para depois
-        procurar.
+        There is no separate step for listing the schema. Looking for a
+        specific property, pass the filter in this same call and the answer
+        already comes with type and value. Never read everything to search
+        afterwards.
 
-        O alvo e' um caminho de objeto: `/Raiz/Pasta/Asset.Asset`. A raiz de um
-        asset de plugin e' o nome do plugin (`/JoyShockLibrary4Unreal/...`), nao
+        The target is an object path: `/Root/Folder/Asset.Asset`. A plugin
+        asset's root is the plugin's name (`/JoyShockLibrary4Unreal/...`), not
         `/Game/`.
 
+        Blackboards come out as `key Name : Type` lines, and Behavior Trees as
+        an indented tree.
+
         Args:
-            target: O objeto a ler. Blueprint e classe viram o CDO delas.
-            filter: Omitido devolve o que mudou. Com texto, devolve as
-                    propriedades cujo nome contem esse texto.
+            target: The object to read. Blueprints and classes become their CDO.
+            filter: Omitted returns what changed. With text, returns the
+                    properties whose name contains that text.
         Returns:
-            A ficha.
+            The sheet.
         """
         return unreal.NodeScribeLibrary.read_object(target, filter or '')
 
     @toolset_registry.tool_call
     @staticmethod
     def write_object(target: unreal.Object, text: str) -> str:
-        """Aplica uma ficha de propriedades num objeto, classe, CDO ou asset.
+        """Applies a property sheet to an object, class, CDO or asset.
 
-        Mesmo formato de read_object. O texto e' uma **lista de mudancas**, nao
-        o estado final: nada e' apagado, e colar de volta uma ficha inteira nao
-        mexe em nada alem do que as linhas dizem. Mande so' as linhas que mudam.
+        Same format as read_object. The text is a **list of changes**, not the
+        final state: pasting a whole sheet back touches nothing beyond what the
+        lines say. Send only the lines that change.
 
-        `Nome = padrao` devolve a propriedade ao valor de fabrica.
-        Bloco indentado sob `Componente:` ou sob `Struct:` alcanca dentro deles.
+        `Name = default` returns the property to its factory value.
+        An indented block under `Component:` or under `Struct:` reaches inside
+        them.
 
-        Nao cria variavel nem componente. Linha que nao resolve vira
-        diagnostico com os nomes parecidos, e as outras sao aplicadas.
+        `variable Name : Type [editable] [= value]` creates a Blueprint
+        variable, and `delete variable Name` removes one. It never creates
+        components. A line that does not resolve becomes a diagnostic with the
+        similar names, and the others are applied.
 
         Args:
-            target: O objeto a alterar. Blueprint e classe viram o CDO delas.
-            text: As linhas no formato da ficha.
+            target: The object to change. Blueprints and classes become their CDO.
+            text: The lines in the sheet format.
         Returns:
-            Quantas propriedades mudaram, e uma linha por diagnostico.
+            How many changes were applied, and one line per diagnostic.
         """
         return unreal.NodeScribeLibrary.write_object(target, text)
 
     @toolset_registry.tool_call
     @staticmethod
     def create_asset(path: str, parent: str, options: str | None = None) -> str:
-        """Cria um asset vazio.
+        """Creates an empty asset.
 
-        Existe porque o toolset nativo tem duplicate, move e delete, e nao tem
-        criacao -- sem isto, todo asset novo depende de alguem clicar.
+        It exists because the native toolset has duplicate, move and delete,
+        and has no creation -- without this, every new asset depends on someone
+        clicking.
 
-        Nunca sobrescreve, e so' cria dentro de /Game/. O asset fica sujo, sem
-        salvar, como qualquer um recem-criado no editor.
+        Never overwrites, and only creates inside /Game/. The asset stays
+        dirty, unsaved, like any freshly created one in the editor.
 
-        Ha' asset que nao se cria so' com o tipo: um AnimBlueprint precisa saber
-        o esqueleto, e um BlendSpace tambem. E' para isso que serve `options` --
-        e nao da' para deixar para depois, porque no asset pronto o esqueleto e'
-        somente-leitura. Quando o tipo pede configuracao e nada vem em
-        `options`, a resposta traz uma nota dizendo o que ficou em branco.
+        Some assets cannot be created from the type alone: an AnimBlueprint
+        needs to know the skeleton, and so does a BlendSpace. That is what
+        `options` is for -- and it cannot be left for later, because on the
+        finished asset the skeleton is read-only. When the type needs
+        configuration and nothing comes in `options`, the answer carries a
+        note saying what was left blank.
 
             create_asset('/Game/Anims/ABP_Sophia', 'AnimBlueprint',
                          'TargetSkeleton = /Game/MetaHumans/.../metahuman_base_skel')
 
         Args:
-            path: Onde criar, com nome: '/Game/BossRush/Testes/BTTask_Foo'.
-            parent: O tipo, pelo nome de tela: 'BTTask_BlueprintBase',
+            path: Where to create it, with its name: '/Game/MyGame/Tests/BTTask_Foo'.
+            parent: The type, by display name: 'BTTask_BlueprintBase',
                     'GameplayEffect', 'BlackboardData', 'AnimBlueprint',
                     'BlendSpace', 'BlendSpace1D'.
-            options: Propriedades da factory, no formato da ficha, uma por
-                     linha. Se alguma nao for aceita, nada e' criado.
+            options: Factory properties, in the sheet format, one per line. If
+                     any is not accepted, nothing is created.
         Returns:
-            O caminho do que foi criado, ou o motivo de nao ter dado.
+            The path of what was created, or why it failed.
         """
         return unreal.NodeScribeLibrary.create_asset(path, parent, options or '')
 
     @toolset_registry.tool_call
     @staticmethod
     def write_blendspace(blend_space: unreal.BlendSpace, text: str) -> str:
-        """Preenche um BlendSpace: os eixos e os samples.
+        """Fills a BlendSpace: the axes and the samples.
 
-        Existe porque a ficha nao alcanca. `SampleData` e `BlendParameters` sao
-        arrays de struct, e escrever neles a mao pularia a validacao da Engine,
-        que e' quem recalcula a malha de interpolacao. Sem a malha o BlendSpace
-        existe, abre, mostra os pontos e nao interpola nada.
+        It exists because the sheet does not reach. `SampleData` and
+        `BlendParameters` are struct arrays, and writing into them by hand
+        would skip the Engine's validation, which is what rebuilds the
+        interpolation grid. Without the grid the BlendSpace exists, opens,
+        shows the points and interpolates nothing.
 
-        Uma linha por sample. Os eixos sao aplicados antes dos samples, apareca
-        o que aparecer primeiro no texto -- um sample fora do intervalo e'
-        recusado, e definir o intervalo depois nao o traz de volta.
+        One line per sample. The axes are applied before the samples, whatever
+        comes first in the text -- a sample outside the range is refused, and
+        setting the range afterwards does not bring it back.
 
-            eixo X : Speed = 0 .. 600
+            axis X : Speed = 0 .. 600
             MM_Idle = 0
             MF_Unarmed_Walk_Fwd = 300
             MF_Unarmed_Jog_Fwd = 600
 
-        Em duas dimensoes o eixo Y entra igual e o sample ganha a segunda
-        posicao: `MF_Unarmed_Walk_Fwd = 0, 300`.
+        In two dimensions the Y axis goes in the same way and the sample gets
+        the second position: `MF_Unarmed_Walk_Fwd = 0, 300`.
 
-        Nao apaga o que ja' esta' la': o texto e' uma lista de mudancas.
+        It does not erase what is already there: the text is a list of changes.
 
         Args:
-            blend_space: O asset a preencher.
-            text: As linhas de eixo e de sample.
+            blend_space: The asset to fill.
+            text: The axis and sample lines.
         Returns:
-            Quantos samples e eixos entraram, e uma linha por problema.
+            How many samples and axes went in, and one line per problem.
         """
         return unreal.NodeScribeLibrary.write_blend_space(blend_space, text)
 
     @toolset_registry.tool_call
     @staticmethod
     def read_tags(filter: str | None = None) -> str:
-        """Le' as Gameplay Tags declaradas, uma por linha.
+        """Reads the declared Gameplay Tags, one per line.
 
         Args:
-            filter: Omitido traz todas. Com texto, so' as que contem esse trecho.
+            filter: Omitted brings them all. With text, only the ones containing it.
         Returns:
-            Uma linha `tag Nome` por tag, com a contagem no cabecalho.
+            One `tag Name` line per tag, with the count in the header.
         """
         return unreal.NodeScribeLibrary.read_tags(filter or '')
 
     @toolset_registry.tool_call
     @staticmethod
     def write_tags(text: str, source: str | None = None) -> str:
-        """Cria Gameplay Tags, uma por linha.
+        """Creates Gameplay Tags, one per line.
 
-        Existe porque tag nao e' asset nem propriedade -- vive num ini --, entao
-        nem create_asset nem write_object alcancam. Sem isto, toda tag nova
-        depende de alguem abrir a janela de configuracao.
+        It exists because a tag is neither an asset nor a property -- it lives
+        in an ini --, so neither create_asset nor write_object reaches it.
+        Without this, every new tag depends on someone opening the settings
+        window.
 
-        Mesmo formato de read_tags: aceita `tag X` ou so' `X`, e o cabecalho da
-        leitura e' ignorado. Tag ja' declarada e' pulada sem erro. **Nao apaga
-        nem renomeia** -- as duas coisas quebram todo asset que usa a tag.
+        Same format as read_tags: accepts `tag X` or just `X`, and the
+        reading's header is ignored. An already declared tag is skipped without
+        error. **It neither deletes nor renames** -- both break every asset
+        that uses the tag.
 
         Args:
-            text: Uma tag por linha.
-            source: O ini de destino, pelo nome de tela: 'BossRush.ini'.
-                    Omitido deixa a Engine escolher, que da'
-                    'DefaultGameplayTags.ini' -- que pode nao ser onde as outras
-                    tags do projeto moram. Fonte inexistente e' recusada com a
-                    lista das que existem.
+            text: One tag per line.
+            source: The target ini, by display name: 'MyGame.ini'. Omitted lets
+                    the Engine choose, which gives 'DefaultGameplayTags.ini' --
+                    which may not be where the project's other tags live. A
+                    source that does not exist is refused with the list of the
+                    ones that do.
         Returns:
-            Quantas foram criadas e em que arquivo, e uma linha por diagnostico.
+            How many were created and in which file, and one line per diagnostic.
         """
         return unreal.NodeScribeLibrary.write_tags(text, source or '')
 
     @toolset_registry.tool_call
     @staticmethod
     def save_all_and_quit() -> str:
-        """Salva tudo e fecha o editor.
+        """Saves everything and closes the editor.
 
-        Serve para recompilar o plugin sem depender de alguem clicar no X --
-        a Unreal segura os binarios enquanto esta' aberta.
+        It is for recompiling the plugin without depending on someone clicking
+        the X -- Unreal holds the binaries while it is open.
 
-        Recusa se houver Play In Editor rodando. Depois disto a conexao MCP
-        cai; reabrir o editor e' por fora.
+        Refuses if Play In Editor is running. After this the MCP connection
+        drops; reopening the editor is done from outside.
 
         Returns:
-            O que foi salvo, ou o motivo de nao ter fechado.
+            What was saved, or why it did not close.
         """
         return unreal.NodeScribeLibrary.save_all_and_quit()
 
     @toolset_registry.tool_call
     @staticmethod
     def get_format_docs() -> str:
-        """Devolve a especificacao do formato NodeScribe.
+        """Returns the NodeScribe format specification.
 
-        Chame uma vez por sessao, antes de escrever um grafo pela primeira vez.
+        Call once per session, before writing a graph for the first time.
         """
         return unreal.NodeScribeLibrary.get_format_docs()

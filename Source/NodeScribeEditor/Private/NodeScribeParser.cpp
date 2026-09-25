@@ -30,8 +30,8 @@ FString FNodeScribeParser::StripComment(const FString& Line)
 			continue;
 		}
 
-		// `//` tambem serve como comentario, porque e' o que sai de um assistente
-		// acostumado a escrever codigo.
+		// `//` also works as a comment, because it is what comes out of an
+		// assistant used to writing code.
 		if (C == TEXT('#'))
 		{
 			return Line.Left(Index);
@@ -168,7 +168,7 @@ FNodeScribeArg FNodeScribeParser::ParseArg(const FString& Raw)
 {
 	FNodeScribeArg Arg;
 
-	// Procura o `=` (ou `:`) de atribuicao fora de aspas.
+	// Looks for the assignment `=` (or `:`) outside quotes.
 	int32 SplitAt = INDEX_NONE;
 	TCHAR OpenQuote = 0;
 	for (int32 Index = 0; Index < Raw.Len(); ++Index)
@@ -206,7 +206,7 @@ FNodeScribeArg FNodeScribeParser::ParseArg(const FString& Raw)
 	}
 	else
 	{
-		// Argumento posicional: o builder casa pela ordem dos pinos de entrada.
+		// Positional argument: the builder matches by the order of the input pins.
 		ValuePart = Raw;
 	}
 
@@ -218,11 +218,11 @@ FNodeScribeArg FNodeScribeParser::ParseArg(const FString& Raw)
 		Arg.Value = ValuePart.Mid(1);
 		Arg.Value.TrimStartAndEndInline();
 
-		// Anotacao de conversao que o leitor escreve: `$c.Device Id (Integer ->
-		// Int64)`. Ela diz que a Unreal poe um node de conversao ali -- coisa que
-		// o builder refaz sozinho ao ligar os pinos, entao aqui e' texto para
-		// pessoa ler. Sem descartar, o `.Pino` sairia daqui com a anotacao colada
-		// no nome e nao acharia pino nenhum.
+		// Conversion note written by the reader: `$c.Device Id (Integer ->
+		// Int64)`. It says Unreal puts a conversion node there -- something the
+		// builder redoes by itself when linking the pins, so here it is text for
+		// people to read. Without discarding it, the `.Pin` would leave here with
+		// the note glued to its name and match no pin at all.
 		int32 NoteStart = INDEX_NONE;
 		if (Arg.Value.EndsWith(TEXT(")")) && Arg.Value.FindLastChar(TEXT('('), NoteStart))
 		{
@@ -258,7 +258,7 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 
 		Line = StripComment(Line);
 
-		// Cercas de bloco de markdown aparecem quando se copia uma resposta de chat.
+		// Markdown code fences show up when a chat answer is copied.
 		{
 			FString Probe = Line;
 			Probe.TrimStartAndEndInline();
@@ -276,16 +276,16 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 			continue;
 		}
 
-		// Marcadores de lista: um assistente costuma escrever `- Print String`.
+		// List bullets: an assistant tends to write `- Print String`.
 		if (Line.StartsWith(TEXT("- ")) || Line.StartsWith(TEXT("* ")))
 		{
 			Line = Line.Mid(2);
 			Line.TrimStartAndEndInline();
 		}
 
-		// Numeracao de passo, em todas as formas que um assistente costuma usar:
+		// Step numbering, in every form an assistant tends to use:
 		// `1. Print String`, `1) Print String`, `[2] Print String`, `3.1 Print
-		// String`. Sao rotulos de leitura humana; o node comeca depois deles.
+		// String`. They are labels for human reading; the node starts after them.
 		{
 			int32 Cursor = 0;
 
@@ -313,7 +313,7 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 
 				if (bValidEnd)
 				{
-					// O espaco nao faz parte do rotulo; os outros terminadores sim.
+					// The space is not part of the label; the other terminators are.
 					Line = Line.Mid(Terminator == TEXT(' ') ? Cursor : Cursor + 1);
 					Line.TrimStartAndEndInline();
 				}
@@ -330,13 +330,14 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 		Statement.Indent = Indent;
 		Statement.RawLine = Original.TrimStartAndEnd();
 
-		// Declaracao de variavel: `variavel Vida : Float = 100`.
+		// Variable declaration: `variable Health : Float = 100`.
 		//
-		// Vem antes do rotulo porque `:` aparece nas duas formas -- aqui no meio
-		// da linha, la' no fim. O prefixo desambigua sem depender disso.
+		// Comes before the label because `:` shows up in both forms -- here in the
+		// middle of the line, there at the end. The prefix disambiguates without
+		// relying on that.
 		{
 			static const TCHAR* const VariableKeywords[] = {
-				TEXT("variavel "), TEXT("variável "), TEXT("variable "), TEXT("var ")
+				TEXT("variable "), TEXT("var ")
 			};
 
 			for (const TCHAR* Keyword : VariableKeywords)
@@ -360,7 +361,7 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 				if (!NameAndType.Split(TEXT(":"), &Statement.VariableName, &Statement.VariableType))
 				{
 					OutDiagnostics.Emplace(ENodeScribeSeverity::Error, LineNumber,
-						TEXT("Declaracao sem tipo. Escreva `variavel Nome : Tipo`."));
+						TEXT("Declaration without a type. Write `variable Name : Type`."));
 					Statement.bIsVariable = false;
 				}
 
@@ -378,16 +379,16 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 
 		const int32 ParenIndex = FindArgsOpenParen(Line);
 
-		// Rotulo de bloco: termina em `:`.
+		// Block label: ends in `:`.
 		//
-		// Com parenteses fechando logo antes dos dois pontos, o que esta' dentro
-		// deles e' argumento, como em qualquer outra linha -- `estado Pulo
-		// (Always Reset on Entry = true):`. Um estado e uma transicao tem opcao
-		// de painel do mesmo jeito que um asset player tem `Loop Animation`, e
-		// inventar outra sintaxe para elas daria duas gramaticas para a mesma
-		// coisa. Sem o `)` na ponta nada muda: uma linha com parenteses no meio
-		// que por acaso termine em `:` continua sendo lida como node, que e'
-		// como sempre foi.
+		// With parentheses closing right before the colon, what is inside them is
+		// an argument, as on any other line -- `state Jump
+		// (Always Reset on Entry = true):`. A state and a transition have panel
+		// options the same way an asset player has `Loop Animation`, and
+		// inventing another syntax for them would give two grammars for the same
+		// thing. Without the `)` at the end nothing changes: a line with
+		// parentheses in the middle that happens to end in `:` is still read as a
+		// node, as it always was.
 		const bool bLabelHasArgs = ParenIndex != INDEX_NONE && Line.EndsWith(TEXT("):"));
 
 		if (Line.EndsWith(TEXT(":")) && (ParenIndex == INDEX_NONE || bLabelHasArgs))
@@ -412,7 +413,7 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 			if (Statement.Label.IsEmpty())
 			{
 				OutDiagnostics.Emplace(ENodeScribeSeverity::Error, LineNumber,
-					TEXT("Rotulo vazio. Escreva algo como `verdadeiro:` ou `falso:`."));
+					TEXT("Empty label. Write something like `true:` or `false:`."));
 				continue;
 			}
 
@@ -429,13 +430,13 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 			if (CloseIndex == INDEX_NONE || CloseIndex < ParenIndex)
 			{
 				OutDiagnostics.Emplace(ENodeScribeSeverity::Error, LineNumber,
-					FString::Printf(TEXT("Faltou fechar o parenteses em: %s"), *Line));
+					FString::Printf(TEXT("Unclosed parenthesis in: %s"), *Line));
 				continue;
 			}
 			ArgsPart = Line.Mid(ParenIndex + 1, CloseIndex - ParenIndex - 1);
 		}
 
-		// `pc = Get Player Controller` -- so vale o `=` antes dos argumentos.
+		// `pc = Get Player Controller` -- only the `=` before the arguments counts.
 		{
 			int32 AssignAt = INDEX_NONE;
 			TCHAR OpenQuote = 0;
@@ -460,7 +461,7 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 
 				if (C == TEXT('='))
 				{
-					// `==` e `=>` nao sao atribuicao.
+					// `==` and `=>` are not assignment.
 					const bool bNextIsEquals = (Index + 1 < HeadPart.Len()) && (HeadPart[Index + 1] == TEXT('=') || HeadPart[Index + 1] == TEXT('>'));
 					const bool bPrevIsOperator = (Index > 0) && (HeadPart[Index - 1] == TEXT('!') || HeadPart[Index - 1] == TEXT('<') || HeadPart[Index - 1] == TEXT('>'));
 					if (!bNextIsEquals && !bPrevIsOperator)
@@ -484,7 +485,7 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 		if (Statement.NodeExpression.IsEmpty())
 		{
 			OutDiagnostics.Emplace(ENodeScribeSeverity::Error, LineNumber,
-				FString::Printf(TEXT("Nao achei o nome do node em: %s"), *Statement.RawLine));
+				FString::Printf(TEXT("Could not find the node name in: %s"), *Statement.RawLine));
 			continue;
 		}
 

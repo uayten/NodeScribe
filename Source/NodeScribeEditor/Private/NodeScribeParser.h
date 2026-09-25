@@ -4,12 +4,12 @@
 #include "NodeScribeTypes.h"
 
 /**
- * Converte o texto colado pelo usuario numa lista plana de statements.
+ * Turns the text pasted by the user into a flat list of statements.
  *
- * O parser e' deliberadamente permissivo: qualquer linha que ele nao entenda
- * vira um statement com NodeExpression igual a linha crua, e quem reclama e'
- * o builder -- que tem contexto para dizer *por que* nao deu, e deixa um
- * comentario vermelho no grafo. Falhar aqui em silencio seria pior.
+ * The parser is deliberately permissive: any line it does not understand
+ * becomes a statement whose NodeExpression is the raw line, and the one who
+ * complains is the builder -- which has the context to say *why* it failed,
+ * and leaves a red comment in the graph. Failing silently here would be worse.
  */
 class FNodeScribeParser
 {
@@ -17,27 +17,27 @@ public:
 	static TArray<FNodeScribeStatement> Parse(const FString& Text, TArray<FNodeScribeDiagnostic>& OutDiagnostics);
 
 	/**
-	 * Remove `#` (e `//`) ate o fim da linha, respeitando aspas.
+	 * Strips `#` (and `//`) up to the end of the line, respecting quotes.
 	 *
-	 * Publica porque o que e' comentario e' do formato, nao do grafo: a ficha e o
-	 * blackboard leem linha por linha sem passar pelo Parse, e se cada um
-	 * decidisse sozinho, um `#` dentro de aspas seria valor num lugar e
-	 * comentario no outro.
+	 * Public because what counts as a comment belongs to the format, not to the
+	 * graph: the sheet and the blackboard read line by line without going
+	 * through Parse, and if each decided on its own, a `#` inside quotes would be
+	 * a value in one place and a comment in the other.
 	 */
 	static FString StripComment(const FString& Line);
 
 private:
-	/** Conta a indentacao em niveis. Tab = 1 nivel, cada 2 espacos = 1 nivel. */
+	/** Counts indentation in levels. Tab = 1 level, every 2 spaces = 1 level. */
 	static int32 MeasureIndent(const FString& Line);
 
-	/** Acha o `(` de abertura dos argumentos, ignorando o que estiver entre aspas. */
+	/** Finds the opening `(` of the arguments, ignoring anything inside quotes. */
 	static int32 FindArgsOpenParen(const FString& Line);
 
-	/** Quebra `A = 1, B = "x, y"` em partes, respeitando aspas e parenteses. */
+	/** Splits `A = 1, B = "x, y"` into parts, respecting quotes and parentheses. */
 	static TArray<FString> SplitArgs(const FString& Inner);
 
 	static FNodeScribeArg ParseArg(const FString& Raw);
 
-	/** Tira aspas simples ou duplas das pontas, se houver. */
+	/** Strips single or double quotes from the ends, if present. */
 	static FString Unquote(const FString& In);
 };

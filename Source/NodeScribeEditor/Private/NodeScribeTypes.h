@@ -5,14 +5,14 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogNodeScribe, Log, All);
 
-/** Gravidade de uma mensagem devolvida ao usuario depois de transcrever. */
+/** Severity of a message returned to the user after transcribing. */
 enum class ENodeScribeSeverity : uint8
 {
-	/** Deu certo, mas vale saber (ex.: "escolhi PrintString de KismetSystemLibrary"). */
+	/** It worked, but it is worth knowing (e.g. "picked PrintString from KismetSystemLibrary"). */
 	Info,
-	/** O node entrou, mas falta decisao sua (ex.: pino de asset vazio). */
+	/** The node went in, but a decision of yours is missing (e.g. empty asset pin). */
 	Warning,
-	/** Nao consegui. Um comentario vermelho foi deixado no grafo no lugar. */
+	/** It could not be done. A red comment was left in the graph in its place. */
 	Error
 };
 
@@ -20,7 +20,7 @@ struct FNodeScribeDiagnostic
 {
 	ENodeScribeSeverity Severity = ENodeScribeSeverity::Info;
 
-	/** Linha do texto de entrada (1-based). 0 = mensagem geral. */
+	/** Line of the input text (1-based). 0 = general message. */
 	int32 Line = 0;
 
 	FString Message;
@@ -35,54 +35,54 @@ struct FNodeScribeDiagnostic
 	}
 };
 
-/** Um argumento entre parenteses: `In String = "ola"` ou `Target = $pc`. */
+/** One argument between parentheses: `In String = "hello"` or `Target = $pc`. */
 struct FNodeScribeArg
 {
-	/** Nome do pino. Vazio = argumento posicional. */
+	/** Pin name. Empty = positional argument. */
 	FString PinName;
 
-	/** Valor literal, ou o nome referenciado quando bIsReference. */
+	/** Literal value, or the referenced name when bIsReference. */
 	FString Value;
 
-	/** true quando o valor veio escrito como `$algo`. */
+	/** true when the value was written as `$something`. */
 	bool bIsReference = false;
 };
 
 /**
- * Uma linha do script, ja quebrada em partes.
- * A estrutura e' plana de proposito: o aninhamento e' reconstruido pelo builder
- * a partir de Indent, o que evita um tipo recursivo e simplifica o parser.
+ * One line of the script, already split into parts.
+ * The structure is flat on purpose: nesting is rebuilt by the builder from
+ * Indent, which avoids a recursive type and keeps the parser simple.
  */
 struct FNodeScribeStatement
 {
-	/** Linha original no texto (1-based), usada para apontar erros. */
+	/** Original line in the text (1-based), used to point at errors. */
 	int32 LineNumber = 0;
 
-	/** Nivel de indentacao (contagem de niveis, nao de espacos). */
+	/** Indentation level (count of levels, not of spaces). */
 	int32 Indent = 0;
 
-	/** A linha como o usuario escreveu, para reproduzir em comentario de erro. */
+	/** The line as the user wrote it, to reproduce in an error comment. */
 	FString RawLine;
 
-	/** true quando a linha e' so um rotulo de saida de execucao, ex.: `verdadeiro:`. */
+	/** true when the line is only an execution output label, e.g. `true:`. */
 	bool bIsLabel = false;
 
-	/** Texto do rotulo, sem os dois pontos. */
+	/** Label text, without the colon. */
 	FString Label;
 
-	/** true quando a linha declara uma variavel: `variavel Vida : Float = 100`. */
+	/** true when the line declares a variable: `variable Health : Float = 100`. */
 	bool bIsVariable = false;
 
 	FString VariableName;
 	FString VariableType;
 
-	/** Valor depois do `=`, se houver. Vazio = padrao do tipo. */
+	/** Value after the `=`, if any. Empty = the type's default. */
 	FString VariableDefault;
 
-	/** Nome dado a saida principal, de `pc = Get Player Controller`. */
+	/** Name given to the main output, from `pc = Get Player Controller`. */
 	FString OutputName;
 
-	/** O que criar: `Get Player Controller`, `Branch`, `Cast to BP_Boss`... */
+	/** What to create: `Get Player Controller`, `Branch`, `Cast to BP_Boss`... */
 	FString NodeExpression;
 
 	TArray<FNodeScribeArg> Args;

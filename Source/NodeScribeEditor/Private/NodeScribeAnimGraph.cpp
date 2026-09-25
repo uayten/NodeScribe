@@ -25,7 +25,7 @@ namespace NodeScribeAnimGraph
 {
 
 // ---------------------------------------------------------------------------
-// Grafo
+// Graph
 // ---------------------------------------------------------------------------
 
 bool IsAnimationGraph(const UEdGraph* Graph)
@@ -35,13 +35,13 @@ bool IsAnimationGraph(const UEdGraph* Graph)
 		return false;
 	}
 
-	// O schema cobre AnimGraph e interior de estado de uma vez -- os dois
-	// aceitam node de anim. Testar a classe do grafo deixaria de fora o interior
-	// de estado, que e' exatamente onde a maquina de estados precisa escrever.
+	// The schema covers the AnimGraph and a state's interior at once -- both
+	// accept anim nodes. Testing the graph's class would leave out the state's
+	// interior, which is exactly where the state machine needs to write.
 	//
-	// **Nao cobre a regra de transicao.** UAnimationTransitionSchema desce de
-	// UEdGraphSchema_K2, nao daqui, porque a regra nao tem pose: e' uma cadeia
-	// de dado terminando num bool. Quem precisa dela testa
+	// **It does not cover the transition rule.** UAnimationTransitionSchema
+	// descends from UEdGraphSchema_K2, not from here, because the rule has no
+	// pose: it is a data chain ending in a bool. Whoever needs it tests
 	// `IsA<UAnimationTransitionGraph>()`.
 	return Graph->GetSchema()->IsA<UAnimationGraphSchema>();
 }
@@ -52,7 +52,7 @@ bool IsStateMachineGraph(const UEdGraph* Graph)
 }
 
 // ---------------------------------------------------------------------------
-// Pinos de pose
+// Pose pins
 // ---------------------------------------------------------------------------
 
 bool IsPosePin(const UEdGraphPin* Pin)
@@ -120,9 +120,9 @@ UEdGraphNode* FindOutputPose(UEdGraph* Graph)
 		return nullptr;
 	}
 
-	// AnimGraph termina em Root; o interior de um estado termina em StateResult.
-	// Sao dois nodes diferentes com o mesmo papel, e nenhum dos dois se cria:
-	// ambos nascem junto com o grafo.
+	// An AnimGraph ends at Root; a state's interior ends at StateResult. They
+	// are two different nodes with the same role, and neither is created: both
+	// are born together with the graph.
 	for (UEdGraphNode* Node : Graph->Nodes)
 	{
 		if (Node && (Node->IsA<UAnimGraphNode_Root>() || Node->IsA<UAnimGraphNode_StateResult>()))
@@ -134,7 +134,7 @@ UEdGraphNode* FindOutputPose(UEdGraph* Graph)
 }
 
 // ---------------------------------------------------------------------------
-// Indice de classes de node
+// Node class index
 // ---------------------------------------------------------------------------
 
 namespace
@@ -144,20 +144,20 @@ struct FEntry
 {
 	TWeakObjectPtr<UClass> NodeClass;
 
-	/** Nome da classe sem o prefixo: `UAnimGraphNode_BlendSpacePlayer` -> "blendspaceplayer". */
+	/** Class name without the prefix: `UAnimGraphNode_BlendSpacePlayer` -> "blendspaceplayer". */
 	FString NormalizedClassName;
 
-	/** Titulo do menu normalizado: "blendposesbybool". */
+	/** Normalised menu title: "blendposesbybool". */
 	FString NormalizedTitle;
 
-	/** Nome legivel para listar num erro de ambiguidade. */
+	/** Readable name to list in an ambiguity error. */
 	FString Display;
 };
 
 TArray<FEntry> GEntries;
 bool GBuilt = false;
 
-/** O titulo que o node mostra no menu do grafo, lido do CDO. */
+/** The title the node shows in the graph's menu, read from the CDO. */
 FString TitleForClass(UClass* NodeClass)
 {
 	const UAnimGraphNode_Base* CDO = Cast<UAnimGraphNode_Base>(NodeClass->GetDefaultObject(false));
@@ -166,9 +166,9 @@ FString TitleForClass(UClass* NodeClass)
 		return FString();
 	}
 
-	// Alguns nodes montam o titulo a partir do asset que embrulham e devolvem
-	// vazio no CDO. Nesses o nome da classe e' o unico nome estavel, e ja' esta'
-	// indexado em separado.
+	// Some nodes build their title from the asset they wrap and return empty
+	// on the CDO. For those the class name is the only stable name, and it is
+	// already indexed separately.
 	return CDO->GetNodeTitle(ENodeTitleType::MenuTitle).ToString();
 }
 
@@ -251,8 +251,8 @@ FLookup FindNodeClass(const FString& Query)
 
 	if (Exact.Num() > 1)
 	{
-		// Mesmo nome em duas classes: listar em vez de escolher, pela mesma
-		// razao do catalogo de funcoes -- chutar compila e roda errado.
+		// The same name on two classes: list instead of choosing, for the same
+		// reason as the function catalog -- guessing compiles and runs wrong.
 		for (const FEntry* Entry : Exact)
 		{
 			Result.Candidates.Add(Entry->Display);
@@ -270,7 +270,7 @@ FLookup FindNodeClass(const FString& Query)
 namespace
 {
 
-/** Nome curto normalizado -> todos os assets que atendem por ele. */
+/** Normalised short name -> every asset that answers to it. */
 TMultiMap<FString, FSoftObjectPath> GAssetsByName;
 bool GAssetsBuilt = false;
 
@@ -288,9 +288,10 @@ void BuildAssetIndex()
 	TArray<FAssetData> Assets;
 	Registry.Get().GetAssets(Filter, Assets);
 
-	// Guardamos o caminho, nao o asset: varrer o registry ja' e' caro uma vez,
-	// e carregar toda animacao do projeto para montar um indice seria pior que
-	// o problema. Carrega-se so' a que a linha pedir.
+	// We keep the path, not the asset: sweeping the registry is already
+	// expensive once, and loading every animation in the project to build an
+	// index would be worse than the problem. Only the one a line asks for is
+	// loaded.
 	for (const FAssetData& Data : Assets)
 	{
 		GAssetsByName.Add(FNodeScribeCatalog::Normalize(Data.AssetName.ToString()), Data.GetSoftObjectPath());
@@ -311,7 +312,7 @@ FAssetLookup FindAnimationAsset(const FString& Query)
 		return Result;
 	}
 
-	// Caminho completo: carregar direto, sem consultar o registry.
+	// Full path: load directly, without asking the registry.
 	if (Trimmed.StartsWith(TEXT("/")))
 	{
 		Result.Asset = LoadObject<UAnimationAsset>(nullptr, *Trimmed);
@@ -326,13 +327,13 @@ FAssetLookup FindAnimationAsset(const FString& Query)
 	TArray<FSoftObjectPath> Matches;
 	GAssetsByName.MultiFind(FNodeScribeCatalog::Normalize(Trimmed), Matches);
 
-	// Zero resultados quer dizer duas coisas diferentes: o asset nao existe, ou
-	// existe e e' mais novo que o indice. O indice e' montado uma vez por
-	// sessao, entao um BlendSpace recem-criado -- por `create_asset`, ou por
-	// alguem clicando no editor -- ficava de fora ate' o editor reabrir, e a
-	// resposta era "nao achei nenhum node chamado X" para um asset que estava
-	// ali na tela. Refazer o indice custa uma varredura do registry, e so' no
-	// caminho que ja' ia dar erro.
+	// Zero results means two different things: the asset does not exist, or it
+	// exists and is newer than the index. The index is built once per session,
+	// so a freshly created BlendSpace -- by `create_asset`, or by someone
+	// clicking in the editor -- stayed out until the editor reopened, and the
+	// answer was "no node called X" for an asset that was right there on
+	// screen. Rebuilding the index costs one registry sweep, and only on the
+	// path that was about to fail anyway.
 	if (Matches.Num() == 0)
 	{
 		BuildAssetIndex();
@@ -359,7 +360,7 @@ UClass* NodeClassForAsset(const UAnimationAsset* Asset)
 		return nullptr;
 	}
 
-	// Mesmo mapeamento que arrastar o asset para o grafo usa.
+	// The same mapping dragging the asset into the graph uses.
 	return GetNodeClassForAsset(Asset->GetClass());
 }
 
