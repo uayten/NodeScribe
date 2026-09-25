@@ -1,362 +1,382 @@
-# Continuar: NodeScribe + locomoção da Sophia
+# Handoff: NodeScribe + Sophia's locomotion
 
-Responda em português. C++ de plugin de Unreal Engine 5.8.
+Context for picking up an earlier round of work: AnimGraph support, tested in a
+separate MetaHuman project. Unreal Engine 5.8 plugin C++.
 
-## Onde estamos
+## Contents
 
-O suporte a **AnimGraph** no NodeScribe foi implementado e **validado no editor**:
-pose, node por asset, leitura de volta, criação de asset de animação e
-preenchimento de BlendSpace. A locomoção da MetaHuman Sophia está montada e
-compilando.
+- [Where we are](#where-we-are)
+- [Paths](#paths)
+- [Operation](#operation)
+- [Task 1 -- Crash on closing through `save_all_and_quit` (SOLVED)](#task-1----crash-on-closing-through-save_all_and_quit-solved)
+- [Task 2 -- State machine: two bugs found, confirmation pending](#task-2----state-machine-two-bugs-found-confirmation-pending)
+- [Task 3 -- Sophia's locomotion: what is missing](#task-3----sophias-locomotion-what-is-missing)
+- [What was done in this round](#what-was-done-in-this-round-context-not-a-task)
+- [Conventions](#conventions)
 
-O **crash ao fechar o editor** foi corrigido e exercitado duas vezes (tarefa 1).
+## Where we are
 
-A **máquina de estados** foi exercitada pela primeira vez e tinha **dois bugs**,
-um na escrita e um na leitura. Os dois estão corrigidos e compilando; falta
-confirmar o round-trip no editor (tarefa 2).
+**AnimGraph** support in NodeScribe was implemented and **validated in the
+editor**: poses, nodes by asset, reading back, animation asset creation and
+BlendSpace filling. The MetaHuman Sophia's locomotion is assembled and
+compiling.
 
-## Caminhos
+The **crash when closing the editor** was fixed and exercised twice (task 1).
 
-| O quê | Onde |
+The **state machine** was exercised for the first time and had **two bugs**,
+one on writing and one on reading. Both are fixed and compiling; the round
+trip in the editor is still to be confirmed (task 2). Since then the automated
+suite (`Tests/run_tests.py`) gained a `state_machine_round_trip` case with
+states, a conduit, an alias and transition options, and it passes.
+
+## Paths
+
+| What | Where |
 |---|---|
-| Repositório canônico | `C:\Unreal Projects\BossRush\Plugins\NodeScribe` (git, `origin` = github.com/uayten/NodeScribe, `main`) |
-| Projeto de teste (UE 5.8, C++) | `C:\Unreal Projects\Metahuman` |
-| Cópia sincronizada para compilar | `C:\Unreal Projects\Metahuman\Plugins\NodeScribe` |
+| Canonical repository | `C:\Unreal Projects\BossRush\Plugins\NodeScribe` (git, `origin` = github.com/uayten/NodeScribe, `main`) |
+| Test project (UE 5.8, C++) | `C:\Unreal Projects\Metahuman` |
+| Synced copy for compiling | `C:\Unreal Projects\Metahuman\Plugins\NodeScribe` |
 | Engine | `E:\Program Files\Epic Games\UE_5.8` |
 
-**Edite no BossRush** (é o repo). Copie os arquivos alterados para a cópia do
-Metahuman e compile lá.
+**Edit in BossRush** (it is the repo). Copy the changed files to the Metahuman
+copy and compile there.
 
-## Operação
+## Operation
 
-### Compilar (editor fechado)
+### Compiling (editor closed)
 
 ```powershell
-& "E:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" MetahumanEditor Win64 Development -Project="C:\Unreal Projects\Metahuman\Metahuman.uproject" -WaitMutex
+& "E:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" MetahumanEditor Win64 Development -Project="C:\Unreal Projects\Metahuman\Metahuman.uproject" -WaitMutex -NoUBA
 ```
 
-**Não confie no exit code.** Confira `Result: Succeeded` E o timestamp de
+**Do not trust the exit code.** Check `Result: Succeeded` AND the timestamp of
 `Plugins/NodeScribe/Binaries/Win64/UnrealEditor-NodeScribeEditor.dll`.
 
-### Abrir o editor
+### Opening the editor
 
 ```powershell
 Start-Process "E:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe" -ArgumentList '"C:\Unreal Projects\Metahuman\Metahuman.uproject"'
 ```
 
-Leva ~2 min. O servidor MCP sobe sozinho (`bAutoStartServer=True` em
-`Config/DefaultEditorPerProjectUserSettings.ini`); espere a porta **8000**
-escutar.
+It takes ~2 min. The MCP server starts by itself (`bAutoStartServer=True` in
+`Config/DefaultEditorPerProjectUserSettings.ini`); wait for port **8000** to
+listen.
 
-### Recompilar **sem** fechar (prefira isto)
+### Recompiling **without** closing (prefer this)
 
-O projeto tem **Live Coding ligado**, e ele se dispara pelo MCP:
+The project has **Live Coding on**, and it can be triggered through the MCP:
 
 ```
 console-run-command  LiveCoding.Compile
 ```
 
-Edite, copie para a cópia do Metahuman, chame isso, e espere no log
-`LogLiveCoding: Display: Live coding succeeded` (ou o `patch_N.lib` sendo
-criado). Leva ~10 s e o editor nem pisca. Foi assim que os bugs da tarefa 2
-foram caçados: quatro ciclos de recompilação sem nenhum restart.
+Edit, copy to the Metahuman copy, call that, and wait for
+`LogLiveCoding: Display: Live coding succeeded` in the log (or the
+`patch_N.lib` being created). It takes ~10 s and the editor does not even
+blink. That is how task 2's bugs were hunted: four recompile cycles without a
+single restart.
 
-Não dá conta de: reflexão nova (`UPROPERTY`/`UFUNCTION`/`UCLASS`), arquivo novo,
-módulo novo, mudança de layout de struct. Nesses, feche e use o `Build.bat`. E
-os patches acumulam na memória — um rebuild completo de vez em quando não faz
-mal.
+It cannot handle: new reflection (`UPROPERTY`/`UFUNCTION`/`UCLASS`), a new
+file, a new module, a struct layout change. For those, close and use
+`Build.bat`. And the patches pile up in memory -- a full rebuild now and then
+does no harm.
 
-### Fechar
+### Closing
 
-`save_all_and_quit` pelo MCP.
+`save_all_and_quit` through the MCP.
 
 ### MCP
 
-Dois servidores, ambos em `.mcp.json` do projeto:
+Two servers, both in the project's `.mcp.json`:
 
-| servidor | porta | o que dá |
+| server | port | what it gives |
 |---|---|---|
-| `unreal-mcp` | 8000 | o toolset do NodeScribe (`write_graph`, `read_graph`, `clear_graph`, `create_asset`, `write_blendspace`, `read_object`, `write_object`, `save_all_and_quit`, `get_format_docs`) |
-| `ai-game-developer` | 8080 | plugin UnrealMCP: ler assets, `blueprint-compile`, screenshots |
+| `unreal-mcp` | 8000 | the NodeScribe toolset (`write_graph`, `read_graph`, `clear_graph`, `create_asset`, `write_blendspace`, `read_object`, `write_object`, `save_all_and_quit`, `get_format_docs`) |
+| `ai-game-developer` | 8080 | the UnrealMCP plugin: reading assets, `blueprint-compile`, screenshots |
 
-O `unreal-mcp` está em modo de descoberta: use `list_toolsets` /
-`describe_toolset` / `call_tool`, com
+`unreal-mcp` is in discovery mode: use `list_toolsets` / `describe_toolset` /
+`call_tool`, with
 `toolset_name = "nodescribe_toolset.toolsets.graph.NodeScribeTools"`.
 
-A **8080 agora sobe junto com o editor** — mas por um patch local, não porque o
-plugin faça isso. Está em
+**Port 8080 now starts together with the editor** -- but through a local patch,
+not because the plugin does it. It is in
 `Plugins/UnrealMCP/Source/UnrealMcpEditor/Private/UnrealMcpEditorCoordinator.cpp`,
-em `ApplyServerLaunchArgsResult`, e é uma linha:
+in `ApplyServerLaunchArgsResult`, and it is one line:
 
 ```cpp
 if (!ServerManager->ReattachIfRunning(Pending.Port, Args))
     ServerManager->Start(Pending.Port, Args);
 ```
 
-O plugin diz no próprio código que não sobe sozinho de propósito ("It does NOT
-auto-start — the user launches it from the MCP-server card's Start button"), e
-não tem opção de configuração para isso. O `ReattachIfRunning` só *adota* um
-servidor sobrevivente e devolve `false` quando não há nenhum — que é exatamente
-quando `Start` é o que se queria.
+The plugin says in its own code that it does not start by itself on purpose
+("It does NOT auto-start — the user launches it from the MCP-server card's
+Start button"), and has no configuration option for that. `ReattachIfRunning`
+only *adopts* a surviving server and returns `false` when there is none --
+which is exactly when `Start` is what is wanted.
 
-**Esse patch é do projeto de teste, não do repo do NodeScribe, e some se o
-UnrealMCP for atualizado.** Confira no log da abertura:
+**That patch belongs to the test project, not to the NodeScribe repo, and it
+goes away if UnrealMCP is updated.** Check the launch log for
 `[Unreal-MCP] spawned local server pid=... on port=8080`.
 
-Se algum dia precisar subir na mão:
+If it ever needs starting by hand:
 
 ```powershell
 Start-Process "C:\Unreal Projects\Metahuman\Intermediate\UnrealMCP\server\win-x64\gamedev-mcp-server.exe" -ArgumentList "--port","8080" -WindowStyle Hidden
 ```
 
-Sobre reconexão, são **duas** falhas diferentes, e vale não confundi-las:
+About reconnecting, there are **two** different failures, and it is worth not
+mixing them up:
 
-| quando | o que acontece | o que resolve |
+| when | what happens | what solves it |
 |---|---|---|
-| Claude Code inicia com o editor **fechado** | servidor que falha na largada é descartado e nunca mais tentado; nenhuma ferramenta aparece, e nada avisa | reiniciar o Claude com o editor já aberto |
-| editor reinicia com o Claude **já rodando** | o transporte é HTTP: costuma religar sozinho na chamada seguinte | nada — mas se o servidor cair de vez do contexto, aí sim é restart |
+| Claude Code starts with the editor **closed** | a server that fails at startup is discarded and never retried; no tool shows up, and nothing warns | restarting Claude with the editor already open |
+| the editor restarts with Claude **already running** | the transport is HTTP: it usually reconnects by itself on the next call | nothing -- but if the server drops out of the context for good, then it is a restart |
 
-A 8080 parecia ser o segundo caso e era o primeiro disfarçado: o
-`gamedev-mcp-server.exe` **não subia sozinho**, então não havia nada para
-religar. Isso foi corrigido — veja abaixo.
+Port 8080 looked like the second case and was the first in disguise:
+`gamedev-mcp-server.exe` **did not start by itself**, so there was nothing to
+reconnect. That was fixed -- see above.
 
-**A regra prática continua: editor primeiro, Claude depois.** E, uma vez de pé,
-recompile com Live Coding em vez de reabrir o editor.
+**The practical rule stands: editor first, Claude afterwards.** And, once it is
+up, recompile with Live Coding instead of reopening the editor.
 
 ---
 
-## Tarefa 1 — Crash ao fechar pelo `save_all_and_quit` (RESOLVIDO)
+## Task 1 -- Crash on closing through `save_all_and_quit` (SOLVED)
 
-**Causa achada, corrigida no commit `785a138`, e exercitada no editor.**
+**Cause found, fixed in commit `785a138`, and exercised in the editor.**
 
-### O que era
+### What it was
 
-`SaveAllAndQuit` enfileirava `QUIT_EDITOR`. Esse comando cai em
-`UUnrealEdEngine::CloseEditor` -> `RequestEngineExit` e **pula o desligamento do
-Slate inteiro**: nunca chama `FMainFrameHandler::ShutDownEditor`, logo nunca
-chama `GEditor->BroadcastEditorClose()`, que e' quem manda o
-`UAssetEditorSubsystem` fechar os editores de asset abertos.
+`SaveAllAndQuit` queued `QUIT_EDITOR`. That command lands in
+`UUnrealEdEngine::CloseEditor` -> `RequestEngineExit` and **skips the whole
+Slate shutdown**: it never calls `FMainFrameHandler::ShutDownEditor`, so it
+never calls `GEditor->BroadcastEditorClose()`, which is what tells the
+`UAssetEditorSubsystem` to close the open asset editors.
 
-Resultado: os editores de asset ficavam vivos ate' o engine loop sair, e so'
-eram desmontados **depois** que a janela principal ja' tinha morrido — com a
-cena de preview apontando para coisa destruida. Dai' o
-`EXCEPTION_ACCESS_VIOLATION` em `AnimationBlueprintEditor` no meio da destruicao
-recursiva de widgets do Slate.
+Result: the asset editors stayed alive until the engine loop exited, and were
+only torn down **after** the main window had already died -- with the preview
+scene pointing at destroyed things. Hence the `EXCEPTION_ACCESS_VIOLATION` in
+`AnimationBlueprintEditor` in the middle of Slate's recursive widget
+destruction.
 
-A engine avisa disso ao lado do proprio comando, em `EditorServer.cpp`
+The engine warns about it next to the command itself, in `EditorServer.cpp`
 (`UEditorEngine::Exec`):
 
 > QUIT_EDITOR - Closes the wx main editor frame. We need to do this in slate but
 > it is routed differently. **Don't call quit_editor directly with slate**
 
-E em `MainFrameHandler.cpp`, ao enfileirar o `QUIT_EDITOR` no fim do
+And in `MainFrameHandler.cpp`, when queuing `QUIT_EDITOR` at the end of
 `ShutDownEditor`: "Note this is the only place in slate that should be calling
 QUIT_EDITOR".
 
-### O que mudou
+### What changed
 
-`SaveAllAndQuit` agora enfileira **`CLOSE_SLATE_MAINFRAME`**, que vai em
+`SaveAllAndQuit` now queues **`CLOSE_SLATE_MAINFRAME`**, which goes to
 `IMainFrameModule::RequestCloseEditor()` -> `CanCloseEditor()` ->
-`ShutDownEditor()`. Na ordem certa: fecha os editores de asset, desliga o
-arquivo de restauracao do autosave, salva a posicao da janela, destroi a janela
-raiz — e so' entao enfileira o `QUIT_EDITOR` ele mesmo.
+`ShutDownEditor()`. In the right order: it closes the asset editors, turns off
+the autosave restore file, saves the window position, destroys the root window
+-- and only then queues `QUIT_EDITOR` itself.
 
-Dois efeitos colaterais bons:
+Two good side effects:
 
-- `GetPackageAutoSaver().UpdateRestoreFile(false)` e' o que faltava para o editor
-  **parar de oferecer "recuperar"** na abertura seguinte. Aquele convite nao era
-  perda de dado, era o autosave nao ter sido descartado.
-- `SaveOpenAssetEditors(true)`: os editores de asset que estavam abertos voltam a
-  abrir na proxima sessao.
+- `GetPackageAutoSaver().UpdateRestoreFile(false)` was what was missing for the
+  editor to **stop offering "recover"** on the next launch. That offer was not
+  data loss, it was the autosave not having been discarded.
+- `SaveOpenAssetEditors(true)`: the asset editors that were open come back open
+  in the next session.
 
-Um preflight novo: `CLOSE_SLATE_MAINFRAME` abre um dialogo modal ("Are you sure
-you want to close the Unreal Editor?") quando `bConfirmEditorClose` esta'
-ligado. Quem chama isto e' um programa, entao o tool recusa antes, com a
-instrucao de desmarcar. Neste projeto ja' esta' `False`.
+A new preflight: `CLOSE_SLATE_MAINFRAME` opens a modal dialog ("Are you sure
+you want to close the Unreal Editor?") when `bConfirmEditorClose` is on. What
+calls this is a program, so the tool refuses first, with the instruction to
+untick it. In that project it is already `False`.
 
-### Como foi testado
+### How it was tested
 
-`ABP_Sophia` e `BP_ThirdPersonCharacter` abertos como editores de asset —
-a condicao em que quebrava —, e `save_all_and_quit`. Fechou limpo: sem Crash
-Reporter, sem pasta nova em `Saved/Crashes`, log terminando em `LogExit:
+`ABP_Sophia` and `BP_ThirdPersonCharacter` open as asset editors -- the
+condition where it broke --, and `save_all_and_quit`. It closed cleanly: no
+Crash Reporter, no new folder in `Saved/Crashes`, log ending in `LogExit:
 Exiting.`
 
-A prova de que a causa era a ordem esta' no log. Antes, o `CleanupWorld` das
-cenas de preview vinha **depois** de `Window 'Metahuman - Unreal Editor' being
-destroyed`, seguido do aviso `Expected preview actor 'BP_ThirdPersonCharacter_C_0'
-to be garbage collected, but it was not`. Agora vem **antes**, e o aviso sumiu:
+The proof that the cause was the order is in the log. Before, the preview
+scenes' `CleanupWorld` came **after** `Window 'Metahuman - Unreal Editor' being
+destroyed`, followed by the warning `Expected preview actor
+'BP_ThirdPersonCharacter_C_0' to be garbage collected, but it was not`. Now it
+comes **before**, and the warning is gone:
 
 ```
 15:334  Cmd: CLOSE_SLATE_MAINFRAME
-15:510  UWorld::CleanupWorld for World_4 ... (as cenas de preview)
+15:510  UWorld::CleanupWorld for World_4 ... (the preview scenes)
 15:622  LogSlate: Window 'Metahuman - Unreal Editor' being destroyed
 15:774  Cmd: QUIT_EDITOR
 ```
 
-Se algum dia voltar a quebrar, o proximo suspeito e' mexer num grafo que um
-editor de asset tem aberto (`clear_graph`/`write_graph` foram usados assim),
-deixando widget de node orfao no painel. Nao ha' evidencia disso, mas e' o outro
-ponto onde os dois lados se tocam.
+If it ever breaks again, the next suspect is touching a graph that an asset
+editor has open (`clear_graph`/`write_graph` were used that way), leaving an
+orphan node widget in the panel. There is no evidence of that, but it is the
+other point where the two sides touch.
 
 ---
 
-## Tarefa 2 — Máquina de estados: dois bugs achados, falta confirmar
+## Task 2 -- State machine: two bugs found, confirmation pending
 
-**Corrigidos no commit `dbfc48f`. Falta o round-trip final no editor.**
+**Fixed in commit `dbfc48f`. The final round trip in the editor is pending.**
 
-Exercitada pela primeira vez, num asset descartável
-(`/Game/Retarget/ABP_TesteSM`, esqueleto da Sophia — **apagar quando terminar**).
-O que funcionou de primeira: a máquina nasce com o nome do `nome =`, os dois
-estados existem com o conteúdo certo, o Entry aponta para o primeiro declarado,
-e as transições ligam os estados certos. O que quebrou foi **a regra**, nas duas
-pontas.
+Exercised for the first time, on a throwaway asset (`/Game/Retarget/ABP_TesteSM`,
+Sophia's skeleton -- **delete it when done**). What worked on the first try: the
+machine is born with the `name =` name, both states exist with the right
+content, the Entry points at the first one declared, and the transitions link
+the right states. What broke was **the rule**, on both ends.
 
-### Bug 1 — na escrita: o último node criado não é o resultado do bloco
+### Bug 1 -- on writing: the last node created is not the block's result
 
-`BuildStateMachine` procurava o resultado da regra varrendo
-`BoundGraph->Nodes` de trás para frente. Mas **o argumento de um node nasce
-depois dele**: em `Greater (A = $Ground Speed, B = 10.0)` o último node criado é
-o `Get Ground Speed`, não a comparação que o consome. Ligava-se um Float num
-pino Boolean, e o único sinal era um aviso de tipo trocado apontando para a
-linha errada:
+`BuildStateMachine` looked for the rule's result by sweeping
+`BoundGraph->Nodes` backwards. But **a node's argument is born after it**: in
+`Greater (A = $Ground Speed, B = 10.0)` the last node created is the
+`Get Ground Speed`, not the comparison that consumes it. A Float was linked into
+a Boolean pin, and the only sign was a wrong-type warning pointing at the wrong
+line:
 
 ```
-linha 6 [aviso]: `Ground Speed` e' Float (double-precision), e o pino
-                 `bCanEnterTransition` espera Boolean. A ligacao nao foi feita.
+line 6 [warning]: `Ground Speed` is Float (double-precision), and pin
+                  `bCanEnterTransition` expects Boolean. The link was not made.
 ```
 
-Quem sabe qual é o resultado de um bloco é o percurso dele, não a ordem em que
-os nodes caíram no grafo. `BuildSubGraph` passou a devolver
-`Nested.Frames[0].LastNode` — o node da última linha, inclusive quando essa
-linha é um node puro (que não entra na cadeia de fluxo e por isso não aparece no
+What knows which node is a block's result is the block's walk, not the order
+in which the nodes landed in the graph. `BuildSubGraph` now returns
+`Nested.Frames[0].LastNode` -- the node of the last line, even when that line
+is a pure node (which does not enter the flow chain and so does not show up in
 `PendingExec`).
 
-### Bug 2 — na leitura: o grafo de regra não é um grafo de animação
+### Bug 2 -- on reading: the rule graph is not an animation graph
 
-`IsAnimationGraph()` pergunta ao schema. E:
+`IsAnimationGraph()` asks the schema. And:
 
 ```cpp
 class UAnimationTransitionSchema : public UEdGraphSchema_K2
 ```
 
-Não desce de `UAnimationGraphSchema` — o que é coerente, porque a regra não tem
-pose: é uma cadeia de dado terminando num bool. Resultado: `EmitTransitionRule()`
-nunca era chamado. A transição voltava **vazia mesmo com a regra ligada no
-grafo**, e os nodes dela ainda apareciam na nota de órfãos. O comentário dentro
-de `IsAnimationGraph` afirmava justamente o contrário ("o schema cobre ... regra
-de transição de uma vez") e foi corrigido junto.
+It does not descend from `UAnimationGraphSchema` -- which is consistent, because
+the rule has no pose: it is a data chain ending in a bool. Result:
+`EmitTransitionRule()` was never called. The transition came back **empty even
+with the rule linked in the graph**, and its nodes still showed up in the
+orphan note. The comment inside `IsAnimationGraph` claimed exactly the opposite
+("the schema covers ... the transition rule at once") and was fixed along with
+it.
 
-### Como esses dois se esconderam um atrás do outro
+### How the two hid behind each other
 
-Vale saber, porque custou caro: depois de corrigir a escrita, a leitura
-continuava mostrando a transição vazia — e é tentador concluir que a escrita não
-foi corrigida. **Usar o leitor para testar o leitor é circular.** O que
-desempatou foi uma sonda temporária lendo o pino direto, em volta do
+Worth knowing, because it cost a lot: after fixing the write, the reading kept
+showing the transition empty -- and it is tempting to conclude the write was not
+fixed. **Using the reader to test the reader is circular.** What broke the tie
+was a temporary probe reading the pin directly, around
 `MarkBlueprintAsStructurallyModified`:
 
 ```
-[SONDA antes]  ...AnimStateTransitionNode_0.Transition : links=1 nodes=3
-[SONDA depois] ...AnimStateTransitionNode_0.Transition : links=1 nodes=3
+[PROBE before] ...AnimStateTransitionNode_0.Transition : links=1 nodes=3
+[PROBE after]  ...AnimStateTransitionNode_0.Transition : links=1 nodes=3
 ```
 
-`links=1` nas duas pontas: a escrita estava certa desde a primeira correção.
+`links=1` on both ends: the write was right since the first fix.
 
-### O que falta
+### What is missing
 
-1. `read_graph` no `ABP_TesteSM` e conferir que a regra volta como linha debaixo
-   de `Parado -> Correndo:`, e que a nota de órfãos sumiu.
-2. Colar esse texto de volta com `write_graph` e comparar — é o round-trip que a
-   tarefa pedia.
-3. `blueprint-compile` sem erro.
-4. **Apagar o `/Game/Retarget/ABP_TesteSM`.**
+1. `read_graph` on `ABP_TesteSM` and check that the rule comes back as a line
+   under `Idle -> Running:`, and that the orphan note is gone.
+2. Paste that text back with `write_graph` and compare -- it is the round trip
+   the task asked for.
+3. `blueprint-compile` without errors.
+4. **Delete `/Game/Retarget/ABP_TesteSM`.**
 
-### Duas coisas que apareceram de lado
+### Two things that came up on the side
 
-- **O exemplo do `FORMATO.md` não funciona como está escrito.** `Greater` e
-  `Less Equal` são ambíguos (`Greater_DoubleDouble`, `GreaterEqual_IntInt`,
-  `GreaterGreater_VectorRotator`, ...), e o plugin recusa os dois pedindo o nome
-  exato. O texto do teste que funciona usa `KismetMathLibrary.Greater_DoubleDouble`.
-  Confira o que a leitura corrigida escreve (provavelmente `float > float`) e
-  ajuste o exemplo da seção **Máquina de estados** para algo que role.
-- **`clear_graph` deixa `BoundGraph` órfão.** Depois de alguns ciclos de
-  escrever/limpar, `obj list class=AnimationTransitionGraph` mostrava sete
-  grafos pendurados direto no asset
-  (`/Game/Retarget/ABP_TesteSM.AnimationTransitionGraph_3`), fora de qualquer
-  node. `RemoveDeletableNodes` apaga o node da máquina mas não o sub-grafo dele.
-  Não atrapalha nada visível — infla o asset e polui `obj list`. Não foi
-  investigado.
+- **The format doc's example did not work as written.** `Greater` and
+  `Less Equal` are ambiguous (`Greater_DoubleDouble`, `GreaterEqual_IntInt`,
+  `GreaterGreater_VectorRotator`, ...), and the plugin refuses both asking for
+  the exact name. **Fixed:** the examples in `FORMAT.md` now use
+  `KismetMathLibrary.Greater_DoubleDouble`, which is what the reading writes,
+  and the test suite's state machine case uses it.
+- **`clear_graph` seemed to leave `BoundGraph` orphaned.** After a few
+  write/clear cycles, `obj list class=AnimationTransitionGraph` showed seven
+  graphs hanging directly off the asset
+  (`/Game/Retarget/ABP_TesteSM.AnimationTransitionGraph_3`), outside any node.
+  The likely explanation: `FBlueprintEditorUtils::RemoveGraph` renames a removed
+  graph into the package so it can be garbage collected, and `obj list` shows
+  it until the next collection. It does not get in the way of anything visible.
+  Not investigated further.
 
 ---
 
-## Tarefa 3 — Locomoção da Sophia: o que falta
+## Task 3 -- Sophia's locomotion: what is missing
 
-Montado e compilando (0 erros, 0 avisos):
+Assembled and compiling (0 errors, 0 warnings):
 
-| asset | o quê |
+| asset | what |
 |---|---|
-| `/Game/Retarget/BS_Sophia_Locomotion` | BlendSpace 1D, eixo `Speed 0..600`, samples `MM_Idle` 0 / `MF_Unarmed_Walk_Fwd` 300 / `MF_Unarmed_Jog_Fwd` 600 |
-| `/Game/Retarget/ABP_Sophia` | AnimGraph: `BS_Sophia_Locomotion (Speed = $Ground Speed)`. Event Graph calcula `Ground Speed` no `BlueprintUpdateAnimation` |
+| `/Game/Retarget/BS_Sophia_Locomotion` | 1D BlendSpace, axis `Speed 0..600`, samples `MM_Idle` 0 / `MF_Unarmed_Walk_Fwd` 300 / `MF_Unarmed_Jog_Fwd` 600 |
+| `/Game/Retarget/ABP_Sophia` | AnimGraph: `BS_Sophia_Locomotion (Speed = $Ground Speed)`. The Event Graph computes `Ground Speed` in `BlueprintUpdateAnimation` |
 | `BP_ThirdPersonCharacter` | Mesh = `SKM_Sophia_BodyMesh`, Anim Class = `ABP_Sophia_C` |
 
-Esqueleto de tudo:
+Skeleton of everything:
 `/Game/MetaHumans/Common/Female/Medium/NormalWeight/Body/metahuman_base_skel`
 
-Pendências:
+Pending:
 
-1. **Nunca foi dado Play.** Primeira coisa a fazer.
-2. **Z do Mesh em `-89`** — altura do Manny. A Sophia é mais baixa; espere pé
-   afundado ou flutuando, e ajuste.
-3. **Só o corpo.** Rosto, cabelo e roupa são componentes separados do
-   `BP_Sophia` e não foram ligados.
-4. **Sem pulo nem queda.** O AnimGraph é uma linha só. `MM_Jump`,
-   `MM_Fall_Loop` e `MM_Land` já estão retargetados e esperando — é o caso de
-   uso natural da tarefa 2.
-5. O BlendSpace é 1D de propósito: o personagem usa `Orient Rotation to
-   Movement`, então `Direction` é sempre ~0 e um blendspace 2D desperdiçaria 24
-   dos 27 samples.
+1. **Play was never pressed.** First thing to do.
+2. **Mesh Z at `-89`** -- Manny's height. Sophia is shorter; expect sunken or
+   floating feet, and adjust.
+3. **Only the body.** Face, hair and clothes are separate components of
+   `BP_Sophia` and were not hooked up.
+4. **No jump or fall.** The AnimGraph is a single line. `MM_Jump`,
+   `MM_Fall_Loop` and `MM_Land` are already retargeted and waiting -- it is the
+   natural use case for task 2.
+5. The BlendSpace is 1D on purpose: the character uses `Orient Rotation to
+   Movement`, so `Direction` is always ~0 and a 2D blendspace would waste 24 of
+   the 27 samples.
 
 ---
 
-## O que foi feito nesta rodada (contexto, não tarefa)
+## What was done in this round (context, not a task)
 
-Cinco commits em `main`, **não pushados**:
+Commits on `main`:
 
-| commit | o quê |
+| commit | what |
 |---|---|
-| `9636df6` | base de AnimGraph: schema, pinos de pose, índice de classes e de assets |
-| `89de623` | escrita: pose, asset, máquina de estados |
-| `b488217` | leitura de volta |
-| `563ee51` | `FORMATO.md`, seção AnimGraph |
-| `10fe368` | vocabulário de anim só onde há pose |
-| `40e4c2a` | declarar `ModelContextProtocol` como dependência do `.uplugin` |
-| `99e5afb` | `create_asset` com `options` (propriedades da factory) e `write_blendspace` |
-| `0fbdfa5` | `clear_graph`, e recusar propriedade que a Engine aposentou |
+| `9636df6` | AnimGraph base: schema, pose pins, class and asset indexes |
+| `89de623` | writing: poses, assets, state machine |
+| `b488217` | reading back |
+| `563ee51` | format doc, AnimGraph section |
+| `10fe368` | anim vocabulary only where there is a pose |
+| `40e4c2a` | declaring `ModelContextProtocol` as a `.uplugin` dependency |
+| `99e5afb` | `create_asset` with `options` (factory properties) and `write_blendspace` |
+| `0fbdfa5` | `clear_graph`, and refusing properties the Engine retired |
 
-Decisões que valem saber:
+Decisions worth knowing:
 
-- **Fluxo, não execução.** `IsFlowPin`/`FindFlowInput`/`GetFlowOutputs` no
-  builder devolvem pino de execução no EventGraph e de pose no AnimGraph. O
-  percurso é o mesmo.
-- **No AnimGraph a indentação abre uma *entrada* de pose**, não uma saída. Cada
-  node do bloco liga por cima do anterior no pino do pai, então sobra o último.
-- **O schema passou a ser o do próprio grafo**, não o `UEdGraphSchema_K2`
-  genérico. Isso mudou para *todos* os grafos — é onde procurar se algo do
-  EventGraph regredir.
-- **`create_asset` aceita `options`**, escritas na *factory* antes de criar. Foi
-  o que destravou AnimBlueprint e BlendSpace: no asset pronto o esqueleto é
-  somente-leitura.
-- **`clear_graph` não é modo forçado.** Ele devolve o grafo transcrito na
-  resposta, com os avisos da leitura. O `substituir` do `write_graph` continua
-  recusando o que o texto não sabe descrever.
+- **Flow, not execution.** `IsFlowPin`/`FindFlowInput`/`GetFlowOutputs` in the
+  builder return an execution pin in the EventGraph and a pose pin in the
+  AnimGraph. The walk is the same.
+- **In the AnimGraph indentation opens a pose *input***, not an output. Each
+  node of the block links over the previous one on the parent's pin, so the
+  last one remains.
+- **The schema became the graph's own**, not the generic `UEdGraphSchema_K2`.
+  That changed for *every* graph -- it is where to look if something in the
+  EventGraph regresses.
+- **`create_asset` accepts `options`**, written into the *factory* before
+  creating. That is what unlocked AnimBlueprint and BlendSpace: on the finished
+  asset the skeleton is read-only.
+- **`clear_graph` is not a forced mode.** It returns the transcribed graph in
+  the response, with the reading's warnings. `write_graph`'s `replace` keeps
+  refusing what the text cannot describe.
 
 ---
 
-## Convenções
+## Conventions
 
-- **Leia `Docs/FORMATO.md` antes** de escrever ou interpretar qualquer grafo.
-- Comentários em português, **sem acentos**, explicando **por quê**, não o quê.
-  Siga o tom dos arquivos vizinhos.
-- Erro nunca é silencioso: nome não encontrado vira comentário vermelho no
-  grafo; ambiguidade lista candidatos e não escolhe.
-- **Git: não criar branch nova.** Commitar direto na `main`. Não dar `push` sem
-  pedido explícito.
+- **Read `Docs/FORMAT.md` first** before writing or interpreting any graph.
+- Everything in English: identifiers, comments, messages, documentation.
+  Comments explain **why**, not what, and plain ASCII in the source files.
+  Follow the tone of the neighbouring files.
+- An error is never silent: a name not found becomes a red comment in the graph;
+  ambiguity lists candidates and does not choose.
+- **Git: do not create a new branch.** Commit straight to `main`. Do not `push`
+  without an explicit request.
