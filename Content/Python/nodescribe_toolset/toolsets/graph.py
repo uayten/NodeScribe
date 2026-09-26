@@ -66,6 +66,35 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
     @toolset_registry.tool_call
     @staticmethod
+    def clear_graph(graph: unreal.EdGraph) -> str:
+        """Esvazia o grafo, e devolve como texto o que estava nele.
+
+        E' o gesto que faltava. O `substituir` do write_graph se recusa a apagar
+        um grafo que o texto nao sabe descrever, e essa recusa esta' certa: o
+        que some nao aparece no que sobrou. Mas ha' caso em que a intencao e'
+        justamente jogar fora -- os stubs que um Blueprint novo traz de fabrica,
+        uma tentativa que falhou --, e ali a recusa so' obriga alguem a fazer na
+        mao o que a chamada faria.
+
+        O que muda em relacao a um modo forcado: nada some calado. O grafo volta
+        transcrito na resposta, com os avisos da leitura junto -- inclusive o
+        aviso de que uma parte nao coube em texto. **Guarde esse retorno antes
+        de escrever por cima.**
+
+        Node que a Engine marca como indelevel fica: o Output Pose de um
+        AnimGraph, o Result de uma transicao, a entrada de uma funcao.
+
+        Uma transacao so': o Ctrl+Z devolve o grafo inteiro.
+
+        Args:
+            graph: O grafo a esvaziar.
+        Returns:
+            Quantos nodes sairam, e o texto do que estava la'.
+        """
+        return unreal.NodeScribeLibrary.clear_graph(graph)
+
+    @toolset_registry.tool_call
+    @staticmethod
     def read_object(target: unreal.Object, filter: str | None = None) -> str:
         """Le' um objeto, classe, CDO, ator ou asset como ficha de propriedades.
 
@@ -116,7 +145,7 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
     @toolset_registry.tool_call
     @staticmethod
-    def create_asset(path: str, parent: str) -> str:
+    def create_asset(path: str, parent: str, options: str | None = None) -> str:
         """Cria um asset vazio.
 
         Existe porque o toolset nativo tem duplicate, move e delete, e nao tem
@@ -125,14 +154,58 @@ class NodeScribeTools(unreal.ToolsetDefinition):
         Nunca sobrescreve, e so' cria dentro de /Game/. O asset fica sujo, sem
         salvar, como qualquer um recem-criado no editor.
 
+        Ha' asset que nao se cria so' com o tipo: um AnimBlueprint precisa saber
+        o esqueleto, e um BlendSpace tambem. E' para isso que serve `options` --
+        e nao da' para deixar para depois, porque no asset pronto o esqueleto e'
+        somente-leitura. Quando o tipo pede configuracao e nada vem em
+        `options`, a resposta traz uma nota dizendo o que ficou em branco.
+
+            create_asset('/Game/Anims/ABP_Sophia', 'AnimBlueprint',
+                         'TargetSkeleton = /Game/MetaHumans/.../metahuman_base_skel')
+
         Args:
             path: Onde criar, com nome: '/Game/BossRush/Testes/BTTask_Foo'.
             parent: O tipo, pelo nome de tela: 'BTTask_BlueprintBase',
-                    'GameplayEffect', 'BlackboardData', 'BehaviorTree'.
+                    'GameplayEffect', 'BlackboardData', 'AnimBlueprint',
+                    'BlendSpace', 'BlendSpace1D'.
+            options: Propriedades da factory, no formato da ficha, uma por
+                     linha. Se alguma nao for aceita, nada e' criado.
         Returns:
             O caminho do que foi criado, ou o motivo de nao ter dado.
         """
-        return unreal.NodeScribeLibrary.create_asset(path, parent)
+        return unreal.NodeScribeLibrary.create_asset(path, parent, options or '')
+
+    @toolset_registry.tool_call
+    @staticmethod
+    def write_blendspace(blend_space: unreal.BlendSpace, text: str) -> str:
+        """Preenche um BlendSpace: os eixos e os samples.
+
+        Existe porque a ficha nao alcanca. `SampleData` e `BlendParameters` sao
+        arrays de struct, e escrever neles a mao pularia a validacao da Engine,
+        que e' quem recalcula a malha de interpolacao. Sem a malha o BlendSpace
+        existe, abre, mostra os pontos e nao interpola nada.
+
+        Uma linha por sample. Os eixos sao aplicados antes dos samples, apareca
+        o que aparecer primeiro no texto -- um sample fora do intervalo e'
+        recusado, e definir o intervalo depois nao o traz de volta.
+
+            eixo X : Speed = 0 .. 600
+            MM_Idle = 0
+            MF_Unarmed_Walk_Fwd = 300
+            MF_Unarmed_Jog_Fwd = 600
+
+        Em duas dimensoes o eixo Y entra igual e o sample ganha a segunda
+        posicao: `MF_Unarmed_Walk_Fwd = 0, 300`.
+
+        Nao apaga o que ja' esta' la': o texto e' uma lista de mudancas.
+
+        Args:
+            blend_space: O asset a preencher.
+            text: As linhas de eixo e de sample.
+        Returns:
+            Quantos samples e eixos entraram, e uma linha por problema.
+        """
+        return unreal.NodeScribeLibrary.write_blend_space(blend_space, text)
 
     @toolset_registry.tool_call
     @staticmethod

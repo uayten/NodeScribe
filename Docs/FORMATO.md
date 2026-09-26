@@ -89,6 +89,11 @@ Print String ("oi", 5.0)
 Os nomes são comparados de forma tolerante — `In String`, `instring` e
 `In_String` dão no mesmo. `Target` e `Alvo` apontam para o pino self.
 
+A comparação também ignora acento, e isso vale em todo o formato: rótulo
+(`então:`), nome de pino, nome de variável (`$Duração` acha `Duracao`, e o
+contrário também). Escrever em português não deve depender de lembrar em que
+palavra o plugin foi escrito sem acento.
+
 ## Quando dois nodes têm o mesmo nome
 
 `Apply Settings` existe em `GameUserSettings` e em `EnhancedInputUserSettings`.
@@ -245,13 +250,127 @@ args = Make MapPlayerKeyArgs (Mapping Name = $Nome, Slot = First)
 Break Vector ($posicao)
 ```
 
-No `Make`, cada pino tem o nome do campo. No `Break` há um pino de entrada só,
-e ele se chama como a struct (`Vector`) — por isso a forma sem nome, por
-posição, é a que se lê melhor.
+No `Make`, cada pino tem o nome do campo. No `Break` há um pino de entrada só —
+por isso a forma sem nome, por posição, é a que sempre funciona.
 
 Aceita o nome interno (`MapPlayerKeyArgs`) ou o de exibição
 (`Map Player Key Args`). Só vira node de struct se a struct existir — assim
 `Make Literal Int` continua sendo a função que sempre foi.
+
+**Algumas structs trazem a própria função de montar e quebrar**, e para elas o
+plugin usa essa função em vez do node genérico: `Vector`, `Rotator`,
+`Transform` e `Color` estão nesse caso. O node genérico ali compila com aviso da
+Engine — *"the structure cannot be broken using generic 'break' node"* —, e esse
+aviso não teria como ser evitado por quem escreve o texto, já que o formato não
+tem como escolher entre os dois nodes.
+
+Só muda o nome do pino de entrada, que passa a ser o do parâmetro da função
+(`In Vec`, e não `Vector`). A forma por posição atravessa as duas.
+
+## Grafos de animação
+
+Um AnimGraph não é um grafo de execução: os nodes não continuam um no outro,
+eles alimentam uma pose. A cadeia termina no **Output Pose**, que já existe no
+grafo e nunca é criado — a última linha do bloco é o que chega nele.
+
+```
+/Game/Anims/BS_Locomotion.BS_Locomotion (Speed = $Ground Speed)
+```
+
+O nome de uma animação vira o node que a toca: AnimSequence dá um Sequence
+Player, BlendSpace dá um BlendSpace Player. É o mesmo mapeamento do arrastar e
+soltar. Vale a regra dos assets: nome curto se for único no projeto, caminho
+completo se não for — duas animações com o mesmo nome curto viram lista de
+candidatos, não escolha.
+
+Nodes de pose entram pelo nome que aparece no menu do grafo: `Blend Poses by
+Bool`, `Layered blend per bone`, `Output Pose`.
+
+### O que não é pino
+
+Nem tudo que muda o que um node de anim faz é pino. `Loop Animation` e
+`Play Rate` de um asset player ficam no painel de detalhes, e entram como
+argumento igual:
+
+```
+MM_Jump (Loop Animation = false, Play Rate = 1.5)
+```
+
+Vale a pena escrever `Loop Animation` sempre que a animação não for de loop:
+ela **nasce ligada**, então um `MM_Jump` que devia tocar uma vez fica repetindo
+sem nada no texto dizendo isso. A leitura escreve de volta toda opção que
+diferir do node recém-criado.
+
+Opção não aceita `$referência`: é valor fixo, porque não há fio para ligar.
+
+### Máquina de estados
+
+```
+Locomocao = State Machine
+  estado Terra:
+    /Game/Anims/BS_Locomotion.BS_Locomotion (Speed = $Ground Speed)
+  estado Pulo:
+    /Game/Anims/MM_Jump.MM_Jump (Loop Animation = false)
+  Terra -> Pulo:
+    $Esta no Ar
+  Pulo -> Terra:
+    NOT Boolean (A = $Esta no Ar)
+```
+
+`nome = State Machine` batiza a máquina — o nome é o do sub-grafo dela, e sem
+ele toda máquina nasceria "New State Machine".
+
+Dentro do bloco há duas formas, e só essas duas: `estado Nome:` e
+`Origem -> Destino:`. O corpo de um estado é um grafo de pose como qualquer
+outro. **O primeiro estado declarado é onde a máquina começa**, que é a única
+leitura possível sem inventar sintaxe: no grafo o Entry aponta para um estado
+só. A ordem em que as transições aparecem não importa — os estados são criados
+todos antes, então uma transição pode ser escrita antes do estado que ela cita.
+
+### A regra de uma transição
+
+O corpo de `Origem -> Destino:` é uma cadeia de dado que termina num booleano.
+**A última linha é a regra**, e o plugin a liga no `Can Enter Transition` —
+como qualquer ligação que o texto não escreve.
+
+```
+  Pulo -> Queda:
+    subindo = KismetMathLibrary.Greater_DoubleDouble (A = $Velocidade Z, B = 1.0)
+    KismetMathLibrary.BooleanAND (A = $Esta no Ar, B = $subindo)
+```
+
+Uma variável sozinha basta, e as três formas abaixo dão o mesmo node:
+
+```
+    $Esta no Ar
+    Get Esta no Ar
+    Esta no Ar
+```
+
+Regra que não termina num valor sai com aviso. Vale ler esse aviso: transição
+sem regra compila, roda, e nunca dispara — o pino vazio é idêntico a um `false`
+deliberado.
+
+### Os getters de máquina de estado
+
+Dentro de uma regra de transição existe um vocabulário que só existe ali:
+
+```
+  Pulo -> Queda:
+    t = Get Relevant Anim Time Remaining
+    KismetMathLibrary.Less_DoubleDouble (A = $t, B = 0.1)
+```
+
+`Get Relevant Anim Time Remaining`, `Get Relevant Anim Time Remaining Fraction`,
+`Get Transition Time Elapsed` e os outros getters não são chamada de função,
+apesar de aparecerem como uma no menu. O que os faz funcionar não está em pino
+nenhum: é o **estado de origem da transição**, que o plugin preenche sozinho,
+porque a transição sabe de onde sai e o texto não teria como dizer.
+
+Por isso eles só existem dentro de uma regra. Fora dali, o nome cai no catálogo
+de funções e acha a função homônima de `UAnimationStateMachineLibrary` — que
+existe, entra no grafo, e pede dois pinos que uma regra de transição não tem de
+onde alimentar.
 
 ## Subsistemas
 

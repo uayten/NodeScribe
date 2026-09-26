@@ -68,9 +68,49 @@ devolve o texto alterado → **Colar**.
 
 ## Pelo MCP
 
-Com os plugins **ToolsetRegistry** e **Python Script Plugin** ligados, o
-NodeScribe se expõe como toolset MCP: `write_graph`, `read_graph` e
-`get_format_docs`.
+Além dos botões, o NodeScribe se expõe como toolset MCP — `write_graph`,
+`read_graph`, `read_object`, `write_object` e companhia. Aí o assistente
+escreve no grafo direto, em vez de te mandar texto para colar.
+
+### Ligando num projeto novo
+
+A cadeia tem quatro elos, e o assistente não avisa quando um falta: as
+ferramentas simplesmente não aparecem.
+
+| elo | o que é | quem liga |
+|---|---|---|
+| **Python Script Plugin** | roda o `init_unreal.py` do plugin | o `.uplugin` do NodeScribe, sozinho |
+| **ToolsetRegistry** | onde o toolset se registra | idem |
+| **ModelContextProtocol** | o servidor MCP da Engine, que expõe o registro | idem |
+| **`.mcp.json`** | diz ao assistente onde o servidor está | **você**, uma vez por projeto |
+
+Os três primeiros são dependências declaradas no `NodeScribe.uplugin` e entram
+sozinhos ao instalar o plugin. Estão marcados como `Optional`: quem só quer os
+botões **Colar** e **Copiar** não é obrigado a subir servidor nenhum.
+
+O quarto é do projeto, não do plugin — um `.mcp.json` na raiz:
+
+```json
+{
+  "mcpServers": {
+    "unreal-mcp": {
+      "type": "http",
+      "url": "http://127.0.0.1:8000/mcp"
+    }
+  }
+}
+```
+
+Depois disso, **reinicie o assistente**: as ferramentas MCP só entram no
+contexto na inicialização.
+
+### Conferindo que pegou
+
+Com o editor aberto, peça `get_format_docs()`. Se a ferramenta não existir, o
+elo que falta está acima dela na tabela — e o `init_unreal.py` do plugin
+reclama no Output Log, canal `LogPython`, quando não acha o `toolset_registry`.
+
+### Por que vale a pena
 
 O motivo é custo, não capacidade. Montar um grafo pelas ferramentas
 convencionais gasta a maior parte dos tokens *descobrindo* identificadores de

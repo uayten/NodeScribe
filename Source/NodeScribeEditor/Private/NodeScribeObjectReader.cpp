@@ -1,10 +1,13 @@
 #include "NodeScribeObjectReader.h"
 
 #include "NodeScribeAIReader.h"
+#include "NodeScribeBlendSpace.h"
 #include "NodeScribeCatalog.h"
 #include "NodeScribeObjectTarget.h"
 #include "NodeScribePropertyText.h"
 
+#include "Animation/AnimBlueprint.h"
+#include "Animation/BlendSpace.h"
 #include "Components/ActorComponent.h"
 #include "EdGraph/EdGraph.h"
 #include "Engine/Blueprint.h"
@@ -538,6 +541,22 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 		}
 	}
 
+	// O esqueleto de um AnimBlueprint nao aparece na ficha por si so': ela le' o
+	// CDO da classe, e `TargetSkeleton` mora no asset, um nivel acima. Sem esta
+	// linha, `read_object` num AnimBlueprint filtrando por "Skeleton" devolve
+	// zero propriedades -- o que se le como "nao tem", e nao como "esta' noutro
+	// objeto". E' a primeira coisa que se quer conferir quando um personagem
+	// aparece na pose de referencia, porque esqueleto trocado da' exatamente
+	// isso.
+	if (const UAnimBlueprint* AnimBlueprint = Cast<UAnimBlueprint>(Blueprint))
+	{
+		const USkeleton* Skeleton = AnimBlueprint->TargetSkeleton;
+
+		Lines.Add(FString::Printf(TEXT("# esqueleto: %s"),
+			Skeleton ? *Skeleton->GetPathName()
+				: (AnimBlueprint->bIsTemplate ? TEXT("nenhum (e' um template)") : TEXT("nenhum"))));
+	}
+
 	const int32 HeaderIndex = 0;
 
 	AppendAligned(Lines, VariableEntries);
@@ -571,6 +590,28 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 		}
 
 		Shown += ComponentEntries.Num();
+	}
+
+	// O BlendSpace guarda o que ele e' em dois arrays de struct que o
+	// formatador generico nao abre -- e a ficha dizia `nao sei escrever o valor
+	// de: Sample Data`, que e' o mesmo que nao dizer nada. As linhas saem no
+	// formato que `write_blendspace` aceita, entao ler e escrever falam a mesma
+	// lingua.
+	if (const UBlendSpace* BlendSpace = Cast<UBlendSpace>(Target))
+	{
+		const FString Samples = NodeScribeBlendSpace::Read(BlendSpace);
+		if (!Samples.IsEmpty())
+		{
+			TArray<FString> SampleLines;
+			Samples.ParseIntoArrayLines(SampleLines);
+			Lines.Append(SampleLines);
+
+			Shown += SampleLines.Num();
+
+			// Ja' saiu, e melhor: nao vale sair de novo como pendencia.
+			Stats.Unreadable.Remove(TEXT("Sample Data"));
+			Stats.Unreadable.Remove(TEXT("Blend Parameters"));
+		}
 	}
 
 	if (bFiltering)

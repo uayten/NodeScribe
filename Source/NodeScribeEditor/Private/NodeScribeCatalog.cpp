@@ -99,11 +99,53 @@ FString FNodeScribeCatalog::Normalize(const FString& In)
 	{
 		if (FChar::IsAlnum(C))
 		{
-			Out.AppendChar(FChar::ToLower(C));
+			Out.AppendChar(FoldAccent(FChar::ToLower(C)));
 		}
 	}
 
 	return Out;
+}
+
+TCHAR FNodeScribeCatalog::FoldAccent(TCHAR C)
+{
+	// `entao` escrito com til e `entao` sem til sao a mesma palavra, e quem
+	// escreve em portugues escreve a primeira. Sem dobrar o acento, todo apelido
+	// da tabela de rotulos precisaria estar escrito duas vezes -- e o par que
+	// faltasse falharia dizendo que a saida nao existe, que e' o pior tipo de
+	// mensagem: verdadeira, e sobre outra coisa. Foi assim que um rotulo `entao:`
+	// acentuado num Cast respondeu "nao e' uma saida deste node", enquanto
+	// `verdadeiro:`, que nao tem acento, funcionava.
+	//
+	// Vale para todo o plugin, inclusive nome de variavel e de asset, e a
+	// tolerancia a mais e' da mesma familia da que ja' existe para maiuscula e
+	// espaco: quem escreve `$Duracao` sem acento acha a variavel escrita com
+	// ele. O risco teorico -- duas variaveis que so' diferem pelo acento virarem
+	// a mesma chave -- e' o mesmo que ja' se corre com `MinhaVar` e `minha var`.
+	//
+	// Os codigos entram como numero, nao como literal: o arquivo e' ASCII puro
+	// como o resto do plugin, e literal acentuado depende de o compilador
+	// adivinhar a codificacao do arquivo.
+	switch (static_cast<uint32>(C))
+	{
+	case 0xE0: case 0xE1: case 0xE2: case 0xE3: case 0xE4: case 0xE5: // a com acento
+		return TEXT('a');
+	case 0xE7:                                                       // c cedilha
+		return TEXT('c');
+	case 0xE8: case 0xE9: case 0xEA: case 0xEB:                      // e com acento
+		return TEXT('e');
+	case 0xEC: case 0xED: case 0xEE: case 0xEF:                      // i com acento
+		return TEXT('i');
+	case 0xF1:                                                       // n com til
+		return TEXT('n');
+	case 0xF2: case 0xF3: case 0xF4: case 0xF5: case 0xF6:           // o com acento
+		return TEXT('o');
+	case 0xF9: case 0xFA: case 0xFB: case 0xFC:                      // u com acento
+		return TEXT('u');
+	case 0xFD: case 0xFF:                                            // y com acento
+		return TEXT('y');
+	default:
+		return C;
+	}
 }
 
 bool FNodeScribeCatalog::IsAsyncActionFactory(const UFunction* Function)

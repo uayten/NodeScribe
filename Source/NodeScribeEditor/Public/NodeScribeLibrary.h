@@ -4,6 +4,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "NodeScribeLibrary.generated.h"
 
+class UBlendSpace;
 class UEdGraph;
 
 /**
@@ -44,6 +45,30 @@ public:
 	static FString ReadGraph(UEdGraph* Graph);
 
 	/**
+	 * Esvazia o grafo, e **devolve como texto o que estava nele**.
+	 *
+	 * E' o gesto que faltava. A substituicao do `WriteGraph` se recusa a apagar
+	 * um grafo que o texto nao sabe descrever, e essa recusa esta' certa: o que
+	 * some nao aparece no que sobrou. Mas ha' caso em que a intencao e'
+	 * justamente jogar fora -- os stubs que um Blueprint novo traz de fabrica,
+	 * uma tentativa que falhou --, e ali a recusa so' obriga alguem a fazer na
+	 * mao o que a chamada faria.
+	 *
+	 * O que muda em relacao a um modo forcado, que este plugin nao tem: nada
+	 * some calado. O grafo volta transcrito na resposta, com os avisos da
+	 * leitura junto -- inclusive o aviso de que uma parte nao coube em texto.
+	 * Quem apagou fica com o que apagou na mao.
+	 *
+	 * Node que a Engine marca como indelevel fica: o Output Pose de um
+	 * AnimGraph, o Result de uma transicao, a entrada de uma funcao. Sao os
+	 * mesmos que o Ctrl+A + Delete do editor preserva.
+	 *
+	 * Uma transacao so': o Ctrl+Z devolve o grafo inteiro.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
+	static FString ClearGraph(UEdGraph* Graph);
+
+	/**
 	 * Um objeto como ficha: uma linha por propriedade, so' o que difere do
 	 * padrao.
 	 *
@@ -81,12 +106,34 @@ public:
 	 * duplicate, move e delete, e nao tem criacao. Sem isto, todo asset novo e'
 	 * um pedido de clique para uma pessoa, e o resto do trabalho para'.
 	 *
-	 * @param Path    onde criar, com nome: `/Game/BossRush/Testes/BTTask_Foo`.
-	 * @param Parent  o tipo, pelo nome de tela: `BTTask_BlueprintBase`,
-	 *                `GameplayEffect`, `BlackboardData`, `BehaviorTree`.
+	 * @param Path     onde criar, com nome: `/Game/BossRush/Testes/BTTask_Foo`.
+	 * @param Parent   o tipo, pelo nome de tela: `BTTask_BlueprintBase`,
+	 *                 `GameplayEffect`, `BlackboardData`, `BehaviorTree`.
+	 * @param Options  propriedades da factory, no formato da ficha, aplicadas
+	 *                 antes de criar. Ha' asset que nao se cria so' com o tipo:
+	 *                 um AnimBlueprint precisa saber o esqueleto, e um
+	 *                 BlendSpace tambem. Consertar depois nao serve -- no asset
+	 *                 pronto o esqueleto e' somente-leitura, de proposito.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
-	static FString CreateAsset(const FString& Path, const FString& Parent);
+	static FString CreateAsset(const FString& Path, const FString& Parent, const FString& Options);
+
+	/**
+	 * Preenche um BlendSpace: os eixos e os samples, por texto.
+	 *
+	 * Existe porque a ficha nao alcanca. `SampleData` e `BlendParameters` sao
+	 * arrays de struct, e escrever neles a mao pularia a validacao da Engine --
+	 * que e' quem recalcula a malha de interpolacao. Sem a malha o BlendSpace
+	 * existe, abre, mostra os pontos e nao interpola nada.
+	 *
+	 *     eixo X : Speed = 0 .. 600
+	 *     MM_Idle = 0
+	 *     MF_Unarmed_Walk_Fwd = 300
+	 *
+	 * Nao apaga o que ja' esta' la': o texto e' uma lista de mudancas.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
+	static FString WriteBlendSpace(UBlendSpace* BlendSpace, const FString& Text);
 
 	/**
 	 * As Gameplay Tags declaradas, uma por linha.

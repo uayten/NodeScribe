@@ -1,6 +1,7 @@
 #include "NodeScribeLibrary.h"
 
 #include "NodeScribeAssetMaker.h"
+#include "NodeScribeBlendSpace.h"
 #include "NodeScribeBuilder.h"
 #include "NodeScribeObjectReader.h"
 #include "NodeScribeObjectWriter.h"
@@ -13,6 +14,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "Editor.h"
+#include "Editor/EditorPerProjectUserSettings.h"
 #include "Engine/Blueprint.h"
 #include "FileHelpers.h"
 #include "Interfaces/IPluginManager.h"
@@ -68,7 +70,7 @@ namespace
  * com razao: ele nasce com a funcao. Pular esses e' o comportamento certo, nao
  * uma limitacao.
  */
-static int32 ClearGraph(UEdGraph* Graph, UBlueprint* Blueprint)
+static int32 RemoveDeletableNodes(UEdGraph* Graph, UBlueprint* Blueprint)
 {
 	TArray<UEdGraphNode*> ToRemove;
 	for (UEdGraphNode* Node : Graph->Nodes)
@@ -153,7 +155,7 @@ FString UNodeScribeLibrary::WriteGraph(UEdGraph* Graph, const FString& Text, boo
 	int32 Removed = 0;
 	if (bReplace)
 	{
-		Removed = ClearGraph(Graph, Blueprint);
+		Removed = RemoveDeletableNodes(Graph, Blueprint);
 	}
 
 	FNodeScribeBuilder::FResult Result = FNodeScribeBuilder::Build(
@@ -176,6 +178,50 @@ FString UNodeScribeLibrary::WriteGraph(UEdGraph* Graph, const FString& Text, boo
 		Result.CreatedNodes.Num(),
 		Report.IsEmpty() ? TEXT("") : TEXT("\n"),
 		*Report);
+}
+
+FString UNodeScribeLibrary::ClearGraph(UEdGraph* Graph)
+{
+	if (!Graph)
+	{
+		return TEXT("[erro]: nenhum grafo informado.");
+	}
+
+	UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
+	if (!Blueprint)
+	{
+		return TEXT("[erro]: esse grafo nao pertence a um Blueprint.");
+	}
+
+	// Ler antes de apagar. E' isto que separa este gesto de um modo forcado: o
+	// grafo volta na resposta, e o que a leitura nao soube dizer volta como
+	// aviso -- entao quem apagou sabe o que perdeu, em vez de descobrir depois.
+	const FNodeScribeReader::FResult Before = FNodeScribeReader::ReadGraph(Graph, Blueprint);
+
+	const FScopedTransaction Transaction(LOCTEXT("ClearGraphTransaction", "NodeScribe: esvaziar grafo"));
+	Blueprint->Modify();
+	Graph->Modify();
+
+	const int32 Removed = RemoveDeletableNodes(Graph, Blueprint);
+
+	if (Removed == 0)
+	{
+		return TEXT("O grafo ja' estava vazio. Nada foi alterado.");
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TArray<FString> Lines;
+	Lines.Add(FString::Printf(TEXT("%d node(s) apagados. O que estava la':"), Removed));
+	Lines.Add(Before.Text.IsEmpty() ? TEXT("# (nada que o texto soubesse dizer)") : Before.Text);
+
+	const FString Report = FormatDiagnostics(Before.Diagnostics);
+	if (!Report.IsEmpty())
+	{
+		Lines.Add(Report);
+	}
+
+	return FString::Join(Lines, TEXT("\n"));
 }
 
 FString UNodeScribeLibrary::ReadGraph(UEdGraph* Graph)
@@ -227,9 +273,22 @@ FString UNodeScribeLibrary::WriteObject(UObject* Object, const FString& Text)
 		*Report);
 }
 
-FString UNodeScribeLibrary::CreateAsset(const FString& Path, const FString& Parent)
+FString UNodeScribeLibrary::CreateAsset(const FString& Path, const FString& Parent, const FString& Options)
 {
-	return FNodeScribeAssetMaker::CreateAsset(Path, Parent);
+	return FNodeScribeAssetMaker::CreateAsset(Path, Parent, Options);
+}
+
+FString UNodeScribeLibrary::WriteBlendSpace(UBlendSpace* BlendSpace, const FString& Text)
+{
+	const NodeScribeBlendSpace::FResult Result = NodeScribeBlendSpace::Write(BlendSpace, Text);
+
+	TArray<FString> Lines;
+	Lines.Add(FString::Printf(TEXT("%d sample(s), %d eixo(s)."),
+		Result.SamplesAdded, Result.AxesSet));
+
+	Lines.Append(Result.Diagnostics);
+
+	return FString::Join(Lines, TEXT("\n"));
 }
 
 FString UNodeScribeLibrary::ReadTags(const FString& Filter)
@@ -253,6 +312,15 @@ FString UNodeScribeLibrary::SaveAllAndQuit()
 	if (GEditor->IsPlaySessionInProgress())
 	{
 		return TEXT("[erro]: ha' um Play In Editor rodando. Pare o Play antes.");
+	}
+
+	// O caminho do Slate pergunta "tem certeza?" num dialogo modal quando essa
+	// opcao esta ligada. Quem chama isto e' um programa: ninguem estaria la para
+	// clicar, e o editor ficaria pendurado sem explicacao.
+	if (GetDefault<UEditorPerProjectUserSettings>()->bConfirmEditorClose)
+	{
+		return TEXT("[erro]: 'Confirm on Editor Close' esta' ligado -- fechar abriria um dialogo\n")
+			TEXT("que so' um humano fecha. Desmarque em Editor Preferences > General > Loading & Saving.");
 	}
 
 	bool bNeededSaving = false;
@@ -301,9 +369,23 @@ FString UNodeScribeLibrary::SaveAllAndQuit()
 			*FString::Join(Nomes, TEXT("\n")));
 	}
 
-	// Adiado: sair aqui derrubaria a conexao antes desta resposta sair, e quem
-	// chamou veria um erro de rede em vez da confirmacao.
-	GEngine->DeferredCommands.Add(TEXT("QUIT_EDITOR"));
+	// O QUIT_EDITOR pula o desligamento do Slate: vai direto em
+	// UUnrealEdEngine::CloseEditor -> RequestEngineExit. Os editores de asset
+	// abertos ficam vivos, e so' sao desmontados depois que a janela principal ja
+	// morreu -- com a cena de preview deles apontando para coisa destruida. E' o
+	// crash do AnimationBlueprintEditor. A propria engine avisa, no
+	// EditorServer.cpp, ao lado do QUIT_EDITOR: "Don't call quit_editor directly
+	// with slate".
+	//
+	// CLOSE_SLATE_MAINFRAME e' a porta certa. Cai em
+	// FMainFrameHandler::ShutDownEditor, que na ordem certa: fecha os editores de
+	// asset (BroadcastEditorClose), desliga o arquivo de restauracao do autosave
+	// -- e' ele que fazia o editor oferecer "recuperar" na abertura seguinte --,
+	// salva a posicao da janela, e so' entao enfileira o QUIT_EDITOR.
+	//
+	// Adiado porque sair aqui derrubaria a conexao antes desta resposta sair, e
+	// quem chamou veria um erro de rede em vez da confirmacao.
+	GEngine->DeferredCommands.Add(TEXT("CLOSE_SLATE_MAINFRAME"));
 
 	return bNeededSaving
 		? TEXT("Tudo salvo. Fechando o editor.")

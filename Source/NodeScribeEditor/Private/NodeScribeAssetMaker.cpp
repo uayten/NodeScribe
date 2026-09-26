@@ -1,6 +1,7 @@
 #include "NodeScribeAssetMaker.h"
 
 #include "NodeScribeBuilder.h"
+#include "NodeScribeObjectWriter.h"
 
 #include "AssetToolsModule.h"
 #include "Factories/BlueprintFactory.h"
@@ -20,6 +21,42 @@ namespace
 	 * blackboard -- um plugin, ou o proprio projeto, pode trazer a sua, e uma
 	 * tabela fixa responderia "nao sei criar" para algo que a Engine sabe.
 	 */
+	/**
+	 * As propriedades que a factory deixa configurar.
+	 *
+	 * Serve para dizer, quando o asset sai capenga, o que faltava passar. Uma
+	 * `UAnimBlueprintFactory` sem `TargetSkeleton` cria um AnimBlueprint sem
+	 * esqueleto: a Engine nao reclama, e o problema so' aparece quando alguem
+	 * abre o asset.
+	 */
+	TArray<FString> EditableFactoryProperties(const UFactory* Factory)
+	{
+		TArray<FString> Names;
+		if (!Factory)
+		{
+			return Names;
+		}
+
+		for (TFieldIterator<FProperty> It(Factory->GetClass()); It; ++It)
+		{
+			const FProperty* Property = *It;
+
+			// Da UFactory para cima e' encanamento da Engine, nao configuracao
+			// deste asset.
+			if (Property->GetOwnerClass() == UFactory::StaticClass())
+			{
+				continue;
+			}
+
+			if (Property->HasAnyPropertyFlags(CPF_Edit))
+			{
+				Names.Add(Property->GetName());
+			}
+		}
+
+		return Names;
+	}
+
 	UFactory* FindFactoryFor(UClass* AssetClass)
 	{
 		for (TObjectIterator<UClass> It; It; ++It)
@@ -42,7 +79,7 @@ namespace
 	}
 }
 
-FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& Parent)
+FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& Parent, const FString& Options)
 {
 	const FString Trimmed = Path.TrimStartAndEnd();
 
@@ -90,21 +127,23 @@ FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& P
 		FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
 
 	UObject* Created = nullptr;
+	UClass* AssetClass = nullptr;
+	UFactory* Factory = nullptr;
 
 	if (FKismetEditorUtilities::CanCreateBlueprintOfClass(ParentClass))
 	{
 		// Blueprint filho da classe pedida. E' o caso de GameplayEffect,
 		// BTTask_BlueprintBase e BTService_BlueprintBase: na tela sao "assets",
 		// mas por dentro sao Blueprint com aquele pai.
-		UBlueprintFactory* Factory = NewObject<UBlueprintFactory>();
-		Factory->ParentClass = ParentClass;
+		UBlueprintFactory* BlueprintFactory = NewObject<UBlueprintFactory>();
+		BlueprintFactory->ParentClass = ParentClass;
 
-		Created = AssetTools.CreateAsset(
-			AssetName, PackagePath, UBlueprint::StaticClass(), Factory);
+		Factory = BlueprintFactory;
+		AssetClass = UBlueprint::StaticClass();
 	}
 	else
 	{
-		UFactory* Factory = FindFactoryFor(ParentClass);
+		Factory = FindFactoryFor(ParentClass);
 		if (!Factory)
 		{
 			return FString::Printf(
@@ -112,8 +151,34 @@ FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& P
 				*ParentClass->GetName());
 		}
 
-		Created = AssetTools.CreateAsset(AssetName, PackagePath, ParentClass, Factory);
+		AssetClass = ParentClass;
 	}
+
+	const TArray<FString> Configurable = EditableFactoryProperties(Factory);
+
+	// A factory antes de criar. Depois nao adianta: as propriedades que ela
+	// carrega -- o esqueleto, sobretudo -- viram somente-leitura no asset
+	// pronto, e a Engine recusa escrever nelas.
+	const FString TrimmedOptions = Options.TrimStartAndEnd();
+	if (!TrimmedOptions.IsEmpty())
+	{
+		const FNodeScribeObjectWriter::FResult Written =
+			FNodeScribeObjectWriter::WriteObject(Factory, TrimmedOptions);
+
+		// Aborta em vez de criar assim mesmo. Um asset criado com a factory meio
+		// configurada e' pior que asset nenhum: ele existe, parece pronto, e so'
+		// da' as caras quando alguem abre.
+		if (Written.Diagnostics.Num() > 0)
+		{
+			return FString::Printf(
+				TEXT("[erro]: nao criei nada -- as opcoes da factory `%s` nao foram aceitas:\n%s\n\nEla configura: %s"),
+				*Factory->GetClass()->GetName(),
+				*FString::Join(Written.Diagnostics, TEXT("\n")),
+				Configurable.Num() > 0 ? *FString::Join(Configurable, TEXT(", ")) : TEXT("(nada)"));
+		}
+	}
+
+	Created = AssetTools.CreateAsset(AssetName, PackagePath, AssetClass, Factory);
 
 	if (!Created)
 	{
@@ -122,5 +187,18 @@ FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& P
 
 	// Nao salva. Fica sujo como qualquer asset recem-criado no editor, e o
 	// `save_all_and_quit` grava -- assim quem criou por engano fecha sem salvar.
-	return FString::Printf(TEXT("Criado: %s"), *Created->GetPathName());
+	FString Message = FString::Printf(TEXT("Criado: %s"), *Created->GetPathName());
+
+	// Nota, e nao erro: ha' factory cuja configuracao e' toda opcional, e
+	// bloquear ali atrapalharia o caso comum. Mas passar em branco quando havia
+	// o que dizer e' como o AnimBlueprint sem esqueleto nasce.
+	if (TrimmedOptions.IsEmpty() && Configurable.Num() > 0)
+	{
+		Message += FString::Printf(
+			TEXT("\n[nota]: a factory `%s` configura %s, e nada foi passado em options. ")
+			TEXT("Se o asset depende de alguma dessas, ele nasceu sem."),
+			*Factory->GetClass()->GetName(), *FString::Join(Configurable, TEXT(", ")));
+	}
+
+	return Message;
 }

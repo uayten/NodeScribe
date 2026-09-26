@@ -378,12 +378,36 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 
 		const int32 ParenIndex = FindArgsOpenParen(Line);
 
-		// Rotulo de saida de execucao: termina em `:` e nao tem argumentos.
-		if (ParenIndex == INDEX_NONE && Line.EndsWith(TEXT(":")))
+		// Rotulo de bloco: termina em `:`.
+		//
+		// Com parenteses fechando logo antes dos dois pontos, o que esta' dentro
+		// deles e' argumento, como em qualquer outra linha -- `estado Pulo
+		// (Always Reset on Entry = true):`. Um estado e uma transicao tem opcao
+		// de painel do mesmo jeito que um asset player tem `Loop Animation`, e
+		// inventar outra sintaxe para elas daria duas gramaticas para a mesma
+		// coisa. Sem o `)` na ponta nada muda: uma linha com parenteses no meio
+		// que por acaso termine em `:` continua sendo lida como node, que e'
+		// como sempre foi.
+		const bool bLabelHasArgs = ParenIndex != INDEX_NONE && Line.EndsWith(TEXT("):"));
+
+		if (Line.EndsWith(TEXT(":")) && (ParenIndex == INDEX_NONE || bLabelHasArgs))
 		{
 			Statement.bIsLabel = true;
 			Statement.Label = Line.LeftChop(1);
 			Statement.Label.TrimStartAndEndInline();
+
+			if (bLabelHasArgs)
+			{
+				const FString Inner =
+					Statement.Label.Mid(ParenIndex + 1, Statement.Label.Len() - ParenIndex - 2);
+
+				for (const FString& Raw : SplitArgs(Inner))
+				{
+					Statement.Args.Add(ParseArg(Raw));
+				}
+
+				Statement.Label = Statement.Label.Left(ParenIndex).TrimStartAndEnd();
+			}
 
 			if (Statement.Label.IsEmpty())
 			{
