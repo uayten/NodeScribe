@@ -85,9 +85,14 @@ will know by itself, in every conversation:
 ```markdown
 ## Blueprint graphs
 
-When delivering a Blueprint graph, use the NodeScribe format, specified in
-`Plugins/NodeScribe/Docs/FORMAT.md`. Read that file before writing or
-interpreting a graph. Never describe nodes in prose.
+- Every Blueprint graph is delivered in the NodeScribe format, never as prose
+  or numbered steps: the answer is pasted into the plugin as is.
+- Read `Plugins/NodeScribe/Docs/FORMAT.md` before writing or interpreting a
+  graph.
+- When needed, before the graph: the target asset and graph, and a table of
+  the variables it needs (name | type | default | Instance Editable). Any
+  explanation goes after the graph, in a separate block, never between nodes.
+- Text pasted in this format comes from the plugin's **Copy Whole Graph**.
 ```
 
 In any other assistant, paste the contents of `Docs/FORMAT.md` at the start of
