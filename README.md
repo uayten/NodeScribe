@@ -245,7 +245,20 @@ Version 0.4. UE 5.8.1, clean build with no warnings.
   subsystems, Create Widget with Expose on Spawn, async actions
   (`UBlueprintAsyncActionBase`), maps and sets, own and other-object variables,
   and the three buttons.
-- **Compiles but never ran:** Select, dispatcher Call/Bind/Unbind.
+- **Compiles but never ran:** Select, dispatcher Call.
+- **Dispatcher Bind/Unbind on another object** -- **fixed**, with a case each
+  in the suite. Found rewriting a BT task in IA_fight, both breaking the round
+  trip of the reader's own text:
+  - `Unbind OnAttackEnd (Target = $Enemy, ...)` with `$Enemy` a variable
+    (implicit Get, the way the reader writes it) died as "no node called
+    `Unbind OnAttackEnd`": the dispatcher's class was only looked up among
+    named lines. It now also comes from the variable's type
+    (`dispatcher_on_variable`).
+  - `Bind X (Event = $done)` before `done = event Done` -- the reader's order,
+    each chain under its event -- made `$done` a missing-variable Get and then
+    warned "defined again". The Custom Event pre-pass now registers the
+    event's name too, so a line above can bind it
+    (`event_bound_before_its_line`).
 - **Language:** English throughout -- interface, messages, code and format.
 
 ### The format is English-only

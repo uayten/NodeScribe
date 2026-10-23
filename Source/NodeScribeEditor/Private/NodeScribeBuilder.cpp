@@ -1636,6 +1636,21 @@ UClass* FNodeScribeBuildContext::FindTargetClassFromArgs(const FNodeScribeStatem
 		const FPinRef* Ref = NamedOutputs.Find(BaseName);
 		if (!Ref)
 		{
+			// `$Enemy` with no line behind it is an implicit Get of the
+			// Blueprint's variable (see ResolveBaseReference), which the reader
+			// writes that way. Its class comes from the property, since the Get
+			// does not exist yet.
+			if (BaseName == Arg.Value && IsBlueprintVariable(BaseName))
+			{
+				const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(
+					GetSelfClass()->FindPropertyByName(FName(*BaseName)));
+
+				if (ObjectProperty && ObjectProperty->PropertyClass)
+				{
+					return ObjectProperty->PropertyClass;
+				}
+			}
+
 			continue;
 		}
 
@@ -2210,8 +2225,15 @@ void FNodeScribeBuildContext::RegisterOutput(const FString& Name, UEdGraphNode* 
 		return;
 	}
 
-	if (NamedOutputs.Contains(Name))
+	if (const FPinRef* Existing = NamedOutputs.Find(Name))
 	{
+		// The pre-pass already registered this event's name, so lines above it
+		// could bind it. Meeting its own line is not a redefinition.
+		if (Existing->Resolve() == OutputPin)
+		{
+			return;
+		}
+
 		AddWarning(Line, FString::Printf(TEXT("`%s` was defined again; the last one wins."), *Name));
 	}
 
@@ -2540,6 +2562,17 @@ void FNodeScribeBuildContext::PreCreateCustomEvents(const TArray<FNodeScribeStat
 
 		PreCreatedEvents.Add(EventName, Node);
 		bCreatedAny = true;
+
+		// `Bind X (Event = $done)` may come before `done = event Done`: the
+		// reader writes each chain under its own event, in graph order. The
+		// name is known now, so it does not become a missing-variable Get.
+		if (!Statement.OutputName.IsEmpty())
+		{
+			if (UEdGraphPin* OutputPin = FindPrimaryOutput(Node))
+			{
+				NamedOutputs.Add(Statement.OutputName, FPinRef(OutputPin));
+			}
+		}
 	}
 
 	// One regeneration for all of them, instead of one per event.

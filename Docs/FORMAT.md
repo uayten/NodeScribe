@@ -226,6 +226,10 @@ Without `Target`, the dispatcher belongs to this Blueprint. With
 `Target = $obj`, it belongs to the object pointed at. For a dispatcher's
 **event**, see `event X of $Variable`.
 
+The event bound with `Event = $done` may be declared further down
+(`done = event Done`): a Custom Event's name is known before the first line
+runs.
+
 ## Select
 
 ```

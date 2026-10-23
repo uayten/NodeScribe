@@ -172,6 +172,36 @@ Switch Has Authority
 ''',
     },
     {
+        # `$Other` is an implicit Get of a variable, which is how the reader
+        # writes it. The dispatcher's class used to be looked up only among
+        # named lines, so this died as "no node called `Unbind OnDestroyed`".
+        'name': 'dispatcher_on_variable',
+        'text': '''
+variable Other : Actor
+
+event Test
+done = event Done
+Bind OnDestroyed (Target = $Other, Event = $done)
+Unbind OnDestroyed (Target = $Other, Event = $done)
+''',
+    },
+    {
+        # The reader writes each chain under its event, so the bound event can
+        # come after the line that binds it. The name used to become a
+        # missing-variable Get, and the event line then "defined it again".
+        'name': 'event_bound_before_its_line',
+        'text': '''
+variable Other : Actor
+
+event Test
+Bind OnDestroyed (Target = $Other, Event = $done)
+
+done = event Done
+Print String (In String = "destroyed")
+''',
+        'forbids_warning': ['does not exist', 'defined again'],
+    },
+    {
         'name': 'declared_hole',
         'text': '''
 event Test
@@ -245,8 +275,16 @@ def round_trip(case):
     if not graph_b:
         return False, ['could not prepare the second Blueprint: ' + error]
 
-    unreal.NodeScribeLibrary.write_graph(graph_b, t1)
+    written_b = unreal.NodeScribeLibrary.write_graph(graph_b, t1)
     t2 = unreal.NodeScribeLibrary.read_graph(graph_b)
+
+    # Checked on both writes: the second one pastes the reader's own order.
+    for forbidden in case.get('forbids_warning', []):
+        for label, output in (('first', written), ('second', written_b)):
+            if forbidden in output:
+                report.append('the %s write said %r, and should not:' % (label, forbidden))
+                report.extend('  ' + l for l in output.splitlines())
+                return False, report
 
     a, b = body(t1), body(t2)
     if a == b:
