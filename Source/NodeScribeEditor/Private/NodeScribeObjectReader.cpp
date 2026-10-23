@@ -13,6 +13,8 @@
 #include "Engine/Blueprint.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
+#include "Engine/Level.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "UObject/UnrealType.h"
 
@@ -541,9 +543,29 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 		Collect(Blueprint->FunctionGraphs);
 		Collect(Blueprint->MacroGraphs);
 
+		// An interface function with a return value is a graph of its own, but it
+		// lives in the interface's entry, not in `FunctionGraphs`. Leaving it out
+		// made a Blueprint that implements the interface read as one that does not:
+		// the function existed, `read_graph` opened it by name, and the list said
+		// nothing.
+		TArray<FString> InterfaceNames;
+		for (const FBPInterfaceDescription& Interface : Blueprint->ImplementedInterfaces)
+		{
+			if (const UClass* InterfaceClass = Interface.Interface.Get())
+			{
+				InterfaceNames.Add(CleanClassName(InterfaceClass));
+			}
+			Collect(Interface.Graphs);
+		}
+
 		if (GraphNames.Num() > 0)
 		{
 			Lines.Add(TEXT("# graphs: ") + FString::Join(GraphNames, TEXT(", ")));
+		}
+
+		if (InterfaceNames.Num() > 0)
+		{
+			Lines.Add(TEXT("# interfaces: ") + FString::Join(InterfaceNames, TEXT(", ")));
 		}
 	}
 
@@ -618,6 +640,39 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 			// pending item.
 			Stats.Unreadable.Remove(TEXT("Sample Data"));
 			Stats.Unreadable.Remove(TEXT("Blend Parameters"));
+		}
+	}
+
+	// The name in the Outliner is the label, not the object's name, and under
+	// World Partition the object's name is `BP_Enemy_C_UAID_<hex>_<number>`:
+	// nobody guesses it. Without this list, reading an actor placed in the level
+	// meant digging the name out of `__ExternalActors__` by hand. The filter
+	// matches the label or the class.
+	if (const UWorld* World = Cast<UWorld>(Target))
+	{
+		const ULevel* Level = World->PersistentLevel;
+		const TArray<TObjectPtr<AActor>> NoActors;
+		for (const AActor* Actor : Level ? Level->Actors : NoActors)
+		{
+			if (!Actor)
+			{
+				continue;
+			}
+
+			const FString Label = Actor->GetActorLabel();
+			const FString ActorClass = CleanClassName(Actor->GetClass());
+
+			++Stats.Considered;
+			if (bFiltering
+				&& !FNodeScribeCatalog::Normalize(Label).Contains(NormalizedFilter)
+				&& !FNodeScribeCatalog::Normalize(ActorClass).Contains(NormalizedFilter))
+			{
+				continue;
+			}
+
+			Lines.Add(FString::Printf(TEXT("# actor %s : %s = %s"),
+				*Label, *ActorClass, *Actor->GetPathName()));
+			++Shown;
 		}
 	}
 

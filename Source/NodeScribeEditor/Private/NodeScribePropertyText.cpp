@@ -5,6 +5,7 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
+#include "Engine/UserDefinedEnum.h"
 #include "Misc/StringOutputDevice.h"
 #include "UObject/EnumProperty.h"
 #include "UObject/TextProperty.h"
@@ -95,6 +96,16 @@ namespace
 		{
 			return false;
 		}
+		// An enum made in the editor names its entries `NewEnumerator0`,
+		// `NewEnumerator1`... and keeps what was typed only as the display name.
+		// The internal name said nothing: `Moviment Speed = NewEnumerator2` had
+		// to be looked up in the enum to find out it meant `Jogging`.
+		if (Enum->IsA<UUserDefinedEnum>())
+		{
+			OutText = Enum->GetDisplayNameTextByIndex(Index).ToString();
+			return !OutText.IsEmpty();
+		}
+
 		// GetNameStringByIndex drops the `EPlayerMappableKeySlot::` and leaves `First`.
 		OutText = Enum->GetNameStringByIndex(Index);
 		return !OutText.IsEmpty();
@@ -109,6 +120,20 @@ namespace
 			// ExportText produces -- so text coming from outside the plugin still
 			// goes in.
 			Value = Enum->GetValueByNameString(Enum->GenerateFullEnumName(*Text));
+		}
+		if (Value == INDEX_NONE && Enum->IsA<UUserDefinedEnum>())
+		{
+			// The mirror of the reading: an editor-made enum comes out by its
+			// display name, so it has to go back in by it. The editor refuses two
+			// entries with the same display name, so the match is unique.
+			for (int32 Index = 0; Index < Enum->NumEnums() - 1; ++Index)
+			{
+				if (Enum->GetDisplayNameTextByIndex(Index).ToString().Equals(Text, ESearchCase::IgnoreCase))
+				{
+					Value = Enum->GetValueByIndex(Index);
+					break;
+				}
+			}
 		}
 		if (Value == INDEX_NONE)
 		{

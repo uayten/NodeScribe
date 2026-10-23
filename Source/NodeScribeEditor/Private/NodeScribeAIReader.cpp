@@ -2,6 +2,7 @@
 
 #include "NodeScribePropertyText.h"
 
+#include "AIGraphNode.h"
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BehaviorTreeTypes.h"
 #include "BehaviorTree/BlackboardData.h"
@@ -12,6 +13,8 @@
 #include "BehaviorTree/BTTaskNode.h"
 #include "BehaviorTree/ValueOrBBKey.h"
 #include "DataProviders/AIDataProvider.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphPin.h"
 #include "UObject/UnrealType.h"
 
 namespace
@@ -314,6 +317,120 @@ namespace
 			EmitNode(OutLines, ChildNode, Level + 1, Seen);
 		}
 	}
+
+#if WITH_EDITORONLY_DATA
+	/**
+	 * A branch left in the editor graph without a link to the root, as comment
+	 * lines.
+	 *
+	 * The runtime tree is rebuilt from the graph keeping only what hangs from
+	 * the root, so this branch never runs -- and reading only `RootNode` made it
+	 * vanish without a word, which reads as "this tree has no patrol". It comes
+	 * out commented because it is not part of the tree; the order of the children
+	 * is the editor's, left to right.
+	 */
+	void EmitDetached(TArray<FString>& OutLines, const UAIGraphNode* GraphNode, int32 Level,
+		TSet<const UAIGraphNode*>& Visited)
+	{
+		if (!GraphNode || Visited.Contains(GraphNode))
+		{
+			return;
+		}
+		Visited.Add(GraphNode);
+
+		const UBTNode* Node = Cast<UBTNode>(GraphNode->NodeInstance);
+		if (!Node)
+		{
+			return;
+		}
+
+		const FString Comment = TEXT("# ");
+
+		for (const UAIGraphNode* SubNode : GraphNode->SubNodes)
+		{
+			if (const UBTDecorator* Decorator = SubNode ? Cast<UBTDecorator>(SubNode->NodeInstance) : nullptr)
+			{
+				OutLines.Add(Comment + NodeLine(Level, TEXT("decorator "), Decorator));
+			}
+		}
+
+		OutLines.Add(Comment + NodeLine(Level, TEXT(""), Node));
+
+		for (const UAIGraphNode* SubNode : GraphNode->SubNodes)
+		{
+			if (const UBTService* Service = SubNode ? Cast<UBTService>(SubNode->NodeInstance) : nullptr)
+			{
+				OutLines.Add(Comment + NodeLine(Level + 1, TEXT("service "), Service));
+			}
+		}
+
+		TArray<const UAIGraphNode*> Children;
+		if (const UEdGraphPin* Output = GraphNode->GetOutputPin())
+		{
+			for (const UEdGraphPin* Linked : Output->LinkedTo)
+			{
+				if (const UAIGraphNode* Child = Linked ? Cast<UAIGraphNode>(Linked->GetOwningNode()) : nullptr)
+				{
+					Children.Add(Child);
+				}
+			}
+		}
+		Children.Sort([](const UAIGraphNode& A, const UAIGraphNode& B)
+		{
+			return A.NodePosX < B.NodePosX;
+		});
+
+		for (const UAIGraphNode* Child : Children)
+		{
+			EmitDetached(OutLines, Child, Level + 1, Visited);
+		}
+	}
+
+	/** The graph's nodes that the runtime tree does not reach. */
+	void EmitDetachedBranches(TArray<FString>& OutLines, const UBehaviorTree* Tree,
+		const TSet<const UBTNode*>& Seen)
+	{
+		if (!Tree->BTGraph)
+		{
+			return;
+		}
+
+		TSet<const UAIGraphNode*> Visited;
+		for (const UEdGraphNode* EdNode : Tree->BTGraph->Nodes)
+		{
+			const UAIGraphNode* GraphNode = Cast<UAIGraphNode>(EdNode);
+			const UBTNode* Node = GraphNode ? Cast<UBTNode>(GraphNode->NodeInstance) : nullptr;
+			if (!Node || Seen.Contains(Node) || Visited.Contains(GraphNode))
+			{
+				continue;
+			}
+
+			// Only the head of each loose piece: its children come with it.
+			const UEdGraphPin* Input = GraphNode->GetInputPin();
+			if (Input && Input->LinkedTo.Num() > 0)
+			{
+				const UAIGraphNode* Parent = Cast<UAIGraphNode>(Input->LinkedTo[0]->GetOwningNode());
+				const UBTNode* ParentNode = Parent ? Cast<UBTNode>(Parent->NodeInstance) : nullptr;
+				if (!ParentNode || !Seen.Contains(ParentNode))
+				{
+					continue;
+				}
+
+				// The parent is in the tree and the child is not: the asset was
+				// not rebuilt since the link was made. It is not a loose branch,
+				// and saying it is would send someone to fix the wrong thing.
+				OutLines.Add(TEXT("# [warning]: `") + CleanNodeName(Node)
+					+ TEXT("` is linked in the editor but missing from the runtime tree -- ")
+					+ TEXT("the asset is out of date; saving it in the editor rebuilds it."));
+				Visited.Add(GraphNode);
+				continue;
+			}
+
+			OutLines.Add(TEXT("# [warning]: not connected to the root -- this branch never runs:"));
+			EmitDetached(OutLines, GraphNode, 0, Visited);
+		}
+	}
+#endif
 }
 
 bool FNodeScribeAIReader::Handles(const UObject* Object)
@@ -357,14 +474,21 @@ FString FNodeScribeAIReader::ReadBehaviorTree(UBehaviorTree* Tree)
 		}
 	}
 
-	if (!Tree->RootNode)
+	TSet<const UBTNode*> Seen;
+	if (Tree->RootNode)
+	{
+		EmitNode(Lines, Tree->RootNode, 0, Seen);
+	}
+	else
 	{
 		Lines.Add(TEXT("# empty tree"));
-		return FString::Join(Lines, TEXT("\n"));
 	}
 
-	TSet<const UBTNode*> Seen;
-	EmitNode(Lines, Tree->RootNode, 0, Seen);
+#if WITH_EDITORONLY_DATA
+	// An empty runtime tree can still have a whole graph that is not hooked to
+	// the root -- that is when the warning matters most.
+	EmitDetachedBranches(Lines, Tree, Seen);
+#endif
 
 	return FString::Join(Lines, TEXT("\n"));
 }

@@ -15,6 +15,9 @@ public class NodeScribeEditor : ModuleRules
 			// by include: they are read through reflection, so that a key type
 			// created by the project is read the same as the Engine's.
 			"AIModule",
+			// The Behavior Tree's editor graph: a branch not hooked to the root
+			// only exists there, never in the runtime tree.
+			"AIGraph",
 			"ApplicationCore",
 			"InputCore",
 			"Slate",
