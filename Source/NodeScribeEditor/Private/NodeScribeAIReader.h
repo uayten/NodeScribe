@@ -24,6 +24,15 @@ public:
 	/** The AI asset as text. Empty when it is not one of them. */
 	static FString ReadAsset(UObject* Object);
 
+	/**
+	 * One Behavior Tree node as its line, without indentation or keyword:
+	 * `CombatState = Selector`, `Wait (Wait Time = 10.00)`.
+	 *
+	 * Public because the writer compares lines: a node whose line already
+	 * matches the text is kept as it is, with whatever the text cannot say.
+	 */
+	static FString DescribeBTNode(const UBTNode* Node);
+
 private:
 	static FString ReadBlackboard(UBlackboardData* Blackboard);
 	static FString ReadBehaviorTree(UBehaviorTree* Tree);

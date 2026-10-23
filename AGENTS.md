@@ -60,8 +60,8 @@ by round trip, the four invariants that must not break, and what a proposal
 for a new tool needs to answer before becoming code.
 
 Current front: **reading an enemy's whole AI**. The sheet (`read_object` /
-`write_object`), the blackboard, the BT tree, `create_asset` and Gameplay Tags
-(`read_tags` / `write_tags`) are already up; **writing Behavior Trees** and
-**Gameplay Effect components** are missing. The roadmap with each stage's state
+`write_object`), the blackboard, the BT tree (read and write), `create_asset`
+and Gameplay Tags (`read_tags` / `write_tags`) are already up; **Gameplay
+Effect components** are missing. The roadmap with each stage's state
 is in *Where we are on that list*, in the README. An idea for a new tool that
 shows up along the way goes to *Possible future features*, not to the code.

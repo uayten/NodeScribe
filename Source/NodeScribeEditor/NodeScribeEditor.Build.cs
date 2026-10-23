@@ -18,6 +18,10 @@ public class NodeScribeEditor : ModuleRules
 			// The Behavior Tree's editor graph: a branch not hooked to the root
 			// only exists there, never in the runtime tree.
 			"AIGraph",
+			// Writing a Behavior Tree goes through its editor graph, never the
+			// runtime tree alone: the asset is rebuilt from the graph, and a
+			// tree written only on the runtime side shows up empty on screen.
+			"BehaviorTreeEditor",
 			"ApplicationCore",
 			"InputCore",
 			"Slate",

@@ -662,10 +662,51 @@ existed was not duplicated, `synced` came back through the reading,
 `Object (Pawn)` resolved the class by its short name, and a nonexistent type
 was refused listing the twelve that exist.
 
-**Writing a BT is still missing**, and it is the expensive one: the asset keeps
-the execution hierarchy *and* an editor graph (`UBehaviorTreeGraph`) that has
-to stay in sync. Writing only the runtime side gives an asset that runs and
-shows up empty on screen.
+#### Stage 5 -- Writing -- Behavior Tree **done**
+
+`write_object` on a Behavior Tree takes the same text the reading gives. The
+asset keeps the execution hierarchy *and* an editor graph
+(`UBehaviorTreeGraph`); writing only the runtime side gives an asset that runs
+and shows up empty on screen. So the writer edits the **graph** -- the same
+steps as the editor's "add node" -- and the runtime tree is rebuilt from it by
+`UpdateAsset`.
+
+**The text is the whole tree**, unlike the sheet and the blackboard: a shape
+only exists as a whole. A node the text does not mention leaves, and the
+return names it. A loose branch, which the reading shows commented, is hooked
+to the root by writing it uncommented in its place -- the case that motivated
+this stage.
+
+Decisions that are not obvious:
+
+- **All or nothing.** Every line is resolved on scratch instances before the
+  graph is touched. Half a tree runs, and it is the wrong tree.
+- **A node that already reads exactly as its line is kept**, instance and all,
+  with whatever the text cannot say. A parameter that does not parse back
+  (an object default the reader writes by short name) is forgiven only then.
+- **Same class with other parameters keeps the graph node and swaps the
+  instance.** With two of the same class, the one already under the same
+  parent wins -- taking the first in the graph reported the wrong one as
+  removed.
+- **The reading had to change first.** A node renamed in the editor came out
+  as its name only -- `CombatState` -- and a name does not say it is a
+  Selector. It now comes out `CombatState = Selector`, the shape that names a
+  state machine.
+- **Key checks.** A key selector or a `Key: Name` value naming a key the
+  blackboard lacks, or of a type the value cannot read, is refused. The first
+  version let `Wait Time = Key: AttackTarget` (an Object key) through; the
+  Engine dropped the key on the next load, silently.
+- **Layout.** When shape and order are unchanged the hand layout stays.
+  Otherwise the tree is laid out left to right in the text's order, which is
+  also the execution order. The editor's Auto Arrange is not used: it
+  measures node widgets, which only exist with the tree open on screen.
+- **Refused, not guessed:** Simple Parallel (the text cannot say which child is
+  the main task), composite decorators and decorators injected by a subtree.
+
+Exercised on a scratch tree: created from nothing (14 nodes), read back
+identical, written again with zero changes, reordered with a parameter
+changed and two nodes removed, and four kinds of error refused with nothing
+changed. Then on the real case: the enemy's patrol branch hooked to the root.
 
 ## Development
 
@@ -1198,14 +1239,13 @@ Without the listing, the only option was trying names until one worked.
 |---|---|---|
 | 1 -- Blueprint variables | **done** | -- |
 | 2 -- Creating assets | **done** | -- |
-| 3 -- Writing Behavior Trees | missing | every change to the tree |
+| 3 -- Writing Behavior Trees | **done** | -- |
 | 4 -- Gameplay Effect components | missing | every new cooldown |
 | 5 -- Creating Gameplay Tags | **done** | -- |
 | 6 -- Reading fixes | missing | `Default Starting Data` |
 
-With 1, 2 and 5 done, what is left for the Golem's AI to close without clicks
-is 3 and 4. 3 is the biggest and the only one where a mistake saves an asset
-that looks right and is empty -- that is why it goes last.
+With 1, 2, 3 and 5 done, what is left for the Golem's AI to close without
+clicks is 4.
 
 ### What is missing so clicks are not needed
 

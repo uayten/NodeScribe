@@ -29,6 +29,7 @@ execution links, implicit casts between types, internal function names.
 - [Other names the plugin knows](#other-names-the-plugin-knows)
 - [Holes: what the plugin does **not** decide for you](#holes-what-the-plugin-does-not-decide-for-you)
 - [AnimGraph](#animgraph)
+- [Behavior Tree](#behavior-tree)
 - [Comments](#comments)
 - [What the parser ignores by itself](#what-the-parser-ignores-by-itself)
 - [The way back](#the-way-back-1)
@@ -635,6 +636,48 @@ they already exist in the target graph, and the link into them is the plugin's.
 
 ---
 
+## Behavior Tree
+
+`read_object` on a Behavior Tree gives the tree, and `write_object` takes the
+same text back:
+
+```
+tree BT_Golem  (blackboard BB_Golem)
+Selector
+  CombatState = Selector
+    decorator Is Wielding Axe (Inverse Condition = true)
+    Sequence
+      Move To (Blackboard Key = Player)
+      Wait (Wait Time = 1.00)
+  decorator Has Patrol Route
+  Patrol = Sequence
+    service Update Target
+    BTT_MoveAlongPatrolRoute
+```
+
+Indentation is the hierarchy, and the order of the lines is the order the
+children run in. `decorator X` guards the node on the **next** line at the
+same indentation; `service X` belongs to the node **above** it, one level in.
+A node renamed in the editor is written `Name = Class`, because the name alone
+does not say what the node is.
+
+**Writing takes the whole tree, not a list of changes** -- unlike the sheet.
+A tree's shape only exists as a whole. A node the text does not mention leaves
+the graph, and the return names it (Ctrl+Z brings it back). A branch the
+reading shows commented, as not connected to the root, is hooked up by writing
+it uncommented where it belongs.
+
+It is all or nothing: a name that does not resolve, an ambiguous one, a key
+the blackboard lacks or a parameter that does not parse, and nothing changes.
+A node whose line already reads exactly the same is kept as it is, with
+whatever the text cannot say. When the shape and order do not change, the
+layout someone arranged by hand stays; otherwise the tree is laid out again,
+left to right in the text's order -- which is also what decides the execution
+order.
+
+Not written yet, and refused out loud: Simple Parallel, composite decorators
+and decorators injected by a subtree.
+
 ## Comments
 
 `#` or `//` up to the end of the line. To create a comment box in the graph:
@@ -817,6 +860,8 @@ The sheet (`read_object` / `write_object`) and the other tools add their own:
 | `delete variable Name` | write_object | removes a Blueprint variable |
 | `Name = default` | write_object | resets the property to its factory value |
 | `key Name : Type [(Detail)] [synced]` | blackboard sheet | a blackboard key |
-| `tree`, `decorator`, `service` | Behavior Tree reading | read only |
+| `tree Name (blackboard X)` | Behavior Tree header | ignored by write_object |
+| `decorator X`, `service X` | Behavior Tree | a decorator guards the node on the next line at its indentation; a service belongs to the node above it |
+| `Name = Class` | Behavior Tree | a node renamed in the editor: `CombatState = Selector` |
 | `axis X : Name = min .. max` | write_blendspace | a BlendSpace axis |
 | `tag Name` | read_tags / write_tags | a Gameplay Tag |

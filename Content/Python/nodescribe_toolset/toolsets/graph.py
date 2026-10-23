@@ -142,6 +142,13 @@ class NodeScribeTools(unreal.ToolsetDefinition):
         components. A line that does not resolve becomes a diagnostic with the
         similar names, and the others are applied.
 
+        **A Behavior Tree is the exception: the text is the whole tree**, in
+        the same shape read_object gives -- the way to hook a loose branch to
+        the root is to write it under the root. A node the text does not
+        mention leaves the graph, and the return names it. All or nothing: one
+        line that does not resolve and nothing changes. A node that already
+        reads exactly as its line is kept untouched.
+
         Args:
             target: The object to change. Blueprints and classes become their CDO.
             text: The lines in the sheet format.

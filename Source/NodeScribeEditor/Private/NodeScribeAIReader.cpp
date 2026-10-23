@@ -235,7 +235,7 @@ namespace
 	/** A node line, with the parameters that depart from the default. */
 	FString NodeLine(int32 Level, const TCHAR* Prefix, const UBTNode* Node)
 	{
-		return Indent(Level) + Prefix + CleanNodeName(Node) + DescribeNodeParams(Node);
+		return Indent(Level) + Prefix + FNodeScribeAIReader::DescribeBTNode(Node);
 	}
 
 	/**
@@ -431,6 +431,22 @@ namespace
 		}
 	}
 #endif
+}
+
+FString FNodeScribeAIReader::DescribeBTNode(const UBTNode* Node)
+{
+	const UBTNode* Defaults = Cast<UBTNode>(Node->GetClass()->GetDefaultObject());
+
+	// A node renamed in the editor shows only its new name, and the name alone
+	// does not say what it is: `CombatState` is a Selector, and the text could
+	// not be written back without knowing that. The class goes after the `=`,
+	// the same shape that names a state machine.
+	if (Defaults && !Node->NodeName.IsEmpty() && Node->NodeName != Defaults->NodeName)
+	{
+		return Node->NodeName + TEXT(" = ") + CleanNodeName(Defaults) + DescribeNodeParams(Node);
+	}
+
+	return CleanNodeName(Node) + DescribeNodeParams(Node);
 }
 
 bool FNodeScribeAIReader::Handles(const UObject* Object)
