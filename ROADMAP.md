@@ -6,12 +6,6 @@
 
 <!-- Passos de teste: um passo pode mandar pedir algo ao assistente; depois do pedido feito, ele é reescrito com o que o usuário confere. -->
 
-### R-008 [ajuste] FORMAT.md por tópico
-1. Na próxima conversa sobre grafo no BossRush, pedir um grafo num rascunho de `Testes/` e colar: o grafo entra e compila como antes da mudança.
-
-### R-012 [ajuste] Teto de tokens na suíte de testes
-1. Abrir o arquivo `tests.txt` em `BossRush/Saved/NodeScribe/`: a última linha diz `0 failure(s)`.
-
 ## Em andamento
 
 ## A fazer
