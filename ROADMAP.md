@@ -4,8 +4,6 @@
 
 ## Em teste
 
-<!-- Passos de teste: um passo pode mandar pedir algo ao assistente; depois do pedido feito, ele é reescrito com o que o usuário confere. -->
-
 ## Em andamento
 
 ## A fazer
