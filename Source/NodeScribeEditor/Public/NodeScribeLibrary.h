@@ -166,9 +166,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString WriteTags(const FString& Text, const FString& Source);
 
-	/** The format's specification, for whoever has never seen it. */
+	/**
+	 * The format's specification, for whoever has never seen it.
+	 *
+	 * @param Topic  empty gives the core (`Docs/FORMAT.md`), which every task
+	 *               needs; a name gives that topic (`Docs/format/<name>.md`),
+	 *               read only when the task touches it. An unknown name is
+	 *               answered with the list of topics.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
-	static FString GetFormatDocs();
+	static FString GetFormatDocs(const FString& Topic);
 
 	/**
 	 * Saves everything and closes the editor.

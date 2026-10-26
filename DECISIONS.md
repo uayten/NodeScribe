@@ -1,6 +1,6 @@
 # Decisions
 
-<!-- project-docs: only what holds now. Next ID: D-016 · Next fact: F-005 -->
+<!-- project-docs: only what holds now. Next ID: D-019 · Next fact: F-005 -->
 
 ## Decisions
 
@@ -82,6 +82,24 @@ Origin: user, AnimGraph round
 Decision: closing goes through `IMainFrameModule::RequestCloseEditor()`.
 Why: `QUIT_EDITOR` skips the Slate shutdown, leaves asset editors alive past the main window, and crashed in `AnimationBlueprintEditor`. The engine itself warns against it in `EditorServer.cpp`.
 Origin: user, AnimGraph round
+
+### D-016 A new kind of asset is a shape of read_object / write_object, not a tool
+Decision: Blackboard, Behavior Tree and Designer already ride on the sheet's two tools; the next kinds (Input Mapping Context, Gameplay Effect components) do the same. `write_blendspace` stays as it is. The suite's `token_budget` caps the number of tools.
+Why: every tool's description is read whenever the toolset is looked up, and similar doors make the assistant choose wrong (README, *What must not break*, 4).
+Origin: user asked for the plugin to stay token efficient as it grows; agent's proposal
+Affects: R-004, R-007, Tests/run_tests.py
+
+### D-017 The format is a core plus topics
+Decision: `Docs/FORMAT.md` holds the rules every graph uses and every keyword; AnimGraph, Behavior Tree, Designer and the details of a reading live in `Docs/format/<topic>.md`. `get_format_docs(topic)` returns one; empty returns the core, and an unknown name answers with the list.
+Why: the whole file was ~9k tokens for every task, and every new kind of asset made it longer for tasks that never touch it. The core is now ~4.7k.
+Origin: R-008
+Affects: Docs/FORMAT.md, Docs/format/, NodeScribeLibrary.cpp, graph.py
+
+### D-018 The README holds the current state; history and ideas go to Docs/
+Decision: what each version changed goes to `Docs/history.md`, proposals to `Docs/ideas.md`; the README's *Status* is the present only.
+Why: an agent reads *Status* and *Development* before touching the code. *Status* had grown to 27 KB of changelog, paid again in every development session.
+Origin: user asked for the plugin to stay token efficient as it grows; agent's proposal
+Affects: README.md, Docs/history.md, Docs/ideas.md
 
 ## Verified facts
 

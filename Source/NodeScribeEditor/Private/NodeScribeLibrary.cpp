@@ -17,6 +17,7 @@
 #include "Editor/EditorPerProjectUserSettings.h"
 #include "Engine/Blueprint.h"
 #include "FileHelpers.h"
+#include "HAL/FileManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Misc/FileHelper.h"
@@ -394,7 +395,7 @@ FString UNodeScribeLibrary::SaveAllAndQuit()
 		: TEXT("Nothing pending to save. Closing the editor.");
 }
 
-FString UNodeScribeLibrary::GetFormatDocs()
+FString UNodeScribeLibrary::GetFormatDocs(const FString& Topic)
 {
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("NodeScribe"));
 	if (!Plugin.IsValid())
@@ -402,15 +403,37 @@ FString UNodeScribeLibrary::GetFormatDocs()
 		return TEXT("[error]: could not find the NodeScribe plugin.");
 	}
 
-	const FString DocsPath = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Docs"), TEXT("FORMAT.md"));
+	const FString DocsDir = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Docs"));
+	const FString TopicsDir = FPaths::Combine(DocsDir, TEXT("format"));
+	const FString Wanted = Topic.TrimStartAndEnd().ToLower();
+
+	// A topic is a bare file name: anything else could walk out of the folder.
+	const bool bBareName = !Wanted.IsEmpty() && !Wanted.Contains(TEXT("/"))
+		&& !Wanted.Contains(TEXT("\\")) && !Wanted.Contains(TEXT(".."));
+	const FString DocsPath = Wanted.IsEmpty()
+		? FPaths::Combine(DocsDir, TEXT("FORMAT.md"))
+		: FPaths::Combine(TopicsDir, Wanted + TEXT(".md"));
 
 	FString Contents;
-	if (!FFileHelper::LoadFileToString(Contents, *DocsPath))
+	if ((Wanted.IsEmpty() || bBareName) && FFileHelper::LoadFileToString(Contents, *DocsPath))
+	{
+		return Contents;
+	}
+	if (Wanted.IsEmpty())
 	{
 		return FString::Printf(TEXT("[error]: could not read %s"), *DocsPath);
 	}
 
-	return Contents;
+	TArray<FString> Files;
+	IFileManager::Get().FindFiles(Files, *FPaths::Combine(TopicsDir, TEXT("*.md")), /*Files*/ true, /*Directories*/ false);
+	TArray<FString> Topics;
+	for (const FString& File : Files)
+	{
+		Topics.Add(FPaths::GetBaseFilename(File));
+	}
+	Topics.Sort();
+	return FString::Printf(TEXT("[error]: no topic `%s`. Topics: %s. An empty topic gives the core."),
+		*Topic, *FString::Join(Topics, TEXT(", ")));
 }
 
 #undef LOCTEXT_NAMESPACE

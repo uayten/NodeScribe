@@ -43,6 +43,28 @@ import unreal
 # saving. Running with the editor open, do not save afterwards -- it is scratch.
 DESTINATION = '/Game/NodeScribeTests'
 
+# What an assistant pays to use the plugin, in characters (~4 per token).
+# These are ceilings, not targets: every run prints the real numbers. Raising
+# one is a decision -- say why in the commit -- because nothing else notices the
+# spec, a tool's description or a reading growing until every session pays.
+BUDGET = {
+    # get_format_docs(): read by every task that writes or reads text.
+    'core': 20000,
+    # Each topic, read only when a task touches it.
+    'topic': 10000,
+    # Every tool's description, read whole when the assistant looks the
+    # toolset up -- once in every session that uses the plugin.
+    'descriptions': 11500,
+    # A new tool costs a choice (README, *What must not break*); a new kind of
+    # asset goes into read_object / write_object instead (DECISIONS, D-016).
+    'tools': 11,
+    # A reading's graph lines against the ones that made it, worst case.
+    'reading_ratio': 2.5,
+}
+
+# Filled by round_trip: case name -> (graph characters written, read back).
+READING_SIZES = {}
+
 
 CASES = [
     {
@@ -294,6 +316,9 @@ def round_trip(case):
 
     written = unreal.NodeScribeLibrary.write_graph(graph_a, case['text'])
     t1 = unreal.NodeScribeLibrary.read_graph(graph_a)
+    # Graph lines only: the header and the warnings are a fixed cost, and on a
+    # three-line case they would be the whole ratio.
+    READING_SIZES[name] = (len('\n'.join(body(case['text']))), len('\n'.join(body(t1))))
 
     if '[error]' in written:
         report.append('the write complained:')
@@ -805,6 +830,63 @@ Root : VerticalBox
     return True, []
 
 
+def token_budget():
+    """What every session pays stays under the ceilings in BUDGET."""
+    import ast
+
+    problems, numbers = [], []
+
+    def check(label, value, ceiling):
+        numbers.append('%s: %s (ceiling %s)' % (label, value, ceiling))
+        if value > ceiling:
+            problems.append('%s is over its ceiling: %s > %s' % (label, value, ceiling))
+
+    core = unreal.NodeScribeLibrary.get_format_docs('')
+    if core.startswith('[error]'):
+        return False, [core]
+    check('core', len(core), BUDGET['core'])
+
+    unknown = unreal.NodeScribeLibrary.get_format_docs('no-such-topic')
+    if not unknown.startswith('[error]'):
+        return False, ['an unknown topic did not answer with an error']
+    topics = unknown.split('Topics: ', 1)[-1].split('.', 1)[0].split(', ')
+    if len(topics) < 4:
+        problems.append('the error lists too few topics: %r' % unknown)
+    for topic in topics:
+        text = unreal.NodeScribeLibrary.get_format_docs(topic)
+        if text.startswith('[error]'):
+            problems.append('topic %s: %s' % (topic, text))
+            continue
+        check('topic ' + topic, len(text), BUDGET['topic'])
+        # The core names every topic, or an assistant never learns it exists.
+        if '`%s`' % topic not in core:
+            problems.append('the core does not name the topic `%s`' % topic)
+
+    if not unreal.NodeScribeLibrary.get_format_docs('../FORMAT').startswith('[error]'):
+        problems.append('a topic with a path walked out of Docs/format')
+
+    source = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          'Content', 'Python', 'nodescribe_toolset', 'toolsets', 'graph.py')
+    with open(source, encoding='utf-8') as f:
+        tree = ast.parse(f.read())
+    tools = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
+    described = sum(len(ast.get_docstring(n) or '') for n in ast.walk(tree)
+                    if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef)))
+    check('descriptions', described, BUDGET['descriptions'])
+    check('tools', len(tools), BUDGET['tools'])
+
+    if READING_SIZES:
+        def ratio(name):
+            given, read = READING_SIZES[name]
+            return read / max(given, 1)
+        worst = max(READING_SIZES, key=ratio)
+        check('reading_ratio (%s, %d -> %d chars)' % ((worst,) + READING_SIZES[worst]),
+              round(ratio(worst), 2), BUDGET['reading_ratio'])
+
+    # Passing, it still prints the numbers: growth shows before it fails.
+    return not problems, problems + numbers
+
+
 OTHERS = [
     ('designer_writes_rows', designer_writes_rows),
     ('chain_reaches_function_entry', chain_reaches_function_entry),
@@ -814,6 +896,8 @@ OTHERS = [
     ('sheet_round_trip_changes_nothing', sheet_round_trip_changes_nothing),
     ('state_machine_round_trip', state_machine_round_trip),
     ('blendspace_gets_grid', blendspace_gets_grid),
+    # Last: it reads the sizes the round trips above recorded.
+    ('token_budget', token_budget),
 ]
 
 

@@ -6,10 +6,13 @@ real nodes in a Blueprint graph, and does the way back.
 This project follows the project-docs convention (ROADMAP.md, DECISIONS.md, HANDOFF.md).
 When the user asks to resume ("retoma", "vamos continuar o projeto", "vamos continuar o desenvolvimento do roadmap"), before acting: read HANDOFF.md; from ROADMAP.md, only the titles (`grep "^### R-" ROADMAP.md`) and the item for the next step or the request. Confirm the state and the next step in 3 lines and wait for the go-ahead.
 
-**The format's specification is [`Docs/FORMAT.md`](Docs/FORMAT.md). Read that
-file before writing or interpreting NodeScribe text** -- the parts that cannot
-be guessed (`$name.Pin`, `Class.Function`, `event X of Y`, indented labels,
-`?` as a declared hole) are there. Its last section lists every keyword.
+**The format's specification is [`Docs/FORMAT.md`](Docs/FORMAT.md), the core.
+Read that file before writing or interpreting NodeScribe text** -- the parts
+that cannot be guessed (`$name.Pin`, `Class.Function`, `event X of Y`, indented
+labels, `?` as a declared hole) are there. Its last section lists every
+keyword. A topic in `Docs/format/` (AnimGraph, Behavior Tree, Designer, the
+details of a reading) only when the task touches it; the core's *Topics* table
+says when.
 
 When someone pastes text in that format asking for help with a graph, it is
 the output of the **Copy Whole Graph** button. The answer should come back in
@@ -50,18 +53,22 @@ accents for them.
 | `NodeScribeReader` | the way back: nodes → text. |
 | `NodeScribeGraphActions` | the three buttons on the editor toolbar. |
 | `NodeScribeWidgetTree` | a Widget Blueprint's Designer as text, both ways: the `designer` section of `read_object` / `write_object`. |
-| `Tests/run_tests.py` | automated round trip, without an interface. Run it before and after touching the reader or the builder; the command is in *Testing*, in the README. |
+| `Tests/run_tests.py` | automated round trip, without an interface, plus `token_budget`: ceilings on what the docs, the tools and a reading cost. Run it before and after touching the reader, the builder or the docs; the command is in *Testing*, in the README. |
 | `Saved/NodeScribe/vocabulary.txt` | the names nobody managed to resolve, one per line. `sort \| uniq -c \| sort -rn` gives the list of aliases missing from the catalog, by frequency. It is not an error log -- see *The missing vocabulary*, in the README. |
 
 Reader and builder are mirrors: when teaching a new kind of node, both change.
+A new family of nodes gets its own pair of files, as `NodeScribeAnimGraph`
+did; a new kind of asset gets a shape of `read_object` / `write_object` and a
+topic in `Docs/format/`, not a new tool (D-016).
 
 ## Before touching the code
 
-Read **Development** and **Status** in the [`README.md`](README.md). They hold:
-where the plugin is and what the current front is, the cycle of closing the
-editor → compiling → reopening → testing (with the commands ready), how to test
-by round trip, the four invariants that must not break, and what a proposal
-for a new tool needs to answer before becoming code.
+Read **Status** and **Development** in the [`README.md`](README.md). They hold:
+where the plugin is, the cycle of closing the editor → compiling → reopening →
+testing (with the commands ready), how to test by round trip, the invariants
+that must not break, how to grow without getting heavier, and what a proposal
+for a new tool needs to answer before becoming code. `Docs/history.md` and
+`Docs/ideas.md` are not read by default.
 
 Current front: the next step in HANDOFF.md, and the pending work in order in
 ROADMAP.md (its items are in Portuguese, D-009). An idea for a new tool goes to

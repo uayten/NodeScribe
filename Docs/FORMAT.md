@@ -28,16 +28,26 @@ execution links, implicit casts between types, internal function names.
 - [Standard macros](#standard-macros)
 - [Other names the plugin knows](#other-names-the-plugin-knows)
 - [Holes: what the plugin does **not** decide for you](#holes-what-the-plugin-does-not-decide-for-you)
-- [AnimGraph](#animgraph)
-- [Behavior Tree](#behavior-tree)
-- [Widget Designer](#widget-designer)
 - [Comments](#comments)
 - [What the parser ignores by itself](#what-the-parser-ignores-by-itself)
-- [The way back](#the-way-back-1)
+- [The way back](#the-way-back)
 - [When it cannot be done](#when-it-cannot-be-done)
 - [Keyword reference](#keyword-reference)
 
----
+Topics, in files of their own: see [Topics](#topics).
+
+## Topics
+
+This file is the core: read it whole before writing or interpreting any
+text. A topic is a file of its own, read only when the task touches it --
+`get_format_docs(topic)` returns one, `get_format_docs()` returns this core.
+
+| topic | file | read it when |
+|---|---|---|
+| `animgraph` | [format/animgraph.md](format/animgraph.md) | the graph is an Animation Blueprint's AnimGraph, a state machine or a transition rule |
+| `behavior-tree` | [format/behavior-tree.md](format/behavior-tree.md) | reading or writing a Behavior Tree with `read_object` / `write_object` |
+| `designer` | [format/designer.md](format/designer.md) | the `designer` section of a Widget Blueprint |
+| `reading` | [format/reading.md](format/reading.md) | a reading has `# anchor`, `(A -> B)` conversions or warnings, or before `replace` |
 
 ## The basics
 
@@ -109,7 +119,7 @@ becoming something else.
 variable when it is placed in the Designer with *Is Variable* ticked --
 declaring one with the same name would give a variable that compiles and never
 points at the widget. The plugin refuses and says so. The widget itself is
-created through `write_object`, in its [Designer section](#widget-designer).
+created through `write_object`, in its [Designer section](format/designer.md).
 
 ## Arguments
 
@@ -387,386 +397,6 @@ Spawn Sound 2D (Sound = /Game/MyGame/Audio/SFX_Hit.SFX_Hit)
 A bare name that is not a path is **not** accepted -- the plugin warns and
 leaves the pin empty instead of guessing which asset it was.
 
-## AnimGraph
-
-In an animation graph the same rules apply, with one difference: the flow is
-not execution, it is **pose** -- and it does not continue, it *feeds*. The
-chain ends at the **Output Pose**, which already exists in the graph and is
-never created.
-
-```
-Idle_Standing
-```
-
-A single line. `Idle_Standing` is the name of an AnimSequence in the project,
-and it becomes the Sequence Player with the asset already filled in. The link
-into the Output Pose is the plugin's -- like every link the format does not
-write.
-
-**A bare asset name is accepted here, and only here.** Outside the AnimGraph
-the plugin refuses it, because there is no obvious node to wrap the asset. Here
-there is exactly one, and it is the same one dragging the asset into the graph
-produces: AnimSequence becomes Sequence Player, BlendSpace becomes BlendSpace
-Player, and so on. Two assets with the same short name do not become a choice
--- the list of paths comes out.
-
-An anim node goes in by the name shown in the graph's menu:
-
-```
-BS_Locomotion (Speed = $Speed)
-Apply Additive
-```
-
-Two lines, two poses: the BlendSpace feeds the Apply Additive, which feeds the
-Output Pose. Consecutive, they link in the order they appear, same as the
-EventGraph.
-
-### What is not a pin
-
-Not everything that changes what an anim node does is a pin. An asset player's
-`Loop Animation` and `Play Rate` live in the details panel, and go in as
-arguments all the same:
-
-```
-MM_Jump (Loop Animation = false, Play Rate = 1.5)
-```
-
-It is worth writing `Loop Animation` whenever the animation is not a loop: it
-**is born on**, so an `MM_Jump` that should play once keeps repeating with
-nothing in the text saying so. The reading writes back every option that
-differs from a freshly created node.
-
-An option does not accept a `$reference`: it is a fixed value, because there is
-no wire to link.
-
-### Indentation, here, opens an input
-
-It is the reverse of the EventGraph. There the indented label opens an
-**output** -- what happens next. Here it opens a pose **input** -- what feeds
-the node:
-
-```
-Blend Poses by bool (Active Value = $bStanding)
-  True Pose:
-    Idle_Standing
-  False Pose:
-    BS_Locomotion (Speed = $Speed)
-```
-
-The label is the pin's name. A block may have several lines: they chain among
-themselves, and the block's result -- the last line -- is what goes into the pin.
-
-```
-  False Pose:
-    BS_Locomotion (Speed = $Speed)
-    Apply Additive
-```
-
-Here `Apply Additive` is what feeds `False Pose`.
-
-### Output Pose
-
-No need to write it: the end of the chain links into it by itself. Writing it
-works and is useful when you want to make explicit where the chain ends:
-
-```
-Idle_Standing
-Output Pose
-```
-
-If the graph has no Output Pose, the plugin warns and **does not create
-another** -- it is born with the AnimGraph, and if it is gone the graph itself
-is wrong.
-
-An empty pose input comes out as a warning. It breaks nothing: it compiles,
-runs, and the character stays in the reference pose, arms spread. It is the
-silent hole of this kind of graph.
-
-### State machine
-
-```
-Locomotion = State Machine
-  state Idle:
-    Idle_Standing
-  state Running:
-    BS_Locomotion (Speed = $Speed)
-  Idle -> Running:
-    KismetMathLibrary.Greater_DoubleDouble (A = $Speed, B = 10.0)
-  Running -> Idle:
-    KismetMathLibrary.LessEqual_DoubleDouble (A = $Speed, B = 10.0)
-```
-
-The comparisons are written qualified on purpose. `Greater` exists for every
-numeric type (`Greater_DoubleDouble`, `Greater_IntInt`, `Greater_ByteByte`...),
-so the bare name is ambiguous and the plugin refuses it with the list of
-candidates; `Class.Function` picks one. It is also what the reading writes.
-
-The `name =` names the machine -- a state machine's name is its sub-graph's,
-and without it every machine would be born "New State Machine".
-
-`state Name:` opens a state, and the block is the AnimGraph inside it, with the
-same rules as everything above. The `state` prefix is mandatory: without it,
-the label would be indistinguishable from a pose input.
-
-`From -> To:` opens a transition, and the block is its rule -- a data graph
-that ends in a bool. The block's last line is what goes into
-`Can Enter Transition`; linking that is the plugin's job. A `transition` prefix
-in front (`transition From -> To:`) is accepted and changes nothing.
-
-**The first state declared is where the machine starts.** It is the only
-possible reading without inventing syntax: in the graph the Entry points at a
-single state.
-
-States are created **before** any transition, so the order in the text does not
-matter -- the transitions can be written first. In exchange, a transition that
-mentions a state that does not exist is an error, with the list of the ones
-that do, instead of an empty state created by mistake.
-
-In a rule, a variable alone is enough. The three forms below give the same node:
-
-```
-    $Is In Air
-    Get Is In Air
-    Is In Air
-```
-
-### State and transition options
-
-What lives in the details panel goes between parentheses, **before** the colon
--- the same syntax as `MM_Jump (Loop Animation = false)`:
-
-```
-  Landing -> Ground (Automatic Rule Based on Sequence Player in State = true):
-```
-
-That is the one that matters most. With it on, the transition fires by itself
-when the source state's animation is ending -- and that is why it **is born
-with no rule at all**. It is how Epic writes `ABP_Unarmed`'s
-`Land -> Locomotion`.
-
-Without it, a transition with an empty block is a transition that compiles and
-never fires, and a warning says so. The two look identical on screen; the
-difference lives in the option, and that is why it needs to fit in the text.
-
-All the panel's options go in here: `Duration` (the blend time),
-`Priority Order`, `Blend Mode`, `Min Time Before Re-entry`. The reading writes
-what differs from a freshly created transition. A state takes its own the same
-way, and so does a conduit.
-
-An option does not accept a `$reference`: it is a fixed value, because there is
-no wire to link.
-
-### Conduit
-
-A conduit is a crossing: **a single rule**, which several transitions go
-through, instead of each repeating the same condition.
-
-```
-  conduit To Air:
-    Get Is In Air
-  Ground -> To Air:
-  To Air -> Jump:
-    KismetMathLibrary.Greater_DoubleDouble (A = $Velocity Z, B = 100.0)
-  To Air -> Fall:
-    KismetMathLibrary.LessEqual_DoubleDouble (A = $Velocity Z, B = 100.0)
-```
-
-A conduit's block is a **rule**, not a pose. That is the difference that calls
-for a word of its own: `conduit X:` and `state X:` would be indistinguishable in
-the text, and the plugin would create the wrong node -- a state without a pose,
-which is the reference pose.
-
-In transitions it is an end like any other.
-
-### Alias
-
-An alias is a nickname for several states at once: a transition leaving it
-leaves all of them, without repeating the rule on each one. The block is the
-list of states, one per line.
-
-```
-  alias In The Air:
-    Jump
-    Fall
-  In The Air -> Landing:
-    NOT Boolean (A = $Is In Air)
-```
-
-It is what Epic uses in `ABP_Unarmed`: `To Falling` and `To Land` are aliases,
-not states.
-
-An alias only points at a `state`. A conduit or another alias in the list is
-refused -- the Engine sweeps the graph for states when rebuilding the
-references, and whatever is not a state **vanishes on the next save**, with no
-error and no warning, taking along the transition that left from there.
-
-`alias Name (Global Alias = true):` covers every state of the machine, and then
-the block stays empty.
-
-### The state machine getters
-
-Inside a transition rule there is a vocabulary that only exists there:
-
-```
-  Jump -> Fall:
-    t = Get Relevant Anim Time Remaining
-    KismetMathLibrary.Less_DoubleDouble (A = $t, B = 0.1)
-```
-
-`Get Relevant Anim Time Remaining`, `Get Relevant Anim Time Remaining Fraction`,
-`Get Transition Time Elapsed` and the other getters are not function calls,
-even though they show up as one in the editor's menu. What makes them work is
-not on any pin: it is the **transition's source state**, which the plugin fills
-in by itself, because the transition knows where it leaves from and the text
-would have no way to say it.
-
-That is why they only exist inside a rule. Outside it the name falls into the
-function catalog and finds the function of the same name in
-`UAnimationStateMachineLibrary` -- which exists, is public, goes into the graph,
-and asks for two pins a transition rule has nothing to feed from. It was a
-plausible node that does not compile, which is exactly what the plugin promises
-not to do.
-
-### The way back
-
-**Copy Whole Graph** on an AnimGraph writes in this same format. Two things do
-not come back the same, and both come out with a warning:
-
-| Situation | What happens |
-|---|---|
-| The same pose feeding two places | anchor on both ends: the format is a tree, and the second link is lost on pasting |
-| An anim node that has an asset but does not come back through it (a Sequence *Evaluator*) | the node's title comes out + a warning: the asset is not in the text |
-
-The Output Pose and a transition's result do not become lines in the reading --
-they already exist in the target graph, and the link into them is the plugin's.
-
----
-
-## Behavior Tree
-
-`read_object` on a Behavior Tree gives the tree, and `write_object` takes the
-same text back:
-
-```
-tree BT_Golem  (blackboard BB_Golem)
-Selector
-  CombatState = Selector
-    decorator Is Wielding Axe (Inverse Condition = true)
-    Sequence
-      Move To (Blackboard Key = Player)
-      Wait (Wait Time = 1.00)
-  decorator Has Patrol Route
-  Patrol = Sequence
-    service Update Target
-    BTT_MoveAlongPatrolRoute
-```
-
-Indentation is the hierarchy, and the order of the lines is the order the
-children run in. `decorator X` guards the node on the **next** line at the
-same indentation; `service X` belongs to the node **above** it, one level in.
-A node renamed in the editor is written `Name = Class`, because the name alone
-does not say what the node is.
-
-**Writing takes the whole tree, not a list of changes** -- unlike the sheet.
-A tree's shape only exists as a whole. A node the text does not mention leaves
-the graph, and the return names it (Ctrl+Z brings it back). A branch the
-reading shows commented, as not connected to the root, is hooked up by writing
-it uncommented where it belongs.
-
-It is all or nothing: a name that does not resolve, an ambiguous one, a key
-the blackboard lacks or a parameter that does not parse, and nothing changes.
-A node whose line already reads exactly the same is kept as it is, with
-whatever the text cannot say. When the shape and order do not change, the
-layout someone arranged by hand stays; otherwise the tree is laid out again,
-left to right in the text's order -- which is also what decides the execution
-order.
-
-Not written yet, and refused out loud: Simple Parallel, composite decorators
-and decorators injected by a subtree.
-
-## Widget Designer
-
-`read_object` on a Widget Blueprint gives its sheet and then, after a
-`designer` line, the Designer's hierarchy. `write_object` takes the same text
-back:
-
-```
-designer
-Root : VerticalBox
-  IsStillRow : HorizontalBox
-    IsStillLabel : TextBlock
-      Text = "Is still?"
-      Font:
-        Size = 18
-    IsStillAnswer : TextBlock variable
-      Text = "-"
-      slot Padding = (Left=8.0,Top=0.0,Right=0.0,Bottom=0.0)
-      # Text is bound to `GetIsStillText`
-  GravityVector : WBP_VectorInspector variable
-```
-
-A widget is written like a component in the sheet, `Name : Class`, and
-`variable` at the end means *Is Variable* is ticked. Under it, one level in,
-come its properties -- only the ones that differ from the class's factory
-value, as in the sheet -- and its children. `slot X = ...` is a property of the
-slot the parent panel gives it (padding, alignment, size); `slot Padding:`
-opens a struct block the same way `Font:` does. A text bound to a function
-comes out as a comment, since the property itself only holds the Designer's
-placeholder.
-
-The class is the name the Palette shows: `TextBlock`, `HorizontalBox`, or a
-Widget Blueprint's name, found even if nobody opened it this session. Two
-Widget Blueprints with the same name are refused, listing both paths; write
-the path instead (`/Game/UI/WBP_Row.WBP_Row`).
-
-**Writing is a list of changes, like the sheet.** A widget the text does not
-mention stays as it is, and pasting a whole reading back changes nothing. A
-name that does not exist yet creates a widget:
-
-```
-designer
-Root : VerticalBox
-  IsStillRow : HorizontalBox
-  BatteryRow : HorizontalBox like IsStillRow
-    BatteryLabel : TextBlock like IsStillLabel
-      Text = "Battery"
-    BatteryAnswer : TextBlock variable like IsStillAnswer
-```
-
-- **Where it goes is where it is written.** A new widget goes right after the
-  sibling written above it, or right before the existing sibling written below
-  it; with neither, at the end of its parent. `Root` and `IsStillRow` above are
-  anchors -- existing widgets with nothing under them -- and say only where.
-- **`like Other`** copies another widget's look onto this one: every property
-  that the Details panel edits, and the slot's settings when both sit in the
-  same kind of panel. Both must be of the same class. Lines under the widget
-  are applied afterwards, so `Text = "Battery"` wins over the copied text. It
-  works on an existing widget too, to copy a style onto it.
-- **Is Variable.** On a new widget, the word `variable` is the whole answer:
-  without it, the widget is not a variable. On an existing one the missing word
-  changes nothing -- an anchor must not untick it and break the graph's
-  references --, so unticking is said out loud: `Is Variable = false`.
-- **`rename Old -> New`** renames, and the graph's references follow, as on
-  screen. **`delete widget Name`** removes a widget and everything under it.
-  They are the only ways to do either: a name written differently is a new
-  widget, never a rename.
-
-A widget line at the top of the text is an anchor and may name any widget,
-however deep it really is. Indented, it states its parent, and a different
-parent is a move -- refused, since moving is not written yet. So are
-reordering existing siblings and changing a widget's class.
-
-The structure is all or nothing: a class that does not resolve, a name already
-taken, a second root, a panel that holds a single child given two, and nothing
-in the Designer changes. Property lines then go through the sheet's writer one
-by one, as on any object: a property that does not exist becomes an error with
-the similar names, and the other lines are applied.
-
-Filtering `read_object` by a word gives the widgets whose name or class
-contains it, with their properties whole, under their ancestors written bare --
-which still pastes back as anchors. Not read yet, and named in a warning:
-content placed in a child Widget Blueprint's named slot.
-
 ## Comments
 
 `#` or `//` up to the end of the line. To create a comment box in the graph:
@@ -806,7 +436,7 @@ asset lives in `/PluginName/`, not in `/Game/`.
 
 Pasting into an empty Blueprint recreates the variables together with the
 nodes. The Designer widgets come out as comments, because it is not the graph
-text that creates them -- `write_object`'s [Designer section](#widget-designer)
+text that creates them -- `write_object`'s [Designer section](format/designer.md)
 does -- and so do the components added in the Components panel,
 under `# components (add them in the Components panel):`. A `variable` line for
 either would create a plain variable of that type, which compiles and never
@@ -815,63 +445,6 @@ points at the widget or the component.
 Only what the Blueprint itself declares -- the inherited ones would be hundreds
 of Engine lines.
 
-### Four things the reading writes and the parser discards
-
-**Reconvergence anchor.** Two chains landing on the same node do not fit in a
-tree. Instead of the second branch coming out empty -- just like a branch
-nobody linked --, the target node gets a `# anchor N` at the end of its line,
-and the point of return says where it goes:
-
-```
-Branch (Condition = $bOn)
-  true:
-    Print String (In String = "turned on")
-    Refresh Screen  # anchor 1
-  false:
-    # -> back to anchor 1 (`Refresh Screen`)
-```
-
-The way back is still lost on pasting -- what changed is that you can see it
-exists, and where.
-
-**Side input.** An execution wire does not always land on the main input of
-the node on the other side. The `Reset` of a Do Once, the `Stop` of a Timeline,
-the `Close` of a Gate: those do not continue the chain, they send a command to
-a node that lives elsewhere in the graph. It comes out with the same anchor,
-saying through which pin it enters:
-
-```
-Branch (Condition = $Rotation Mode?)
-  true:
-    Do Once  # anchor 2
-      completed:
-        Set Actor Location (New Location = $Home Location)
-        # -> enters `Do Once` through pin `Reset` (anchor 3)
-  false:
-    Do Once  # anchor 3
-```
-
-Before, this was followed as if it were a continuation, and the reading wrote a
-chain that does not exist -- two Do Onces that reset each other came out
-stacked, one under the other, as if one called the other. The link itself is
-still lost on pasting; what changed is that it shows up, and on the right pin.
-
-**Type conversion.** Linking an `Integer` into a `String` pin makes Unreal
-insert a conversion node. It does not become a line (the plugin recreates it by
-itself when redoing the link), but it is marked:
-
-```
-Append (A = "n = ", B = $Counter (Integer -> String))
-```
-
-Without this, a `Device Id` promoted to `int64` and a `Connection Id` that
-already was `int64` write exactly the same line -- and one of the two makes
-every controller collide on the same map key.
-
-**Unnamed pin.** When the plugin cannot name the output a value comes from, it
-writes `$x.<unknown pin>` instead of `$x`, which would look like the main
-output and link to another pin on the way back.
-
 ### A pin that does not appear on the line
 
 An omitted pin is at its **factory value** -- it never means "nothing linked".
@@ -879,22 +452,9 @@ An omitted pin is at its **factory value** -- it never means "nothing linked".
 `false`. A value erased on purpose, which differs from the default, comes out
 explicitly: `""`.
 
-### The rest of what is not perfect
-
-| Situation | What happens |
-|---|---|
-| Execution chain that reconverges | anchor on both ends + warning: the way back is lost on pasting |
-| Wire entering through a side pin (`Reset`, `Stop`, `Close`) | anchor + the pin's name, and a warning: the link is lost on pasting |
-| Pin fed by a node outside the selection | warning: the pin comes out without a value |
-| Node the plugin cannot name back | the node's title comes out + a warning that it may not come back the same |
-| Value with both kinds of quotes | warning: there is no escape, copy it by hand |
-| Data node that feeds nobody | note, with each one's name |
-| Event bound to a dispatcher/delegate | warning on reading; red comment on pasting |
-| Function entry (`Function Entry`) | warning with the signature: create the function and paste inside it |
-
-Reroutes (the little dots for arranging wires) vanish on the way back -- they
-are layout, not logic. A Get of the Blueprint's own variable becomes `$Name`
-directly, without a line of its own.
+What else the reading marks (reconvergence anchors, side inputs, type
+conversions, unnamed pins) and the table of what does not come back the same
+are in the [reading](format/reading.md) topic.
 
 ---
 

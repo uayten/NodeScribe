@@ -1,15 +1,22 @@
 # Roadmap
 
-<!-- project-docs: só pendências; aprovado é apagado. Ordem = prioridade. Próximo ID: R-012 -->
+<!-- project-docs: só pendências; aprovado é apagado. Ordem = prioridade. Próximo ID: R-014 -->
 
 ## Em teste
 
-### R-001 Designer de Widget Blueprint como texto
-1. Pedir ao assistente para ler o Designer do WBP_ConnectedJoyShockInfo e abrir esse widget no editor: a resposta lista os widgets na mesma ordem e hierarquia do painel Hierarchy, com os mesmos textos da tela.
-2. Pedir ao assistente uma linha "Temperature" igual à do Is Still no WBP_TesteDesigner e abrir o widget no Designer: a linha nova aparece logo abaixo da do Is Still, com a mesma fonte, alinhamento e largura.
-3. Pedir ao assistente um widget com o nome da classe escrito errado (por exemplo "TextBlok"): ele responde com o erro e sugere "TextBlock", e o Designer não muda.
-4. Pedir ao assistente um grafo no WBP_TesteDesigner que esconde a resposta da bateria e escreve nela um texto juntando quatro pedaços, e clicar em Compile: compila sem erro, e o nó Append aparece com quatro entradas.
-5. Pedir ao assistente para regravar por inteiro o EventGraph de um rascunho a partir da própria leitura: ele grava, sem recusar por "coisas que o texto não diz".
+<!-- Passos de teste: só o que o usuário faz e confere. A parte do assistente é feita antes de o item entrar aqui. -->
+
+### R-008 [ajuste] FORMAT.md por tópico
+1. Abrir `Docs/FORMAT.md` do NodeScribe: a tabela *Topics* aparece logo depois do índice, com os quatro tópicos e quando ler cada um.
+2. Abrir a pasta `Docs/format/`: tem um arquivo para cada tópico da tabela (`animgraph`, `behavior-tree`, `designer`, `reading`).
+3. Na próxima conversa sobre grafo no BossRush, conferir que o assistente lê só o `FORMAT.md` e só abre um arquivo de `Docs/format/` quando a tarefa é daquele tópico.
+
+### R-012 [ajuste] Teto de tokens na suíte de testes
+1. Abrir o arquivo `tests.txt` em `BossRush/Saved/NodeScribe/`: a última linha é `25 case(s), 0 failure(s)`, e logo acima está o `token_budget` com o tamanho do núcleo, de cada tópico, das descrições das ferramentas e a razão leitura/texto, cada um com seu teto.
+
+### R-013 [ajuste] README só com o estado atual
+1. Abrir o `README.md` do NodeScribe: a seção *Status* cabe numa tela e aponta para `Docs/history.md` e `Docs/ideas.md`.
+2. Abrir esses dois arquivos: o histórico e as propostas que estavam no README estão lá, inteiros.
 
 ## Em andamento
 
@@ -26,30 +33,18 @@ Esperado: ler e escrever um Input Mapping Context como uma lista tecla → açã
 
 ### R-005 [feature] Mover e reordenar widgets no Designer
 Esperado: mudar um widget de lugar ou de ordem pelo texto do Designer.
-Depende de: R-001
 
 ### R-006 [feature] Conteúdo de named slots no Designer
 Esperado: ver e montar o que fica dentro dos named slots de um Widget Blueprint filho, como o resto do Designer.
-Depende de: R-001
 
 ### R-007 [feature] Componentes de Gameplay Effect
 Esperado: montar um cooldown novo sem cliques, incluindo o componente Grant Tags to Target Actor.
-
-### R-008 [ajuste] FORMAT.md por tópico
-Ajusta: a especificação do formato (Docs/FORMAT.md)
-Esperado: uma tarefa comum de grafo custar ~3-4 mil tokens de leitura da especificação, em vez dos ~9 mil de hoje.
-Como:
-- Um núcleo curto (regras comuns de grafo + tabela de palavras-chave), lido por padrão
-- As seções de tópico (AnimGraph, volta, Designer, Behavior Tree) lidas só quando a tarefa pede; `get_format_docs` recebe o tópico
-- Peso hoje: 963 linhas (~36 KB); AnimGraph 255, volta 115, Designer 83, Behavior Tree 42, núcleo ~400
-- Atualizar junto a instrução do CLAUDE.md do BossRush, que hoje manda ler o arquivo inteiro
 
 ### R-009 [ajuste] Prosa enxuta no FORMAT.md
 Ajusta: a especificação do formato (Docs/FORMAT.md)
 Esperado: o FORMAT.md dizer só as regras; o porquê de cada uma fica num documento de design à parte.
 Como:
 - As afirmações medidas do README ficam onde estão
-Depende de: R-008
 
 ### R-010 [feature] Teste automático de ida e volta nos grafos do projeto
 Esperado: qualquer grafo do projeto que não volta igual depois de lido e colado aparece sozinho como falha, sem alguém tropeçar nele (como o Set Visibility, os pinos do Append e os nomes de struct dividida).
@@ -59,7 +54,7 @@ Como:
 - Junto da suíte de testes que já existe
 
 ### R-011 [ajuste] Confirmar no editor a ida e volta da state machine
-Ajusta: state machine do AnimGraph (Docs/FORMAT.md > AnimGraph)
+Ajusta: state machine do AnimGraph (Docs/format/animgraph.md)
 Esperado: uma state machine com regra de transição lida, colada de volta e compilada sem erro no editor, não só na suíte automática.
 Como:
 - Rascunho `/Game/Retarget/ABP_TesteSM` no projeto Metahuman; apagar no fim

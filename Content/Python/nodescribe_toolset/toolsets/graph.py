@@ -292,9 +292,14 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
     @toolset_registry.tool_call
     @staticmethod
-    def get_format_docs() -> str:
+    def get_format_docs(topic: str | None = None) -> str:
         """Returns the NodeScribe format specification.
 
-        Call once per session, before writing a graph for the first time.
+        Without a topic, the core: call once per session, before writing or
+        interpreting text for the first time. A topic is read only when the
+        task touches it: `animgraph` (AnimGraph, state machines), `designer`
+        (a Widget Blueprint's `designer` section), `behavior-tree`, and
+        `reading` (anchors, conversions and warnings in a reading; read it
+        before `replace`).
         """
-        return unreal.NodeScribeLibrary.get_format_docs()
+        return unreal.NodeScribeLibrary.get_format_docs(topic or "")
