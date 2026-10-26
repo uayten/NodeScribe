@@ -45,7 +45,14 @@ public class NodeScribeEditor : ModuleRules
 			"AssetTools",
 			// Tags: read through the Manager, written to the ini by the editor module.
 			"GameplayTags",
-			"GameplayTagsEditor"
+			"GameplayTagsEditor",
+			// The Designer: a Widget Blueprint's tree, edited through the same
+			// operations the Designer's Hierarchy uses, so bindings and graph
+			// references follow a rename the way they do on screen.
+			"UMG",
+			"UMGEditor",
+			// Finding a Widget Blueprint by name before anyone has opened it.
+			"AssetRegistry"
 		});
 	}
 }

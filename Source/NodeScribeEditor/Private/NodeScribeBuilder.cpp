@@ -46,6 +46,8 @@
 #include "K2Node_IfThenElse.h"
 #include "K2Node_MacroInstance.h"
 #include "K2Node_AddDelegate.h"
+#include "K2Node_AddPinInterface.h"
+#include "K2Node_CommutativeAssociativeBinaryOperator.h"
 #include "K2Node_CallDelegate.h"
 #include "K2Node_ClearDelegate.h"
 #include "K2Node_RemoveDelegate.h"
@@ -738,6 +740,49 @@ namespace
 	{
 		const UEdGraphSchema_K2* Found = Graph ? Cast<UEdGraphSchema_K2>(Graph->GetSchema()) : nullptr;
 		return Found ? Found : GetDefault<UEdGraphSchema_K2>();
+	}
+
+	/**
+	 * true when the text's name is this struct field.
+	 *
+	 * The field is written the way the split pin shows it: `Is Supported` for
+	 * `bIsSupported`. Comparing only the C++ name refused exactly the name the
+	 * reader had just written for the neighbouring field.
+	 */
+	bool FieldMatches(const FProperty* Field, const FString& Wanted)
+	{
+		const FString Name = Field->GetName();
+		if (FNodeScribeCatalog::Normalize(Name) == Wanted
+			|| FNodeScribeCatalog::Normalize(Field->GetAuthoredName()) == Wanted
+			|| FNodeScribeCatalog::Normalize(Field->GetDisplayNameText().ToString()) == Wanted)
+		{
+			return true;
+		}
+
+		return Name.Len() > 1 && Name[0] == TEXT('b') && FChar::IsUpper(Name[1])
+			&& FNodeScribeCatalog::Normalize(Name.RightChop(1)) == Wanted;
+	}
+
+	/**
+	 * true when this sub-pin of a split struct is the field the text names.
+	 *
+	 * A sub-pin is born as `<parent>_<field>` -- `ReturnValue_bIsSupported` --,
+	 * so the field is what follows the parent's name, and the struct says what
+	 * that field is called on screen.
+	 */
+	bool SubPinMatches(const UEdGraphPin* Parent, const UEdGraphPin* Sub, const FString& Wanted)
+	{
+		FString FieldName = Sub->PinName.ToString();
+		if (!FieldName.RemoveFromStart(Parent->PinName.ToString() + TEXT("_")))
+		{
+			return FNodeScribeCatalog::Normalize(FieldName) == Wanted;
+		}
+
+		const UScriptStruct* Struct = Cast<UScriptStruct>(Parent->PinType.PinSubCategoryObject.Get());
+		const FProperty* Field = Struct ? Struct->FindPropertyByName(FName(*FieldName)) : nullptr;
+
+		return Field ? FieldMatches(Field, Wanted)
+			: FNodeScribeCatalog::Normalize(FieldName) == Wanted;
 	}
 }
 
@@ -1843,6 +1888,39 @@ UEdGraphPin* FNodeScribeBuildContext::TrySplitToFindPin(UEdGraphNode* Node, cons
 			&& Schema->CanSplitStructPin(*Pin);
 	};
 
+	// --- Already split: the field is a sub-pin -----------------------------
+	//
+	// A struct split by an earlier line keeps its sub-pins, and the parent is no
+	// longer splittable. `$s.Battery Volts` split `ReturnValue`, and the next
+	// line's `$s.Is Supported` then found nothing: only the raw
+	// `ReturnValue_bIsSupported` resolved.
+	TArray<UEdGraphPin*> SplitMatches;
+	for (UEdGraphPin* Parent : Candidates)
+	{
+		if (!Parent || Parent->Direction != EGPD_Output || Parent->SubPins.Num() == 0)
+		{
+			continue;
+		}
+
+		for (UEdGraphPin* Sub : Parent->SubPins)
+		{
+			if (Sub && SubPinMatches(Parent, Sub, Wanted))
+			{
+				SplitMatches.Add(Sub);
+			}
+		}
+	}
+
+	// Two split structs with the same field: answering would be choosing.
+	if (SplitMatches.Num() == 1)
+	{
+		return SplitMatches[0];
+	}
+	if (SplitMatches.Num() > 1)
+	{
+		return nullptr;
+	}
+
 	// --- 1st attempt: the requested name starts with the pin's name -------
 	//
 	// `Selected Key Key` starts with `Selected Key`: it is part of that struct.
@@ -1897,9 +1975,7 @@ UEdGraphPin* FNodeScribeBuildContext::TrySplitToFindPin(UEdGraphNode* Node, cons
 
 		for (TFieldIterator<FProperty> It(Struct); It; ++It)
 		{
-			const FProperty* Field = *It;
-			if (FNodeScribeCatalog::Normalize(Field->GetName()) == Wanted
-				|| FNodeScribeCatalog::Normalize(Field->GetAuthoredName()) == Wanted)
+			if (FieldMatches(*It, Wanted))
 			{
 				WithField.Add(Pin);
 				break;
@@ -1931,6 +2007,14 @@ UEdGraphPin* FNodeScribeBuildContext::TrySplitToFindPin(UEdGraphNode* Node, cons
 		// `ReturnValue_Z`. Looking for a bare `Z` finds none of them -- and the
 		// search used to stop here, after having already split the pin, which
 		// left the graph changed and the link undone.
+		for (UEdGraphPin* Sub : Parent->SubPins)
+		{
+			if (Sub && SubPinMatches(Parent, Sub, Wanted))
+			{
+				return Sub;
+			}
+		}
+
 		for (UEdGraphPin* Sub : Parent->SubPins)
 		{
 			if (!Sub)
@@ -2351,17 +2435,76 @@ void FNodeScribeBuildContext::ApplyLabelSettings(UEdGraphNode* Node, const FNode
 	}
 }
 
+namespace
+{
+	/**
+	 * Grows a node with an "Add pin" button until it has the pin the text names.
+	 *
+	 * `Append (A = ..., B = ..., C = ...)` is how the reader writes an Append
+	 * with three inputs, and the node is born with two: `C` only exists after
+	 * the button. Pins added for a name that never showed up are taken off
+	 * again, so a typo does not leave the node wider than anyone wrote.
+	 */
+	UEdGraphPin* GrowToFindPin(UEdGraphNode* Node, TFunctionRef<UEdGraphPin*()> Find)
+	{
+		IK2Node_AddPinInterface* Growable = Cast<IK2Node_AddPinInterface>(Node);
+		if (!Growable)
+		{
+			return nullptr;
+		}
+
+		TArray<UEdGraphPin*> Added;
+		while (Growable->CanAddPin() && Added.Num() < IK2Node_AddPinInterface::GetMaxInputPinsNum())
+		{
+			const TSet<UEdGraphPin*> Before(Node->Pins);
+			Growable->AddInputPin();
+
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (!Before.Contains(Pin))
+				{
+					Added.Add(Pin);
+				}
+			}
+
+			if (UEdGraphPin* Found = Find())
+			{
+				return Found;
+			}
+
+			if (Node->Pins.Num() == Before.Num())
+			{
+				break;
+			}
+		}
+
+		for (int32 Index = Added.Num() - 1; Index >= 0; --Index)
+		{
+			if (Growable->CanRemovePin(Added[Index]))
+			{
+				Growable->RemoveInputPin(Added[Index]);
+			}
+		}
+		return nullptr;
+	}
+}
+
 void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScribeStatement& Statement)
 {
 	// Eligible input pins, in order, to resolve positional arguments.
 	TArray<UEdGraphPin*> PositionalPins;
-	for (UEdGraphPin* Pin : Node->Pins)
+	auto CollectPositional = [this, Node, &PositionalPins]()
 	{
-		if (Pin->Direction == EGPD_Input && !IsExecPin(Pin) && !Pin->bHidden)
+		PositionalPins.Reset();
+		for (UEdGraphPin* Pin : Node->Pins)
 		{
-			PositionalPins.Add(Pin);
+			if (Pin->Direction == EGPD_Input && !IsExecPin(Pin) && !Pin->bHidden)
+			{
+				PositionalPins.Add(Pin);
+			}
 		}
-	}
+	};
+	CollectPositional();
 
 	int32 NextPositional = 0;
 
@@ -2372,6 +2515,18 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 		if (!Arg.PinName.IsEmpty())
 		{
 			Pin = FindPinByFuzzyName(Node, Arg.PinName, EGPD_Input);
+
+			if (!Pin)
+			{
+				Pin = GrowToFindPin(Node, [this, Node, &Arg]()
+				{
+					return FindPinByFuzzyName(Node, Arg.PinName, EGPD_Input);
+				});
+				if (Pin)
+				{
+					CollectPositional();
+				}
+			}
 
 			if (!Pin)
 			{
@@ -2438,6 +2593,17 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 		}
 		else
 		{
+			if (!PositionalPins.IsValidIndex(NextPositional))
+			{
+				// One more value than pins on an Append is one more pin.
+				GrowToFindPin(Node, [&CollectPositional, &PositionalPins, NextPositional]()
+				{
+					CollectPositional();
+					return PositionalPins.IsValidIndex(NextPositional) ? PositionalPins[NextPositional] : nullptr;
+				});
+				CollectPositional();
+			}
+
 			if (!PositionalPins.IsValidIndex(NextPositional))
 			{
 				AddError(Statement.LineNumber, FString::Printf(
@@ -3632,7 +3798,45 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		// the catalog and finds the function, where it should always have fallen.
 		const bool bSetterBlocked = bIsSetter && !IsVariableWritable(VariableName);
 
-		if (IsBlueprintVariable(VariableName) && !bSetterBlocked)
+		// The arguments decide between a variable and a function with the same
+		// name. `Set Visibility (Target = $Row, In Visibility = Visible)` is the
+		// reader's line for `UWidget::SetVisibility`, and a Widget Blueprint is a
+		// widget with a `Visibility` property of its own: taken as that variable,
+		// the line lost its Target and died on `In Visibility`. A variable node
+		// has the variable's own pin and nothing else -- plus Target, when the
+		// variable belongs to another object. Any other name means a function.
+		auto ArgsFitVariable = [&Statement, &VariableName](const FProperty* Property, bool bExternal)
+		{
+			for (const FNodeScribeArg& Arg : Statement.Args)
+			{
+				if (Arg.PinName.IsEmpty())
+				{
+					continue;
+				}
+
+				const FString Written = ResolvePinAlias(Arg.PinName);
+				if (Written == TEXT("self"))
+				{
+					if (bExternal)
+					{
+						continue;
+					}
+					return false;
+				}
+
+				if (Written == FNodeScribeCatalog::Normalize(VariableName)
+					|| (Property && (Written == FNodeScribeCatalog::Normalize(Property->GetName())
+						|| Written == FNodeScribeCatalog::Normalize(Property->GetDisplayNameText().ToString()))))
+				{
+					continue;
+				}
+				return false;
+			}
+			return true;
+		};
+
+		if (IsBlueprintVariable(VariableName) && !bSetterBlocked
+			&& ArgsFitVariable(FindPropertyByFriendlyName(GetSelfClass(), VariableName), false))
 		{
 			if (bIsSetter)
 			{
@@ -3661,6 +3865,11 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 				// Same reason as the block above, on the other side of `Target`.
 				if (Property && bIsSetter
 					&& Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly | CPF_EditConst))
+				{
+					Property = nullptr;
+				}
+
+				if (Property && !ArgsFitVariable(Property, true))
 				{
 					Property = nullptr;
 				}
@@ -3722,8 +3931,12 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 		return nullptr;
 	}
 
+	// The Target's class breaks ties the name cannot: `Set Visibility (Target =
+	// $Panel)` exists on Widget, SceneComponent and two more, and the pin it is
+	// wired to says which one the line means. It is what the editor itself
+	// does when you drag from an object pin.
 	const FNodeScribeLookup Lookup = FNodeScribeCatalog::Get().FindFunction(
-		Statement.NodeExpression, GetSelfClass(), nullptr);
+		Statement.NodeExpression, GetSelfClass(), FindTargetClassFromArgs(Statement));
 
 	// Standard library macros (ForEachLoop, DoOnce, Gate...).
 	//
@@ -3765,7 +3978,14 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 			return Node;
 		}
 
-		UK2Node_CallFunction* Node = AllocateNode<UK2Node_CallFunction>();
+		// Append, the math operators and the like are their own node class in
+		// the editor, the one with the "Add pin" button. As a plain call they
+		// are stuck with two inputs, and the reader's `Append (A, B, C)` from a
+		// real graph did not paste back.
+		UK2Node_CallFunction* Node = Lookup.Function->HasMetaData(
+			FBlueprintMetadata::MD_CommutativeAssociativeBinaryOperator)
+			? AllocateNode<UK2Node_CommutativeAssociativeBinaryOperator>()
+			: AllocateNode<UK2Node_CallFunction>();
 		Node->SetFromFunction(Lookup.Function);
 		FinalizeNode(Node);
 		return Node;

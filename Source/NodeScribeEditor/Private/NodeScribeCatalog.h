@@ -55,6 +55,16 @@ public:
 	static TCHAR FoldAccent(TCHAR C);
 
 	/**
+	 * true when two normalised names are one typo apart -- `textblok` and
+	 * `textblock`, `txet` and `text`.
+	 *
+	 * Only for the "Similar:" list of an error, never to resolve a name: a typo
+	 * that resolved itself would be the plugin choosing, and the format's
+	 * answer to a name it does not know is to say so.
+	 */
+	static bool IsNearMiss(const FString& NormalizedA, const FString& NormalizedB);
+
+	/**
 	 * true when the function does not become a call, but an async action node
 	 * (`UK2Node_AsyncAction`).
 	 *

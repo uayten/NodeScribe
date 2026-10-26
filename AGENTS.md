@@ -3,6 +3,9 @@
 Unreal editor plugin that transcribes a list of nodes written as text into
 real nodes in a Blueprint graph, and does the way back.
 
+This project follows the project-docs convention (ROADMAP.md, DECISIONS.md, HANDOFF.md).
+When the user asks to resume ("retoma", "vamos continuar o projeto", "vamos continuar o desenvolvimento do roadmap"), before acting: read HANDOFF.md; from ROADMAP.md, only the titles (`grep "^### R-" ROADMAP.md`) and the item for the next step or the request. Confirm the state and the next step in 3 lines and wait for the go-ahead.
+
 **The format's specification is [`Docs/FORMAT.md`](Docs/FORMAT.md). Read that
 file before writing or interpreting NodeScribe text** -- the parts that cannot
 be guessed (`$name.Pin`, `Class.Function`, `event X of Y`, indented labels,
@@ -46,6 +49,7 @@ accents for them.
 | `NodeScribeBuilder` | statements → real nodes, linked and positioned. |
 | `NodeScribeReader` | the way back: nodes → text. |
 | `NodeScribeGraphActions` | the three buttons on the editor toolbar. |
+| `NodeScribeWidgetTree` | a Widget Blueprint's Designer as text, both ways: the `designer` section of `read_object` / `write_object`. |
 | `Tests/run_tests.py` | automated round trip, without an interface. Run it before and after touching the reader or the builder; the command is in *Testing*, in the README. |
 | `Saved/NodeScribe/vocabulary.txt` | the names nobody managed to resolve, one per line. `sort \| uniq -c \| sort -rn` gives the list of aliases missing from the catalog, by frequency. It is not an error log -- see *The missing vocabulary*, in the README. |
 
@@ -59,9 +63,17 @@ editor → compiling → reopening → testing (with the commands ready), how to
 by round trip, the four invariants that must not break, and what a proposal
 for a new tool needs to answer before becoming code.
 
-Current front: **reading an enemy's whole AI**. The sheet (`read_object` /
-`write_object`), the blackboard, the BT tree (read and write), `create_asset`
-and Gameplay Tags (`read_tags` / `write_tags`) are already up; **Gameplay
-Effect components** are missing. The roadmap with each stage's state
-is in *Where we are on that list*, in the README. An idea for a new tool that
-shows up along the way goes to *Possible future features*, not to the code.
+Current front: the next step in HANDOFF.md, and the pending work in order in
+ROADMAP.md (its items are in Portuguese, D-009). An idea for a new tool goes to
+the ROADMAP only once the user accepts it, and its proposal answers the four
+questions in *Proposing a new tool*, in the README, first.
+
+## Lessons that cost a build
+
+- **Helpers in an anonymous namespace need names unique across the module.**
+  UBT compiles the module as one unity blob, so two files' `CleanClassName` or
+  `FDelete` collide. A green unity build also hides a missing include: to
+  check, put `bUseUnity = false;` next to `PCHUsage` in the Build.cs, build,
+  and take it out again.
+- **Git:** commit straight to `main`, no branches; never push without an
+  explicit request.

@@ -113,7 +113,11 @@ class NodeScribeTools(unreal.ToolsetDefinition):
         `/Game/`.
 
         Blackboards come out as `key Name : Type` lines, and Behavior Trees as
-        an indented tree.
+        an indented tree. A Widget Blueprint adds its Designer after a
+        `designer` line: one `Name : Class [variable]` line per widget,
+        indented by hierarchy, with its changed properties and `slot ...`
+        settings under it. Filtering a Widget Blueprint also matches widget
+        names and classes.
 
         Args:
             target: The object to read. Blueprints and classes become their CDO.
@@ -148,6 +152,13 @@ class NodeScribeTools(unreal.ToolsetDefinition):
         mention leaves the graph, and the return names it. All or nothing: one
         line that does not resolve and nothing changes. A node that already
         reads exactly as its line is kept untouched.
+
+        **A Widget Blueprint's Designer** goes after a `designer` line, as a
+        list of changes: an existing widget's line is an anchor, a new name
+        creates a widget where the text puts it (after the sibling above it),
+        `like Other` copies another widget's look and slot, and `rename A -> B`
+        / `delete widget X` are the only renames and removals. Moves, reorders
+        and class changes are refused; any structural error changes nothing.
 
         Args:
             target: The object to change. Blueprints and classes become their CDO.

@@ -4,6 +4,7 @@
 #include "NodeScribeObjectWriter.h"
 
 #include "AssetToolsModule.h"
+#include "Blueprint/UserWidget.h"
 #include "Factories/BlueprintFactory.h"
 #include "Factories/Factory.h"
 #include "IAssetTools.h"
@@ -11,6 +12,8 @@
 #include "Misc/PackageName.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/UObjectIterator.h"
+#include "WidgetBlueprint.h"
+#include "WidgetBlueprintFactory.h"
 
 namespace
 {
@@ -131,7 +134,18 @@ FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& P
 	UClass* AssetClass = nullptr;
 	UFactory* Factory = nullptr;
 
-	if (FKismetEditorUtilities::CanCreateBlueprintOfClass(ParentClass))
+	if (ParentClass->IsChildOf(UUserWidget::StaticClass()))
+	{
+		// A plain Blueprint factory takes UserWidget as a parent without
+		// complaint and gives a Blueprint with no Designer: it compiles, and
+		// nothing can ever be placed on it.
+		UWidgetBlueprintFactory* WidgetFactory = NewObject<UWidgetBlueprintFactory>();
+		WidgetFactory->ParentClass = ParentClass;
+
+		Factory = WidgetFactory;
+		AssetClass = UWidgetBlueprint::StaticClass();
+	}
+	else if (FKismetEditorUtilities::CanCreateBlueprintOfClass(ParentClass))
 	{
 		// A Blueprint child of the requested class. It is the case of
 		// GameplayEffect, BTTask_BlueprintBase and BTService_BlueprintBase: on
@@ -155,7 +169,16 @@ FString FNodeScribeAssetMaker::CreateAsset(const FString& Path, const FString& P
 		AssetClass = ParentClass;
 	}
 
-	const TArray<FString> Configurable = EditableFactoryProperties(Factory);
+	TArray<FString> Configurable = EditableFactoryProperties(Factory);
+
+	// The Widget Blueprint factory's two options are already decided above --
+	// the parent is the one asked for, and the type is a normal Blueprint. The
+	// note below would warn about a choice nobody left open.
+	if (Cast<UWidgetBlueprintFactory>(Factory))
+	{
+		Configurable.Remove(TEXT("ParentClass"));
+		Configurable.Remove(TEXT("BlueprintType"));
+	}
 
 	// The factory before creating. Afterwards it is no use: the properties it
 	// carries -- the skeleton, above all -- become read-only on the finished

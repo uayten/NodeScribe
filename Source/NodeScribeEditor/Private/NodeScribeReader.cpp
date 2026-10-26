@@ -2331,7 +2331,10 @@ void FNodeScribeReadContext::Run()
 
 			if (DesignerWidgets.Num() > 0)
 			{
-				Lines.Add(TEXT("# from the Designer (create them there, ticking Is Variable):"));
+				// Not a `variable` line: that would be a plain variable that never
+				// points at the widget. The widget itself comes from the Designer
+				// section of write_object, which ticks Is Variable with it.
+				Lines.Add(TEXT("# from the Designer (create them with write_object's `designer` section, as `Name : Class variable`):"));
 				Lines.Append(DesignerWidgets);
 			}
 

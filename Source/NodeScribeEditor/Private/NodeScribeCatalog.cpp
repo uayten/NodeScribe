@@ -106,6 +106,48 @@ FString FNodeScribeCatalog::Normalize(const FString& In)
 	return Out;
 }
 
+bool FNodeScribeCatalog::IsNearMiss(const FString& A, const FString& B)
+{
+	// Damerau-Levenshtein (optimal string alignment): a swapped pair of letters
+	// is one typo, as a person counts it -- `txet` is one slip, not two.
+	const int32 Allowed = FMath::Max(1, FMath::Min(A.Len(), B.Len()) / 4);
+	if (A.IsEmpty() || B.IsEmpty() || FMath::Abs(A.Len() - B.Len()) > Allowed)
+	{
+		return false;
+	}
+
+	const int32 Width = B.Len() + 1;
+	TArray<int32> D;
+	D.SetNumZeroed((A.Len() + 1) * Width);
+
+	for (int32 I = 0; I <= A.Len(); ++I)
+	{
+		D[I * Width] = I;
+	}
+	for (int32 J = 0; J <= B.Len(); ++J)
+	{
+		D[J] = J;
+	}
+
+	for (int32 I = 1; I <= A.Len(); ++I)
+	{
+		for (int32 J = 1; J <= B.Len(); ++J)
+		{
+			const int32 Cost = A[I - 1] == B[J - 1] ? 0 : 1;
+			int32 Best = FMath::Min3(D[(I - 1) * Width + J] + 1, D[I * Width + J - 1] + 1,
+				D[(I - 1) * Width + J - 1] + Cost);
+
+			if (I > 1 && J > 1 && A[I - 1] == B[J - 2] && A[I - 2] == B[J - 1])
+			{
+				Best = FMath::Min(Best, D[(I - 2) * Width + J - 2] + 1);
+			}
+			D[I * Width + J] = Best;
+		}
+	}
+
+	return D[A.Len() * Width + B.Len()] <= Allowed;
+}
+
 TCHAR FNodeScribeCatalog::FoldAccent(TCHAR C)
 {
 	// Names are written by people, and people write accents: a variable called
@@ -293,7 +335,12 @@ int32 FNodeScribeCatalog::ScoreEntry(const FEntry& Entry, const FString& Normali
 
 	// The class the user is editing beats anything from the Engine: if they
 	// wrote the name of one of their own functions, that is the one they want.
-	if (SelfClass && SelfClass->IsChildOf(Owner))
+	//
+	// Unless the line names a Target that is not one of those: the function
+	// runs on the Target then, and a Widget Blueprint's own `SetVisibility`
+	// would win over the SceneComponent the line is wired to.
+	if (SelfClass && SelfClass->IsChildOf(Owner)
+		&& (!ContextClass || ContextClass->IsChildOf(Owner)))
 	{
 		Score += 300;
 	}

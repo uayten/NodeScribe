@@ -425,7 +425,8 @@ resolving as before; `Actor` and `Pawn` now give the class.
 ### Where we are
 
 Working today: **graphs** (`read_graph` / `write_graph`), **single-object
-sheets** (`read_object`, default and filtered mode) and **Gameplay Tags**
+sheets** (`read_object`, default and filtered mode), the **Widget Designer**
+(the `designer` section of the same two tools) and **Gameplay Tags**
 (`read_tags` / `write_tags`).
 
 The active front is **reading an enemy's whole AI** -- the Golem in the
@@ -720,6 +721,59 @@ Exercised on a scratch tree: created from nothing (14 nodes), read back
 identical, written again with zero changes, reordered with a parameter
 changed and two nodes removed, and four kinds of error refused with nothing
 changed. Then on the real case: the enemy's patrol branch hooked to the root.
+
+#### Off the AI front -- the Widget Designer, read and write
+
+Not on the roadmap: it came from a real session that had to add two rows to a
+Widget Blueprint. NodeScribe wrote the graph, and the rows had to go through
+the native `UMGToolSet` -- a ~62 KB schema, plus `ObjectTools.list_properties`
+per widget to see a text or a font, estimated at 15-25k tokens for two rows.
+
+`read_object` on a Widget Blueprint now ends with a `designer` section, and
+`write_object` takes it back. The format is in
+[`Docs/FORMAT.md`](Docs/FORMAT.md#widget-designer); the decisions:
+
+- **A widget is a component, one level down.** `Name : Class`, its changed
+  properties under it, children too -- the sheet's own vocabulary, so there
+  is no second format to learn. The sheet's `X = None` line per widget
+  variable is gone: the section says what each one is and where.
+- **A list of changes, not the whole tree** -- unlike the Behavior Tree. A
+  Designer has dozens of widgets; making the whole tree the text would make
+  "add a row" cost the whole screen, and every widget the text forgot would
+  be deleted. Existing widgets are anchors; a new name creates one, placed by
+  its neighbours in the text.
+- **`like Other`** is what makes "a row like that one" short: the look of an
+  existing widget, slot included, onto the new one. Instanced subobjects are
+  not copied -- two widgets would share one.
+- **Is Variable never changes by omission.** An anchor written without the
+  word must not untick it -- that would break every graph node that reads the
+  widget. Unticking is `Is Variable = false`.
+- **The structure is all or nothing; properties are line by line**, through
+  the sheet's own writer (`WriteProperties`). A row half created is a row in
+  the wrong place; a font size that did not parse is one line to fix.
+- **The editor's operations, not hand-made ones.** Create, add, rename and
+  delete go through `FWidgetBlueprintOperationUtils`, the same as the
+  Hierarchy panel: a rename takes the graph's references along, and a widget
+  is created as the Palette creates it.
+- **Refused for now, out loud:** moving a widget to another parent,
+  reordering existing siblings, changing a class, named slot content.
+
+Exercised on a real Widget Blueprint of another plugin (read only): 37
+widgets, the whole Designer in ~4 KB. On a scratch Widget Blueprint: a tree created from nothing, a
+Widget Blueprint child found by name without being open, a row added `like`
+another one in a 300-character text and landing between its neighbours, the
+whole reading pasted back with nothing changed, and a move plus an unknown
+class refused together with nothing changed. `designer_writes_rows` in the
+suite does the same by itself.
+
+Also found on the way: a struct that has no text form of its own came out as
+"I do not know how to write the value of" -- every TextBlock's `Font`. It is
+now opened member by member, the same as a struct that is too long.
+
+Found on the way: `create_asset` with parent `UserWidget` used to give a plain
+Blueprint with no Designer -- the generic factory accepts the parent and
+produces something nobody can place a widget on. It now uses the Widget
+Blueprint factory.
 
 ## Development
 

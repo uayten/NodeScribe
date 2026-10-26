@@ -32,4 +32,14 @@ public:
 	};
 
 	static FResult WriteObject(UObject* Object, const FString& Text);
+
+	/**
+	 * Property lines straight onto one object: no Blueprint, so no `variable`
+	 * lines, and no component blocks -- struct blocks and `= default` work as
+	 * in the sheet.
+	 *
+	 * For the Designer, whose widgets are objects inside the Blueprint and not
+	 * its CDO. Marking and compiling the Blueprint is the caller's job.
+	 */
+	static FResult WriteProperties(UObject* Target, const FString& Text);
 };

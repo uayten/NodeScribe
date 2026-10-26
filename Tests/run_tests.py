@@ -202,6 +202,41 @@ Print String (In String = "destroyed")
         'forbids_warning': ['does not exist', 'defined again'],
     },
     {
+        # The first `$v.X` splits the struct pin; the second one used to find
+        # it already split and give up -- only the raw
+        # `MinimalViewInfo_bConstrainAspectRatio` resolved, not the name on screen.
+        'name': 'second_field_of_split_struct',
+        'text': '''
+event Test
+v = Make MinimalViewInfo (FOV = 75.0)
+Print String (In String = $v.FOV)
+Print String (In String = $v.Constrain Aspect Ratio)
+''',
+        'forbids_warning': ['has no output'],
+    },
+    {
+        # The reader writes an Append with five inputs as A..E; the node is
+        # born with two, and C..E used to be refused instead of added.
+        'name': 'append_grows_pins',
+        'text': '''
+event Test
+s = Append (A = "a", B = "b", C = "c", D = "d", E = "e")
+Print String (In String = $s)
+''',
+    },
+    {
+        # `Set Visibility` is both a function of Widget and the setter of its
+        # `Visibility` property. The arguments say which: `In Visibility` is the
+        # function's pin. Taken as the property, the line died on that pin.
+        'name': 'function_over_property_setter',
+        'text': '''
+variable Panel : Widget
+
+event Test
+Set Visibility (Target = $Panel, In Visibility = Hidden)
+''',
+    },
+    {
         'name': 'declared_hole',
         'text': '''
 event Test
@@ -323,6 +358,37 @@ def replace_swaps_the_graph():
         problems.append('')
         problems.extend(text.splitlines())
         return False, problems
+
+    return True, []
+
+
+def replace_takes_own_break():
+    """A generic struct Break that NodeScribe wrote can be replaced with its own reading.
+
+    Every Break fills `Show Pin for Properties`, and the reader used to call it
+    an option it could not write -- so `replace` refused the graph it had just
+    written, as one with things the text cannot say.
+    """
+    graph, error = new_blueprint('NS_replace_break')
+    if not graph:
+        return False, [error]
+
+    written = unreal.NodeScribeLibrary.write_graph(graph, '''
+variable View : MinimalViewInfo
+
+event Test
+v = Break MinimalViewInfo ($View)
+Print String (In String = $v.FOV)
+''')
+    if '[error]' in written:
+        return False, ['the write complained:'] + written.splitlines()
+
+    text = unreal.NodeScribeLibrary.read_graph(graph)
+    report = unreal.NodeScribeLibrary.write_graph(graph, text, True)
+
+    if '[error]' in report or 'Show Pin' in text:
+        return False, ['replacing with its own reading was refused:'] + report.splitlines() \
+            + ['', '--- reading ---'] + text.splitlines()
 
     return True, []
 
@@ -598,10 +664,153 @@ def chain_reaches_function_entry():
     return True, []
 
 
+def designer_section(text):
+    """The lines from `designer` on, without comments: what a write takes back."""
+    lines = text.splitlines()
+    if 'designer' not in lines:
+        return []
+    return body('\n'.join(lines[lines.index('designer'):]))
+
+
+def in_order(lines, wanted):
+    """True when every wanted line shows up in `lines`, in this order.
+
+    Quotes are left out of the comparison: whether `Battery` needs them is the
+    formatter's call, not what this test is about.
+    """
+    position = 0
+    for line in lines:
+        if position < len(wanted) and line.replace('"', '') == wanted[position].replace('"', ''):
+            position += 1
+    return position == len(wanted)
+
+
+def designer_writes_rows():
+    """The Designer as text: create a tree, add a row `like` another, paste back.
+
+    The row case is the one that motivated it: a label and an answer like the
+    ones already on screen, placed right after them, in one short text.
+    """
+    path = '%s/NS_designer' % DESTINATION
+    created = unreal.NodeScribeLibrary.create_asset(path, 'UserWidget', '')
+    if created.startswith('[error]'):
+        return False, [created]
+
+    bp = unreal.load_asset(path)
+    if not isinstance(bp, unreal.WidgetBlueprint):
+        return False, ['create_asset with UserWidget did not give a Widget Blueprint: %s' % bp]
+
+    # The factory may or may not give a default root, depending on the
+    # project's settings. The test starts from an empty Designer either way.
+    start = designer_section(unreal.NodeScribeLibrary.read_object(bp, ''))
+    reset = ''
+    if len(start) > 1:
+        reset = 'delete widget %s\n' % start[1].split(' : ')[0].strip()
+
+    first = 'designer\n' + reset + '''Root : VerticalBox
+  IsStillRow : HorizontalBox
+    IsStillLabel : TextBlock
+      Text = "Is still?"
+    IsStillAnswer : TextBlock variable
+      Text = "-"
+      slot Padding = (Left=8.0,Top=0.0,Right=0.0,Bottom=0.0)
+  Footer : TextBlock
+'''
+    written = unreal.NodeScribeLibrary.write_object(bp, first)
+    if '[error]' in written:
+        return False, ['creating the tree complained:'] + written.splitlines()
+
+    # Root and IsStillRow are anchors; the new row goes between IsStillRow and
+    # Footer because that is where the text puts it.
+    row = '''designer
+Root : VerticalBox
+  IsStillRow : HorizontalBox
+  BatteryRow : HorizontalBox like IsStillRow
+    BatteryLabel : TextBlock like IsStillLabel
+      Text = "Battery"
+    BatteryAnswer : TextBlock variable like IsStillAnswer
+'''
+    written = unreal.NodeScribeLibrary.write_object(bp, row)
+    if '[error]' in written:
+        return False, ['adding the row complained:'] + written.splitlines()
+
+    sheet = unreal.NodeScribeLibrary.read_object(bp, '')
+    tree = designer_section(sheet)
+
+    problems = []
+    expected = [
+        'Root : VerticalBox',
+        '  IsStillRow : HorizontalBox',
+        '    IsStillLabel : TextBlock',
+        '      Text = "Is still?"',
+        '    IsStillAnswer : TextBlock variable',
+        '      Text = "-"',
+        '  BatteryRow : HorizontalBox',
+        '    BatteryLabel : TextBlock',
+        '      Text = Battery',
+        '    BatteryAnswer : TextBlock variable',
+        '      Text = "-"',
+        '  Footer : TextBlock',
+    ]
+    if not in_order(tree, expected):
+        problems.append('the tree is not what was written, in that order. Expected, in order:')
+        problems.extend('  ' + l for l in expected)
+
+    if sum(1 for l in tree if l.strip().startswith('slot Padding')) != 2:
+        problems.append('`like` did not copy the slot\'s padding onto BatteryAnswer.')
+
+    # Pasting the whole reading back is the fixed point: it changes nothing.
+    again_written = unreal.NodeScribeLibrary.write_object(bp, sheet)
+    if '[error]' in again_written:
+        problems.append('pasting the reading back complained:')
+        problems.extend('  ' + l for l in again_written.splitlines())
+
+    again = designer_section(unreal.NodeScribeLibrary.read_object(bp, ''))
+    if again != tree:
+        problems.append('pasting the reading back changed it:')
+        problems.extend(difflib.unified_diff(tree, again, 'before', 'after', lineterm='', n=2))
+
+    # Refused, with nothing changed: a move, an unknown class, a second root.
+    for label, text in (
+        ('move', 'designer\nRoot : VerticalBox\n  IsStillRow : HorizontalBox\n    Footer : TextBlock\n'),
+        ('unknown class', 'designer\nRoot : VerticalBox\n  Ghost : NoSuchWidget\n'),
+        ('second root', 'designer\nOther : VerticalBox\n'),
+    ):
+        refused = unreal.NodeScribeLibrary.write_object(bp, text)
+        if '[error]' not in refused:
+            problems.append('the %s was not refused:' % label)
+            problems.extend('  ' + l for l in refused.splitlines())
+
+    # A typo is answered with the name it missed, for classes and properties.
+    for text, wanted in (
+        ('designer\nRoot : VerticalBox\n  Ghost : TextBlok\n', 'TextBlock'),
+        ('designer\nFooter : TextBlock\n  Txet = "x"\n', 'Text'),
+    ):
+        refused = unreal.NodeScribeLibrary.write_object(bp, text)
+        if 'Similar' not in refused or wanted not in refused:
+            problems.append('a typo was not answered with `%s`:' % wanted)
+            problems.extend('  ' + l for l in refused.splitlines())
+
+    after = designer_section(unreal.NodeScribeLibrary.read_object(bp, ''))
+    if after != tree:
+        problems.append('a refused write changed the tree:')
+        problems.extend(difflib.unified_diff(tree, after, 'before', 'after', lineterm='', n=2))
+
+    if problems:
+        problems.append('')
+        problems.append('--- reading ---')
+        problems.extend(sheet.splitlines())
+        return False, problems
+
+    return True, []
+
+
 OTHERS = [
+    ('designer_writes_rows', designer_writes_rows),
     ('chain_reaches_function_entry', chain_reaches_function_entry),
     ('replace_swaps_the_graph', replace_swaps_the_graph),
     ('replace_refuses_lossy_graph', replace_refuses_lossy_graph),
+    ('replace_takes_own_break', replace_takes_own_break),
     ('sheet_round_trip_changes_nothing', sheet_round_trip_changes_nothing),
     ('state_machine_round_trip', state_machine_round_trip),
     ('blendspace_gets_grid', blendspace_gets_grid),

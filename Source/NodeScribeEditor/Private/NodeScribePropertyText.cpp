@@ -332,6 +332,17 @@ bool IsNodeSetting(const FProperty* Property)
 		return false;
 	}
 
+	// The same option on a struct Break or Make (`UK2Node_StructOperation` and
+	// its family) says which fields are drawn as pins -- every instance fills
+	// it, so it always "changed". It is how the node draws, not what it does: a
+	// field the graph uses is a linked pin, and the text already names it. Read
+	// as a setting, it made `replace` refuse a Break that NodeScribe had just
+	// written itself, as a graph with "things the text cannot say".
+	if (Property->GetFName() == TEXT("ShowPinForProperties"))
+	{
+		return false;
+	}
+
 	// An instanced subobject does not come back through text: the value is a
 	// path to an object that only exists inside this node.
 	if (Property->HasAnyPropertyFlags(CPF_InstancedReference))

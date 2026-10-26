@@ -5,6 +5,7 @@
 #include "NodeScribeCatalog.h"
 #include "NodeScribeObjectTarget.h"
 #include "NodeScribePropertyText.h"
+#include "NodeScribeWidgetTree.h"
 
 #include "Animation/AnimBlueprint.h"
 #include "Animation/BlendSpace.h"
@@ -17,6 +18,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "UObject/UnrealType.h"
+#include "WidgetBlueprint.h"
 
 using namespace NodeScribeObjectTarget;
 
@@ -294,7 +296,8 @@ namespace
 	 */
 	void CollectEntries(const UObject* Target, const UObject* Archetype,
 		const FString& NormalizedFilter, const TSet<FName>& Skip,
-		const FString& Context, TArray<FEntry>& OutEntries, FCollectStats& Stats)
+		const FString& Context, TArray<FEntry>& OutEntries, FCollectStats& Stats,
+		bool bWhole = false)
 	{
 		const bool bFiltering = !NormalizedFilter.IsEmpty();
 
@@ -336,6 +339,30 @@ namespace
 			FString Value;
 			if (!ValueToText(Property, ValuePtr, Value))
 			{
+				// A struct with no text form of its own may still have readable
+				// members. A TextBlock's `Font` is the case: the whole struct does
+				// not export, and its `Size` and typeface are what anyone asks for.
+				if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
+				{
+					const int32 Before = OutEntries.Num();
+					const int32 TooLongBefore = Stats.TooLong.Num();
+					const int32 UnreadableBefore = Stats.Unreadable.Num();
+
+					FEntry Head;
+					Head.Left = Name + TEXT(":");
+					OutEntries.Add(Head);
+
+					if (CollectStructMembers(StructProperty, ValuePtr, DefaultPtr, 1,
+						Qualify(Name), OutEntries, Stats) > 0)
+					{
+						continue;
+					}
+
+					OutEntries.SetNum(Before);
+					Stats.TooLong.SetNum(TooLongBefore);
+					Stats.Unreadable.SetNum(UnreadableBefore);
+				}
+
 				// Do not invent a line that looks right and comes back different. It
 				// leaves the sheet and shows up in the warning, by name, so its
 				// absence is visible.
@@ -343,7 +370,7 @@ namespace
 				continue;
 			}
 
-			if (!bFiltering && Value.Len() > MaxSurveyValueLength)
+			if (!bFiltering && !bWhole && Value.Len() > MaxSurveyValueLength)
 			{
 				// Too long flat: try opening it and showing only what changed.
 				if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
@@ -441,7 +468,13 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 		? FNodeScribeCatalog::Normalize(Filter) : FString();
 
 	UBlueprint* Blueprint = FindBlueprint(Object, Class);
-	const TSet<FName> OwnVariables = CollectOwnVariableNames(Blueprint);
+	TSet<FName> OwnVariables = CollectOwnVariableNames(Blueprint);
+
+	// A Designer widget ticked as Is Variable is a property of the class, and
+	// in the CDO it says `= None` -- one useless line per widget. The Designer
+	// section below says what it is and where.
+	const UWidgetBlueprint* WidgetBlueprint = Cast<UWidgetBlueprint>(Blueprint);
+	OwnVariables.Append(NodeScribeWidgetTree::CollectWidgetNames(WidgetBlueprint));
 
 	FCollectStats Stats;
 
@@ -703,5 +736,40 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 			*FString::Join(Stats.Unreadable, TEXT(", "))));
 	}
 
+	// Last, after the sheet's own footer: `write_object` splits the text at the
+	// `designer` line, and everything above it is the sheet's.
+	if (WidgetBlueprint)
+	{
+		const FString Designer = NodeScribeWidgetTree::Read(WidgetBlueprint, NormalizedFilter);
+		if (!Designer.IsEmpty())
+		{
+			Lines.Add(Designer);
+		}
+	}
+
 	return FString::Join(Lines, TEXT("\n"));
+}
+
+void FNodeScribeObjectReader::ReadProperties(const UObject* Target, const TSet<FName>& Skip,
+	const FString& Context, bool bWhole, TArray<FString>& OutLines,
+	TArray<FString>& OutTooLong, TArray<FString>& OutUnreadable)
+{
+	if (!Target)
+	{
+		return;
+	}
+
+	FCollectStats Stats;
+	TArray<FEntry> Entries;
+	CollectEntries(Target, Target->GetArchetype(), FString(), Skip, Context, Entries, Stats,
+		bWhole);
+
+	for (FEntry& Entry : Entries)
+	{
+		Entry.Default.Empty();
+	}
+
+	AppendAligned(OutLines, Entries);
+	OutTooLong.Append(Stats.TooLong);
+	OutUnreadable.Append(Stats.Unreadable);
 }
