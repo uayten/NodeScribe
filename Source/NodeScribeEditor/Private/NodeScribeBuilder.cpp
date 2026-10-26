@@ -907,6 +907,17 @@ private:
 
 	UEdGraphNode* CreateDuplicateEventComment(const FNodeScribeStatement& Statement, const FString& EventLabel);
 
+	/**
+	 * An event the text asks for that is already in the graph.
+	 *
+	 * With no wire on any pin it is reused: the reader leaves exactly those out
+	 * (the disabled BeginPlay a new Blueprint is born with is the common case),
+	 * so refusing them would make a reading that shows no BeginPlay unable to
+	 * take one, with nothing in the text saying why. With a wire, the existing
+	 * event carries behaviour, and the duplicate guard stands.
+	 */
+	UEdGraphNode* ReuseEmptyEventOrRefuse(const FNodeScribeStatement& Statement, UEdGraphNode* Existing, const FString& EventLabel);
+
 	// --- Linking ----------------------------------------------------------
 
 	void ApplyArguments(UEdGraphNode* Node, const FNodeScribeStatement& Statement);
@@ -956,6 +967,14 @@ private:
 	 * repositioned -- moving the node the user already arranged would be odd.
 	 */
 	TSet<UEdGraphNode*> AdoptedNodes;
+
+	/**
+	 * Empty events that were already in the graph and that a line took over.
+	 *
+	 * Unlike an adopted node, a reused event is moved next to its new chain --
+	 * nobody arranged a factory stub --, but it is not counted as created.
+	 */
+	TSet<UEdGraphNode*> ReusedEvents;
 
 	UEdGraphNode* TryCreateAnimNode(const FNodeScribeStatement& Statement, bool& bOutHandled);
 
@@ -2839,6 +2858,39 @@ UEdGraphNode* FNodeScribeBuildContext::CreateDuplicateEventComment(
 		*EventLabel));
 }
 
+UEdGraphNode* FNodeScribeBuildContext::ReuseEmptyEventOrRefuse(
+	const FNodeScribeStatement& Statement,
+	UEdGraphNode* Existing,
+	const FString& EventLabel)
+{
+	// A second line for the same event in one text is still a duplicate, even
+	// when its chain has not been linked yet.
+	bool bHasWire = ReusedEvents.Contains(Existing);
+	for (const UEdGraphPin* Pin : Existing->Pins)
+	{
+		if (Pin && Pin->LinkedTo.Num() > 0)
+		{
+			bHasWire = true;
+			break;
+		}
+	}
+
+	if (bHasWire)
+	{
+		return CreateDuplicateEventComment(Statement, EventLabel);
+	}
+
+	// Inside the paste's transaction, so Ctrl+Z puts the stub back where it was.
+	// A disabled stub turns into a real node on its first link, as on screen.
+	Existing->Modify();
+	ReusedEvents.Add(Existing);
+
+	AddInfo(Statement.LineNumber, FString::Printf(
+		TEXT("Used the empty `%s` that was already in this graph."), *EventLabel));
+
+	return Existing;
+}
+
 // ---------------------------------------------------------------------------
 // AnimGraph
 // ---------------------------------------------------------------------------
@@ -3293,15 +3345,15 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			{
 				const FName WantedEvent = EventFunction->GetFName();
 
-				if (FindExistingEvent([&](UEdGraphNode* Existing)
+				if (UEdGraphNode* Existing = FindExistingEvent([&](UEdGraphNode* Candidate)
 					{
-						const UK2Node_Event* EventNode = Cast<UK2Node_Event>(Existing);
+						const UK2Node_Event* EventNode = Cast<UK2Node_Event>(Candidate);
 						return EventNode
 							&& EventNode->bOverrideFunction
 							&& EventNode->EventReference.GetMemberName() == WantedEvent;
 					}))
 				{
-					return CreateDuplicateEventComment(Statement, EventName);
+					return ReuseEmptyEventOrRefuse(Statement, Existing, EventName);
 				}
 
 				UK2Node_Event* Node = AllocateNode<UK2Node_Event>();
@@ -3365,15 +3417,15 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 					const FName WantedDelegate = DelegateProperty->GetFName();
 					const FName WantedComponent = ComponentProperty->GetFName();
 
-					if (FindExistingEvent([&](UEdGraphNode* Existing)
+					if (UEdGraphNode* Existing = FindExistingEvent([&](UEdGraphNode* Candidate)
 						{
-							const UK2Node_ComponentBoundEvent* Bound = Cast<UK2Node_ComponentBoundEvent>(Existing);
+							const UK2Node_ComponentBoundEvent* Bound = Cast<UK2Node_ComponentBoundEvent>(Candidate);
 							return Bound
 								&& Bound->DelegatePropertyName == WantedDelegate
 								&& Bound->GetComponentPropertyName() == WantedComponent;
 						}))
 					{
-						return CreateDuplicateEventComment(Statement,
+						return ReuseEmptyEventOrRefuse(Statement, Existing,
 							FString::Printf(TEXT("%s of %s"), *DelegateName, *ComponentName));
 					}
 
@@ -3414,13 +3466,13 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 
 			const FName WantedCustomEvent(*EventName);
 
-			if (FindExistingEvent([&](UEdGraphNode* Existing)
+			if (UEdGraphNode* Existing = FindExistingEvent([&](UEdGraphNode* Candidate)
 				{
-					const UK2Node_CustomEvent* CustomEvent = Cast<UK2Node_CustomEvent>(Existing);
+					const UK2Node_CustomEvent* CustomEvent = Cast<UK2Node_CustomEvent>(Candidate);
 					return CustomEvent && CustomEvent->CustomFunctionName == WantedCustomEvent;
 				}))
 			{
-				return CreateDuplicateEventComment(Statement, EventName);
+				return ReuseEmptyEventOrRefuse(Statement, Existing, EventName);
 			}
 
 			UK2Node_CustomEvent* Node = AllocateNode<UK2Node_CustomEvent>();
@@ -4703,7 +4755,7 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 			++Frame.Column;
 		}
 
-		if (!bAdopted)
+		if (!bAdopted && !ReusedEvents.Contains(Node))
 		{
 			Result.CreatedNodes.Add(Node);
 		}

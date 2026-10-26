@@ -387,6 +387,43 @@ def replace_swaps_the_graph():
     return True, []
 
 
+def empty_event_is_reused():
+    """A new Blueprint's unlinked BeginPlay, hidden by the reader, takes `event BeginPlay`."""
+    graph, error = new_blueprint('NS_empty_event')
+    if not graph:
+        return False, [error]
+
+    problems = []
+
+    # The factory stub is there, and the reading leaves it out: that is the
+    # state in which refusing `event BeginPlay` had no visible reason.
+    before = unreal.NodeScribeLibrary.read_graph(graph)
+    if 'event BeginPlay' in before:
+        problems.append('the reading shows the unlinked stub; this case no longer tests the hidden one')
+
+    first = unreal.NodeScribeLibrary.write_graph(
+        graph, 'event BeginPlay\nPrint String (In String = "ready")\n')
+    if '[error]' in first:
+        problems.append('the empty BeginPlay was refused: %s' % first)
+
+    text = unreal.NodeScribeLibrary.read_graph(graph)
+    if text.count('event BeginPlay') != 1:
+        problems.append('expected exactly one `event BeginPlay` in the reading')
+
+    # Now it carries a chain, and a second one is a real duplicate.
+    second = unreal.NodeScribeLibrary.write_graph(
+        graph, 'event BeginPlay\nPrint String (In String = "again")\n')
+    if 'already exists' not in second:
+        problems.append('a BeginPlay with a wire was not refused: %s' % second)
+
+    if problems:
+        problems.append('')
+        problems.extend(text.splitlines())
+        return False, problems
+
+    return True, []
+
+
 def replace_takes_own_break():
     """A generic struct Break that NodeScribe wrote can be replaced with its own reading.
 
@@ -891,6 +928,7 @@ OTHERS = [
     ('designer_writes_rows', designer_writes_rows),
     ('chain_reaches_function_entry', chain_reaches_function_entry),
     ('replace_swaps_the_graph', replace_swaps_the_graph),
+    ('empty_event_is_reused', empty_event_is_reused),
     ('replace_refuses_lossy_graph', replace_refuses_lossy_graph),
     ('replace_takes_own_break', replace_takes_own_break),
     ('sheet_round_trip_changes_nothing', sheet_round_trip_changes_nothing),

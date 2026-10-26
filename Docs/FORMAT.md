@@ -192,6 +192,12 @@ If the name exists in the parent class, it becomes the override event. If it
 does not, it becomes a Custom Event with that name (and the plugin says it did
 that).
 
+An event already in the graph with **nothing linked** -- the greyed-out
+BeginPlay, Tick and ActorBeginOverlap a new Blueprint is born with -- is
+reused: the reading leaves those out, so `event BeginPlay` takes that node
+instead of failing. An event that already has a wire is a duplicate (see
+[When it cannot be done](#when-it-cannot-be-done)).
+
 For the event of **another object's dispatcher** -- the one you create by
 right-clicking a child widget and choosing its dispatcher:
 
@@ -465,7 +471,7 @@ None of this fails silently:
 | Situation | What happens |
 |---|---|
 | Node name not found | **red** comment in the graph with the original line |
-| Event that already exists in the graph | red comment; nothing is created or changed |
+| Event that already exists in the graph, with a wire | red comment; nothing is created or changed |
 | Ambiguous name | red comment listing the candidates, none chosen |
 | Nonexistent pin | error in the panel listing the pins the node really has |
 | `$something` that does not exist | error in the panel |

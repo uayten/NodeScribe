@@ -1,6 +1,6 @@
 # Decisions
 
-<!-- project-docs: only what holds now. Next ID: D-019 · Next fact: F-005 -->
+<!-- project-docs: only what holds now. Next ID: D-020 · Next fact: F-005 -->
 
 ## Decisions
 
@@ -100,6 +100,13 @@ Decision: what each version changed goes to `Docs/history.md`, proposals to `Doc
 Why: an agent reads *Status* and *Development* before touching the code. *Status* had grown to 27 KB of changelog, paid again in every development session.
 Origin: user asked for the plugin to stay token efficient as it grows; agent's proposal
 Affects: README.md, README.pt-BR.md, Docs/history.md, Docs/ideas.md, Docs/development.md
+
+### D-019 An event already in the graph with no wire is reused, not refused
+Decision: `event X` that finds an existing X with no link on any pin takes that node, moves it next to the new chain and does not count it as created; with any link, the duplicate guard refuses as before. A second `event X` in the same text is still a duplicate.
+Why: the reader leaves out exactly those events, so a reading with no `BeginPlay` could not take one, and the text gave no reason. Hit by a fresh agent on `BP_TesteGolem`, which had to delete the stub with the native toolset. An unlinked event carries no behaviour, so reusing it decides nothing; linking it turns a disabled stub into a real node, as on screen.
+Origin: user, from the fresh agent's R-008 check
+Not chosen: deleting the stub and creating a new event, as the editor's menu does -- a Custom Event with no wire may still hold parameters someone declared.
+Affects: NodeScribeBuilder.cpp (ReuseEmptyEventOrRefuse), Docs/FORMAT.md (Events)
 
 ## Verified facts
 
