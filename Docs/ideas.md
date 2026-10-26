@@ -2,7 +2,7 @@
 
 Proposals and measurements, not plans. An idea becomes work only when it is
 accepted into [ROADMAP.md](../ROADMAP.md), with its proposal answering the
-four questions in *Proposing a new tool*, in the README.
+four questions in *Proposing a new tool*, in [development.md](development.md).
 
 ## Our own MCP: talking straight to the client
 
@@ -87,7 +87,7 @@ This is where the proposal pays for itself:
 
 ### What stays the same, and there is no point pretending
 
-This README already records, in *Development*, that a server of our own "is not
+[development.md](development.md) already records that a server of our own "is not
 worth it" -- that was said about replacing the **command file**, which exists
 precisely for when the network goes down. The argument survives here: stage 2
 does not remove the risk of having a network protocol up, it only changes its

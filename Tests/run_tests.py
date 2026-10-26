@@ -55,7 +55,7 @@ BUDGET = {
     # Every tool's description, read whole when the assistant looks the
     # toolset up -- once in every session that uses the plugin.
     'descriptions': 11500,
-    # A new tool costs a choice (README, *What must not break*); a new kind of
+    # A new tool costs a choice (Docs/development.md, *What must not break*); a new kind of
     # asset goes into read_object / write_object instead (DECISIONS, D-016).
     'tools': 11,
     # A reading's graph lines against the ones that made it, worst case.

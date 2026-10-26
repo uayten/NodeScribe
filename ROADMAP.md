@@ -4,19 +4,13 @@
 
 ## Em teste
 
-<!-- Passos de teste: só o que o usuário faz e confere. A parte do assistente é feita antes de o item entrar aqui. -->
+<!-- Passos de teste: um passo pode mandar pedir algo ao assistente; depois do pedido feito, ele é reescrito com o que o usuário confere. -->
 
 ### R-008 [ajuste] FORMAT.md por tópico
-1. Abrir `Docs/FORMAT.md` do NodeScribe: a tabela *Topics* aparece logo depois do índice, com os quatro tópicos e quando ler cada um.
-2. Abrir a pasta `Docs/format/`: tem um arquivo para cada tópico da tabela (`animgraph`, `behavior-tree`, `designer`, `reading`).
-3. Na próxima conversa sobre grafo no BossRush, conferir que o assistente lê só o `FORMAT.md` e só abre um arquivo de `Docs/format/` quando a tarefa é daquele tópico.
+1. Na próxima conversa sobre grafo no BossRush, pedir um grafo num rascunho de `Testes/` e colar: o grafo entra e compila como antes da mudança.
 
 ### R-012 [ajuste] Teto de tokens na suíte de testes
-1. Abrir o arquivo `tests.txt` em `BossRush/Saved/NodeScribe/`: a última linha é `25 case(s), 0 failure(s)`, e logo acima está o `token_budget` com o tamanho do núcleo, de cada tópico, das descrições das ferramentas e a razão leitura/texto, cada um com seu teto.
-
-### R-013 [ajuste] README só com o estado atual
-1. Abrir o `README.md` do NodeScribe: a seção *Status* cabe numa tela e aponta para `Docs/history.md` e `Docs/ideas.md`.
-2. Abrir esses dois arquivos: o histórico e as propostas que estavam no README estão lá, inteiros.
+1. Abrir o arquivo `tests.txt` em `BossRush/Saved/NodeScribe/`: a última linha diz `0 failure(s)`.
 
 ## Em andamento
 

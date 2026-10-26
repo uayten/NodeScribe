@@ -47,10 +47,10 @@ Decision: the reader and builder skip `ShowPinForProperties` on every node class
 Why: every struct Break fills it, so it always "changed"; as a setting it made `replace` refuse a graph NodeScribe had just written.
 Origin: agent's choice, from the other session's test
 
-### D-009 Code and docs in English; ROADMAP.md in Portuguese
-Decision: identifiers, comments, messages, README, FORMAT and these files are English; the ROADMAP items are Portuguese.
-Why: the repository is public and English; the roadmap's test steps are what the user reads to test.
-Origin: user
+### D-009 Code and docs in English; the main README and ROADMAP.md in Portuguese
+Decision: identifiers, comments, messages, FORMAT and these files are English. The main README is `README.pt-BR.md`, in Portuguese, and `README.md` is its English translation, kept with the same content; the ROADMAP items are Portuguese.
+Why: the repository is public and English, but the user reads the README and the roadmap's test steps to test, in Portuguese. A change to the README is made in `README.pt-BR.md` and translated into `README.md` in the same commit.
+Origin: user (README in Portuguese asked for on 2026-10-26)
 
 ### D-010 Flow, not execution
 Decision: the builder's walk uses `IsFlowPin` / `FindFlowInput` / `GetFlowOutputs`, which answer an execution pin in the EventGraph and a pose pin in the AnimGraph.
@@ -85,7 +85,7 @@ Origin: user, AnimGraph round
 
 ### D-016 A new kind of asset is a shape of read_object / write_object, not a tool
 Decision: Blackboard, Behavior Tree and Designer already ride on the sheet's two tools; the next kinds (Input Mapping Context, Gameplay Effect components) do the same. `write_blendspace` stays as it is. The suite's `token_budget` caps the number of tools.
-Why: every tool's description is read whenever the toolset is looked up, and similar doors make the assistant choose wrong (README, *What must not break*, 4).
+Why: every tool's description is read whenever the toolset is looked up, and similar doors make the assistant choose wrong (`Docs/development.md`, *What must not break*, 4).
 Origin: user asked for the plugin to stay token efficient as it grows; agent's proposal
 Affects: R-004, R-007, Tests/run_tests.py
 
@@ -96,10 +96,10 @@ Origin: R-008
 Affects: Docs/FORMAT.md, Docs/format/, NodeScribeLibrary.cpp, graph.py
 
 ### D-018 The README holds the current state; history and ideas go to Docs/
-Decision: what each version changed goes to `Docs/history.md`, proposals to `Docs/ideas.md`; the README's *Status* is the present only.
+Decision: what each version changed goes to `Docs/history.md`, proposals to `Docs/ideas.md`, and what a developer or agent needs to work on the plugin to `Docs/development.md`, in English only; the README is for a newcomer and its *Status* is the present only.
 Why: an agent reads *Status* and *Development* before touching the code. *Status* had grown to 27 KB of changelog, paid again in every development session.
 Origin: user asked for the plugin to stay token efficient as it grows; agent's proposal
-Affects: README.md, Docs/history.md, Docs/ideas.md
+Affects: README.md, README.pt-BR.md, Docs/history.md, Docs/ideas.md, Docs/development.md
 
 ## Verified facts
 

@@ -43,6 +43,11 @@ there are no aliases in other languages. Names that come from a project
 (variables, pins, assets) may be in any language, and the lookup ignores
 accents for them.
 
+Two exceptions, both read by the user (D-009): the main README is
+`README.pt-BR.md`, in Portuguese, and `README.md` is its English translation --
+change the first and translate into the second in the same commit; the
+ROADMAP items are Portuguese.
+
 ## Structure
 
 | file | role |
@@ -53,8 +58,8 @@ accents for them.
 | `NodeScribeReader` | the way back: nodes → text. |
 | `NodeScribeGraphActions` | the three buttons on the editor toolbar. |
 | `NodeScribeWidgetTree` | a Widget Blueprint's Designer as text, both ways: the `designer` section of `read_object` / `write_object`. |
-| `Tests/run_tests.py` | automated round trip, without an interface, plus `token_budget`: ceilings on what the docs, the tools and a reading cost. Run it before and after touching the reader, the builder or the docs; the command is in *Testing*, in the README. |
-| `Saved/NodeScribe/vocabulary.txt` | the names nobody managed to resolve, one per line. `sort \| uniq -c \| sort -rn` gives the list of aliases missing from the catalog, by frequency. It is not an error log -- see *The missing vocabulary*, in the README. |
+| `Tests/run_tests.py` | automated round trip, without an interface, plus `token_budget`: ceilings on what the docs, the tools and a reading cost. Run it before and after touching the reader, the builder or the docs; the command is in *Testing*, in `Docs/development.md`. |
+| `Saved/NodeScribe/vocabulary.txt` | the names nobody managed to resolve, one per line. `sort \| uniq -c \| sort -rn` gives the list of aliases missing from the catalog, by frequency. It is not an error log -- see *The missing vocabulary*, in `Docs/development.md`. |
 
 Reader and builder are mirrors: when teaching a new kind of node, both change.
 A new family of nodes gets its own pair of files, as `NodeScribeAnimGraph`
@@ -63,17 +68,17 @@ topic in `Docs/format/`, not a new tool (D-016).
 
 ## Before touching the code
 
-Read **Status** and **Development** in the [`README.md`](README.md). They hold:
-where the plugin is, the cycle of closing the editor → compiling → reopening →
-testing (with the commands ready), how to test by round trip, the invariants
-that must not break, how to grow without getting heavier, and what a proposal
+Read [`Docs/development.md`](Docs/development.md), and *Status* in the README
+for where the plugin is. The first holds the cycle of closing the editor →
+compiling → reopening → testing (with the commands ready), how to test by
+round trip, the invariants that must not break, how to grow without getting heavier, and what a proposal
 for a new tool needs to answer before becoming code. `Docs/history.md` and
 `Docs/ideas.md` are not read by default.
 
 Current front: the next step in HANDOFF.md, and the pending work in order in
 ROADMAP.md (its items are in Portuguese, D-009). An idea for a new tool goes to
 the ROADMAP only once the user accepts it, and its proposal answers the four
-questions in *Proposing a new tool*, in the README, first.
+questions in *Proposing a new tool*, in `Docs/development.md`, first.
 
 ## Lessons that cost a build
 
