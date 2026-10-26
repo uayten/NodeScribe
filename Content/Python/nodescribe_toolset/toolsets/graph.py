@@ -117,7 +117,8 @@ class NodeScribeTools(unreal.ToolsetDefinition):
         `designer` line: one `Name : Class [variable]` line per widget,
         indented by hierarchy, with its changed properties and `slot ...`
         settings under it. Filtering a Widget Blueprint also matches widget
-        names and classes.
+        names and classes. An Input Mapping Context adds a `mappings` section,
+        and an actor Blueprint names its components in `# components:`.
 
         Args:
             target: The object to read. Blueprints and classes become their CDO.
@@ -142,9 +143,12 @@ class NodeScribeTools(unreal.ToolsetDefinition):
         them.
 
         `variable Name : Type [editable] [= value]` creates a Blueprint
-        variable, and `delete variable Name` removes one. It never creates
-        components. A line that does not resolve becomes a diagnostic with the
-        similar names, and the others are applied.
+        variable, and `delete variable Name` removes one; `component Name :
+        Class [in Parent]` adds a component, configured by the lines indented
+        under it, and `delete component Name` removes one. A block of
+        instanced objects (a Gameplay Effect's `Components:`) is that array's
+        whole value. A line that does not resolve becomes a diagnostic with the
+        similar names, and the others are applied. Details: topic `sheet`.
 
         **A Behavior Tree is the exception: the text is the whole tree**, in
         the same shape read_object gives -- the way to hook a loose branch to
@@ -157,8 +161,14 @@ class NodeScribeTools(unreal.ToolsetDefinition):
         list of changes: an existing widget's line is an anchor, a new name
         creates a widget where the text puts it (after the sibling above it),
         `like Other` copies another widget's look and slot, and `rename A -> B`
-        / `delete widget X` are the only renames and removals. Moves, reorders
-        and class changes are refused; any structural error changes nothing.
+        / `delete widget X` are the only renames and removals. An existing
+        widget written under another parent moves there, siblings written in
+        another order are reordered, and `named slot X` holds a slot's
+        content. Class changes are refused; any structural error changes nothing.
+
+        **An Input Mapping Context's mappings** go after a `mappings` line:
+        `Key -> Action`, with `trigger X` / `modifier X` indented under it.
+        Topic `input-mapping`.
 
         Args:
             target: The object to change. Blueprints and classes become their CDO.
@@ -298,8 +308,9 @@ class NodeScribeTools(unreal.ToolsetDefinition):
         Without a topic, the core: call once per session, before writing or
         interpreting text for the first time. A topic is read only when the
         task touches it: `animgraph` (AnimGraph, state machines), `designer`
-        (a Widget Blueprint's `designer` section), `behavior-tree`, and
-        `reading` (anchors, conversions and warnings in a reading; read it
-        before `replace`).
+        (a Widget Blueprint's `designer` section), `behavior-tree`,
+        `input-mapping`, `sheet` (components and instanced objects in
+        write_object), and `reading` (anchors, conversions and warnings in a
+        reading; read it before `replace`).
         """
         return unreal.NodeScribeLibrary.get_format_docs(topic or "")

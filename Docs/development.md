@@ -93,6 +93,16 @@ answer, so nothing goes stale when the format changes. It does not cover
 readability -- `True:` on a node that is not a Branch closes the fixed point
 just the same --, so someone still has to read a real graph now and then.
 
+`project_graphs_round_trip` does the same over **every graph of the
+project**: each Blueprint under `/Game` is duplicated into the scratch folder,
+each of its graphs emptied and refilled with the original's reading, and read
+again. A difference the reading did not warn about fails the case, by graph
+name; the diffs and the writer's errors go to
+`Saved/NodeScribe/project_graphs.txt`. One the reading warns about (or names
+in its *left out* note) is counted apart, as declared. Each copy is deleted
+before the next: a copy left in memory is a second class with the same
+functions, and every call to them reads as ambiguous.
+
 To move into the Engine's suite one day, the template is
 `ToolsetRegistry/Source/ToolsetRegistry/Private/Tests/ToolsetLibraryTest.cpp`
 (`BEGIN_DEFINE_SPEC`).
@@ -131,6 +141,11 @@ They compile and fail at runtime.
   constructor. Use `GetDefault<UEdGraphSchema_K2>()`. It happened twice (in
   `cac90d8`, and writing `NodeScribePropertyText`); check it wherever
   `ConvertPropertyToPinType` shows up.
+- **A new node gets its pins before `PostPlacedNewNode`.** That is the order of
+  the Blueprint action menu (`UBlueprintNodeSpawner`); the generic schema's is
+  the other one, and in 5.8 Spawn Actor from Class looks a pin up inside
+  `PostPlacedNewNode` -- `FindPinChecked` brought the editor down. The suite's
+  `spawn_actor` case holds it.
 
 ## What must not break
 

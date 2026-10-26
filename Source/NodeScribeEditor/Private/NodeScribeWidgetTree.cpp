@@ -116,8 +116,9 @@ namespace
 	{
 		TArray<FString> TooLong;
 		TArray<FString> Unreadable;
-		TArray<FString> NamedSlots;
 	};
+
+	const TCHAR* const NamedSlotKeyword = TEXT("named slot ");
 
 	/**
 	 * One widget and what hangs from it.
@@ -140,6 +141,26 @@ namespace
 		for (const UWidget* Child : ChildrenOf(Widget))
 		{
 			bAnyChild |= ReadWidget(Blueprint, Child, Depth + 1, NormalizedFilter, ChildLines, Notes);
+		}
+
+		// Content placed in a user widget's named slot lives in that instance,
+		// not in the panel's children: `named slot Name`, the content under it.
+		TArray<FString> NamedSlotLines;
+		if (const UUserWidget* UserWidget = Cast<UUserWidget>(Widget))
+		{
+			TArray<FName> SlotNames;
+			UserWidget->GetSlotNames(SlotNames);
+			for (const FName& SlotName : SlotNames)
+			{
+				const UWidget* Content = UserWidget->GetContentForSlot(SlotName);
+				TArray<FString> ContentLines;
+				if (Content && ReadWidget(Blueprint, Content, Depth + 2, NormalizedFilter, ContentLines, Notes))
+				{
+					NamedSlotLines.Add(FString::ChrN((Depth + 1) * 2, TEXT(' ')) + NamedSlotKeyword + SlotName.ToString());
+					NamedSlotLines.Append(ContentLines);
+					bAnyChild = true;
+				}
+			}
 		}
 
 		if (!bMatches && !bAnyChild)
@@ -200,24 +221,9 @@ namespace
 				OutLines.Add(FString::Printf(TEXT("%s# %s is bound to `%s`"),
 					*Inner, *Property, *Source.ToString()));
 			}
-
-			// Content placed in a child user widget's named slot lives in that
-			// instance, not in the panel's children. It is named, so its absence
-			// is visible.
-			if (const UUserWidget* UserWidget = Cast<UUserWidget>(Widget))
-			{
-				TArray<FName> SlotNames;
-				UserWidget->GetSlotNames(SlotNames);
-				for (const FName& SlotName : SlotNames)
-				{
-					if (UserWidget->GetContentForSlot(SlotName))
-					{
-						Notes.NamedSlots.Add(Name + TEXT(".") + SlotName.ToString());
-					}
-				}
-			}
 		}
 
+		OutLines.Append(NamedSlotLines);
 		OutLines.Append(ChildLines);
 		return true;
 	}
@@ -374,6 +380,13 @@ namespace
 		UWidget* Existing = nullptr;
 		UWidget* Widget = nullptr;   // after applying: the existing one or the new one
 
+		// A `named slot Name` line: not a widget, the place its one child goes.
+		bool bNamedSlot = false;
+		FName SlotName;
+
+		// An existing widget written under a parent it is not in.
+		bool bMove = false;
+
 		// The property lines, at their own line numbers -- the sheet's writer
 		// reports `line N`, and N has to be the line of the text that was sent.
 		TArray<FString> OwnText;
@@ -415,6 +428,30 @@ namespace
 		OutName = Line.Left(Colon).TrimStartAndEnd();
 		OutRest = Line.RightChop(Colon + 1).TrimStartAndEnd();
 		return !OutName.IsEmpty() && !OutRest.IsEmpty();
+	}
+
+	/**
+	 * Content of a named slot: not the root, and with no panel above it.
+	 * MoveWidget only knows panels, so moving in or out of a slot is refused.
+	 */
+	bool IsNamedSlotContent(const UWidgetTree* Tree, const UWidget* Widget)
+	{
+		return Widget && !Widget->GetParent() && Widget != Tree->RootWidget;
+	}
+
+	/** What a host offers: a user widget instance's slots, or the parent class's for the tree. */
+	TArray<FName> NamedSlotsOfHost(const UWidgetBlueprint* Blueprint, const UObject* Host)
+	{
+		TArray<FName> Names;
+		if (const UUserWidget* UserWidget = Cast<UUserWidget>(Host))
+		{
+			UserWidget->GetSlotNames(Names);
+		}
+		else if (!Host)
+		{
+			Names = Blueprint->GetInheritedAvailableNamedSlots();
+		}
+		return Names;
 	}
 
 	/** Puts a line in a sparse text at its own line number. */
@@ -500,21 +537,49 @@ FString Read(const UWidgetBlueprint* Blueprint, const FString& NormalizedFilter)
 	TArray<FString> Lines;
 	Lines.Add(SectionKeyword);
 
-	const UWidget* Root = Blueprint->WidgetTree->RootWidget;
-	if (!Root)
+	const UWidgetTree* Tree = Blueprint->WidgetTree;
+	const UWidget* Root = Tree->RootWidget;
+
+	FReadNotes Notes;
+	bool bAny = Root && ReadWidget(Blueprint, Root, 0, NormalizedFilter, Lines, Notes);
+
+	// A child Widget Blueprint has no root of its own: what it designs is the
+	// content of the named slots its parent class exposes, kept in its tree.
+	const TArray<FName> InheritedSlots = Blueprint->GetInheritedAvailableNamedSlots();
+	for (const FName& SlotName : InheritedSlots)
+	{
+		const UWidget* Content = Tree->GetContentForSlot(SlotName);
+		if (!Content)
+		{
+			// Said only when there is no root: then the slots are the whole
+			// Designer, and an empty one is a place to write into.
+			if (!Root && !bFiltering)
+			{
+				Lines.Add(NamedSlotKeyword + SlotName.ToString() + TEXT("  # empty"));
+			}
+			continue;
+		}
+
+		TArray<FString> ContentLines;
+		if (ReadWidget(Blueprint, Content, 1, NormalizedFilter, ContentLines, Notes))
+		{
+			Lines.Add(NamedSlotKeyword + SlotName.ToString());
+			Lines.Append(ContentLines);
+			bAny = true;
+		}
+	}
+
+	if (!bAny)
 	{
 		if (bFiltering)
 		{
 			return FString();
 		}
-		Lines.Add(TEXT("# empty: the Designer has no root widget"));
+		if (!Root && InheritedSlots.Num() == 0)
+		{
+			Lines.Add(TEXT("# empty: the Designer has no root widget"));
+		}
 		return FString::Join(Lines, TEXT("\n"));
-	}
-
-	FReadNotes Notes;
-	if (!ReadWidget(Blueprint, Root, 0, NormalizedFilter, Lines, Notes))
-	{
-		return FString();
 	}
 
 	if (Notes.TooLong.Num() > 0)
@@ -529,13 +594,6 @@ FString Read(const UWidgetBlueprint* Blueprint, const FString& NormalizedFilter)
 	{
 		Lines.Add(FString::Printf(TEXT("# [warning]: I do not know how to write the value of: %s"),
 			*FString::Join(Notes.Unreadable, TEXT(", "))));
-	}
-
-	if (Notes.NamedSlots.Num() > 0)
-	{
-		Lines.Add(FString::Printf(
-			TEXT("# [warning]: named slot content is not read yet, and exists in: %s"),
-			*FString::Join(Notes.NamedSlots, TEXT(", "))));
 	}
 
 	return FString::Join(Lines, TEXT("\n"));
@@ -646,6 +704,34 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 			continue;
 		}
 
+		if (Line.StartsWith(NamedSlotKeyword, ESearchCase::IgnoreCase))
+		{
+			FWidgetLine& Slot = Widgets.AddDefaulted_GetRef();
+			Slot.Line = LineNumber;
+			Slot.Indent = Indent;
+			Slot.Name = Line.RightChop(FCString::Strlen(NamedSlotKeyword)).TrimStartAndEnd();
+			Slot.bNamedSlot = true;
+			Slot.Parent = Current;
+
+			if (Current != INDEX_NONE && Widgets[Current].bNamedSlot)
+			{
+				Error(LineNumber, TEXT("a named slot holds a widget, not another named slot."));
+			}
+			else if (Current != INDEX_NONE && Widgets[Current].Indent != Indent - 1)
+			{
+				Error(LineNumber, FString::Printf(TEXT("`named slot %s` is indented more than one level under `%s`."),
+					*Slot.Name, *Widgets[Current].Name));
+			}
+			else if (Current == INDEX_NONE && Indent > 0)
+			{
+				Error(LineNumber, FString::Printf(
+					TEXT("`named slot %s` is indented, but there is no widget above it."), *Slot.Name));
+			}
+
+			Current = Widgets.Num() - 1;
+			continue;
+		}
+
 		FString Name;
 		FString Rest;
 		if (SplitWidgetLine(Line, Name, Rest))
@@ -702,6 +788,12 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 		}
 
 		FWidgetLine& Owner = Widgets[Current];
+		if (Owner.bNamedSlot)
+		{
+			Error(LineNumber, FString::Printf(
+				TEXT("under `named slot %s` goes one widget line, `Name : Class`."), *Owner.Name));
+			continue;
+		}
 		const int32 Depth = Indent - (Owner.Indent + 1);
 
 		if (Depth == 0)
@@ -789,7 +881,10 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 	TSet<FString> Mentioned;
 	for (const FWidgetLine& Widget : Widgets)
 	{
-		Mentioned.Add(Widget.Name.ToLower());
+		if (!Widget.bNamedSlot)
+		{
+			Mentioned.Add(Widget.Name.ToLower());
+		}
 	}
 
 	TSet<UWidget*> Deleted;
@@ -829,9 +924,76 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 	int32 NewRoots = 0;
 	TSet<FString> Seen;
 
+	// The host a named slot line belongs to: the widget above it, or -- at
+	// the top -- this Blueprint's own tree, for a child Widget Blueprint.
+	auto SlotHost = [&](const FWidgetLine& Slot) -> UObject*
+	{
+		if (Slot.Parent == INDEX_NONE)
+		{
+			return nullptr;
+		}
+		const FWidgetLine& Host = Widgets[Slot.Parent];
+		if (Host.Widget)
+		{
+			return Host.Widget;
+		}
+		if (Host.Existing)
+		{
+			return Host.Existing;
+		}
+		return Host.Class ? Host.Class->GetDefaultObject() : nullptr;
+	};
+
+	auto SlotContent = [&](const FWidgetLine& Slot) -> UWidget*
+	{
+		if (Slot.Parent == INDEX_NONE)
+		{
+			return Tree->GetContentForSlot(Slot.SlotName);
+		}
+		const FWidgetLine& Host = Widgets[Slot.Parent];
+		const UUserWidget* UserWidget = Cast<UUserWidget>(Host.Widget ? Host.Widget : Host.Existing);
+		return UserWidget ? UserWidget->GetContentForSlot(Slot.SlotName) : nullptr;
+	};
+
 	for (int32 Self = 0; Self < Widgets.Num(); ++Self)
 	{
 		FWidgetLine& Widget = Widgets[Self];
+
+		if (Widget.bNamedSlot)
+		{
+			const UObject* Host = SlotHost(Widget);
+			if (Widget.Parent != INDEX_NONE && !Cast<UUserWidget>(Host))
+			{
+				Error(Widget.Line, FString::Printf(TEXT("`%s` is not a user widget: it has no named slots."),
+					*Widgets[Widget.Parent].Name));
+				continue;
+			}
+
+			const TArray<FName> Available = NamedSlotsOfHost(Blueprint, Host);
+			const FName* Match = Available.FindByPredicate([&Widget](const FName& Candidate)
+			{
+				return Candidate.ToString().Equals(Widget.Name, ESearchCase::IgnoreCase);
+			});
+			if (!Match)
+			{
+				TArray<FString> Names;
+				for (const FName& Candidate : Available)
+				{
+					Names.Add(Candidate.ToString());
+				}
+				Error(Widget.Line, FString::Printf(TEXT("there is no named slot `%s` here. %s"), *Widget.Name,
+					Names.Num() > 0 ? *(TEXT("It has: ") + FString::Join(Names, TEXT(", ")))
+						: TEXT("It has none.")));
+				continue;
+			}
+			Widget.SlotName = *Match;
+
+			if (Widget.Children.Num() > 1)
+			{
+				Error(Widget.Line, FString::Printf(TEXT("`named slot %s` holds a single widget."), *Widget.Name));
+			}
+			continue;
+		}
 
 		if (Seen.Contains(Widget.Name.ToLower()))
 		{
@@ -850,6 +1012,27 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 
 		Widget.Existing = FindByName(Widget.Name);
 		const FWidgetLine* Parent = Widget.Parent != INDEX_NONE ? &Widgets[Widget.Parent] : nullptr;
+
+		// Under a named slot: the existing content stays where it is, and a new
+		// widget fills an empty slot. Moving into or out of a slot is not written.
+		if (Parent && Parent->bNamedSlot)
+		{
+			UWidget* Content = SlotContent(*Parent);
+			if (Widget.Existing && Content != Widget.Existing)
+			{
+				Error(Widget.Line, FString::Printf(
+					TEXT("`%s` is not in `named slot %s`. Moving a widget into a named slot is not written yet: ")
+					TEXT("drag it in the Designer's Hierarchy."), *Widget.Name, *Parent->Name));
+				continue;
+			}
+			if (!Widget.Existing && Content && !IsBeingDeleted(Content))
+			{
+				Error(Widget.Line, FString::Printf(
+					TEXT("`named slot %s` already holds `%s`; delete it first, or write it instead."),
+					*Parent->Name, *Content->GetName()));
+				continue;
+			}
+		}
 
 		if (Widget.Existing)
 		{
@@ -871,18 +1054,58 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 
 			// A line at the top of the text is an anchor and may name any widget.
 			// Indented, it says who the parent is -- and a different parent is a
-			// move, which nothing here does by accident.
-			if (Parent)
+			// move, there, at the place its neighbours in the text give it, as for
+			// a new widget. The return names every move.
+			if (Parent && !Parent->bNamedSlot)
 			{
 				const UWidget* Actual = Widget.Existing->GetParent();
 				if (!Parent->Existing || Actual != Parent->Existing)
 				{
-					Error(Widget.Line, FString::Printf(
-						TEXT("`%s` is under `%s`, not `%s`. Moving a widget is not written yet: ")
-						TEXT("drag it in the Designer's Hierarchy, or write it under its real parent."),
-						*Widget.Name, Actual ? *Actual->GetName() : TEXT("nothing (it is the root)"),
-						*Parent->Name));
-					continue;
+					if (Widget.Existing == Tree->RootWidget)
+					{
+						Error(Widget.Line, FString::Printf(
+							TEXT("`%s` is the root; the root does not move under another widget."), *Widget.Name));
+						continue;
+					}
+					if (IsNamedSlotContent(Tree, Widget.Existing))
+					{
+						Error(Widget.Line, FString::Printf(
+							TEXT("`%s` is in a named slot. Moving a widget out of a named slot is not written yet: ")
+							TEXT("drag it in the Designer's Hierarchy."), *Widget.Name));
+						continue;
+					}
+
+					// A parent whose own line failed already said so.
+					if (!Parent->Class)
+					{
+						continue;
+					}
+					const UPanelWidget* Panel = Cast<UPanelWidget>(Parent->Class->GetDefaultObject());
+					if (!Panel)
+					{
+						Error(Widget.Line, FString::Printf(TEXT("`%s` cannot have children: a %s is not a panel."),
+							*Parent->Name, *Parent->ClassText));
+						continue;
+					}
+
+					if (Parent->Existing)
+					{
+						FText CannotMove;
+						if (!FWidgetBlueprintOperationUtils::CanAddToParent(Blueprint, Parent->Existing, CannotMove))
+						{
+							Error(Widget.Line, FString::Printf(TEXT("`%s` does not take `%s`: %s"),
+								*Parent->Name, *Widget.Name, *CannotMove.ToString()));
+							continue;
+						}
+						if (!FWidgetBlueprintOperationUtils::IsParentChildCycleFree(Blueprint, Widget.Existing, Parent->Existing))
+						{
+							Error(Widget.Line, FString::Printf(TEXT("`%s` is inside `%s`; it cannot go under it."),
+								*Parent->Name, *Widget.Name));
+							continue;
+						}
+					}
+
+					Widget.bMove = true;
 				}
 			}
 		}
@@ -910,7 +1133,11 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 				continue;
 			}
 
-			if (!Parent)
+			if (Parent && Parent->bNamedSlot)
+			{
+				// Checked above: the slot is there and empty.
+			}
+			else if (!Parent)
 			{
 				if (bRootStays)
 				{
@@ -929,8 +1156,11 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 			else
 			{
 				const UClass* ParentClass = Parent->Class;
-				const UPanelWidget* Panel = ParentClass
-					? Cast<UPanelWidget>(ParentClass->GetDefaultObject()) : nullptr;
+				if (!ParentClass)
+				{
+					continue;
+				}
+				const UPanelWidget* Panel = Cast<UPanelWidget>(ParentClass->GetDefaultObject());
 
 				if (!Panel)
 				{
@@ -991,36 +1221,48 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 		}
 	}
 
-	// Existing siblings must be written in their real order: a new widget is
-	// placed by its neighbours, and an order the tree does not have would put
-	// it somewhere nobody wrote.
+	// Existing siblings written in another order are put in that order. The
+	// ones the text names take the places they had among themselves; a sibling
+	// the text does not name keeps its own -- reordering two of five children
+	// does not touch the other three.
+	struct FReorder
+	{
+		UPanelWidget* Panel = nullptr;
+		FString Name;
+		TArray<UWidget*> Order;
+	};
+	TArray<FReorder> Reorders;
+
 	for (const FWidgetLine& Widget : Widgets)
 	{
-		const UPanelWidget* Panel = Cast<UPanelWidget>(Widget.Existing);
-		if (!Panel)
+		UPanelWidget* Panel = Cast<UPanelWidget>(Widget.Existing);
+		if (!Panel || Widget.bNamedSlot)
 		{
 			continue;
 		}
 
+		FReorder Reorder;
+		Reorder.Panel = Panel;
+		Reorder.Name = Widget.Name;
+
 		int32 Previous = -1;
-		FString PreviousName;
+		bool bOutOfOrder = false;
 		for (int32 Child : Widget.Children)
 		{
-			const UWidget* Existing = Widgets[Child].Existing;
-			if (!Existing)
+			UWidget* Existing = Widgets[Child].Existing;
+			if (!Existing || Widgets[Child].bMove || Existing->GetParent() != Panel || Deleted.Contains(Existing))
 			{
 				continue;
 			}
 			const int32 At = Panel->GetChildIndex(Existing);
-			if (At < Previous)
-			{
-				Error(Widgets[Child].Line, FString::Printf(
-					TEXT("`%s` comes before `%s` in `%s`. Reordering is not written yet: ")
-					TEXT("write the existing children in their real order."),
-					*Widgets[Child].Name, *PreviousName, *Widget.Name));
-			}
+			bOutOfOrder |= At < Previous;
 			Previous = At;
-			PreviousName = Widgets[Child].Name;
+			Reorder.Order.Add(Existing);
+		}
+
+		if (bOutOfOrder)
+		{
+			Reorders.Add(MoveTemp(Reorder));
 		}
 	}
 
@@ -1067,6 +1309,78 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 		}
 	}
 
+	for (const FReorder& Reorder : Reorders)
+	{
+		TArray<int32> Places;
+		for (const UWidget* Child : Reorder.Order)
+		{
+			Places.Add(Reorder.Panel->GetChildIndex(Child));
+		}
+		Places.Sort();
+
+		// One at a time into the sorted places. MoveWidget counts the index in
+		// the list before taking the widget out, so a move to the right asks
+		// for one more.
+		bool bMoved = false;
+		for (int32 Index = 0; Index < Reorder.Order.Num(); ++Index)
+		{
+			UWidget* Child = Reorder.Order[Index];
+			const int32 Now = Reorder.Panel->GetChildIndex(Child);
+			const int32 Wanted = Places[Index];
+			if (Now == Wanted)
+			{
+				continue;
+			}
+
+			FText Why;
+			if (!FWidgetBlueprintOperationUtils::MoveWidget(Blueprint, Child, Reorder.Panel,
+				Now < Wanted ? Wanted + 1 : Wanted, Why))
+			{
+				Result.Diagnostics.Add(FString::Printf(TEXT("[error]: could not reorder `%s` in `%s`: %s"),
+					*Child->GetName(), *Reorder.Name, *Why.ToString()));
+				continue;
+			}
+			bMoved = true;
+		}
+
+		if (bMoved)
+		{
+			++Result.Applied;
+			TArray<FString> Names;
+			for (int32 Index = 0; Index < Reorder.Panel->GetChildrenCount(); ++Index)
+			{
+				Names.Add(Reorder.Panel->GetChildAt(Index)->GetName());
+			}
+			Result.Diagnostics.Add(FString::Printf(TEXT("[note]: reordered `%s`: %s"),
+				*Reorder.Name, *FString::Join(Names, TEXT(", "))));
+		}
+	}
+
+	// Where a widget goes among its siblings: right after the sibling written
+	// above it, or right before the existing one written below it; with
+	// neither, at the end -- the case of a parent written alone as an anchor,
+	// with only the new child under it.
+	auto PlaceAmongSiblings = [&](int32 Self, const UPanelWidget* Parent) -> int32
+	{
+		const TArray<int32>& Siblings = Widgets[Widgets[Self].Parent].Children;
+		const int32 Position = Siblings.IndexOfByKey(Self);
+
+		if (Position > 0 && Widgets[Siblings[Position - 1]].Widget
+			&& Widgets[Siblings[Position - 1]].Widget->GetParent() == Parent)
+		{
+			return Parent->GetChildIndex(Widgets[Siblings[Position - 1]].Widget) + 1;
+		}
+		for (int32 Next = Position + 1; Next < Siblings.Num(); ++Next)
+		{
+			const UWidget* Below = Widgets[Siblings[Next]].Existing;
+			if (Below && Below->GetParent() == Parent)
+			{
+				return Parent->GetChildIndex(Below);
+			}
+		}
+		return INDEX_NONE;
+	};
+
 	auto ApplyVariable = [&](FWidgetLine& Widget, bool bIsNew)
 	{
 		bool bWanted = Widget.Widget->bIsVariable;
@@ -1110,11 +1424,98 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 	for (int32 Self = 0; Self < Widgets.Num(); ++Self)
 	{
 		FWidgetLine& Widget = Widgets[Self];
+		if (Widget.bNamedSlot)
+		{
+			continue;
+		}
+
 		const bool bIsNew = Widget.Existing == nullptr;
+		const FWidgetLine* SlotLine = Widget.Parent != INDEX_NONE && Widgets[Widget.Parent].bNamedSlot
+			? &Widgets[Widget.Parent] : nullptr;
 
 		if (!bIsNew)
 		{
 			Widget.Widget = Widget.Existing;
+
+			if (Widget.bMove)
+			{
+				UPanelWidget* NewParent = Cast<UPanelWidget>(Widgets[Widget.Parent].Widget);
+				const UPanelWidget* OldParent = Widget.Existing->GetParent();
+				FText Why;
+				if (!NewParent)
+				{
+					Error(Widget.Line, FString::Printf(TEXT("`%s` was not created, so `%s` has nowhere to go."),
+						*Widgets[Widget.Parent].Name, *Widget.Name));
+				}
+				else if (FWidgetBlueprintOperationUtils::MoveWidget(Blueprint, Widget.Existing, NewParent,
+					PlaceAmongSiblings(Self, NewParent), Why))
+				{
+					++Result.Applied;
+					Result.Diagnostics.Add(FString::Printf(TEXT("line %d [note]: moved `%s` from `%s` to `%s`."),
+						Widget.Line, *Widget.Name, OldParent ? *OldParent->GetName() : TEXT("?"),
+						*NewParent->GetName()));
+				}
+				else
+				{
+					Error(Widget.Line, FString::Printf(TEXT("could not move `%s`: %s"), *Widget.Name, *Why.ToString()));
+				}
+			}
+		}
+		else if (SlotLine)
+		{
+			UObject* Host = SlotLine->Parent != INDEX_NONE ? Widgets[SlotLine->Parent].Widget : nullptr;
+			if (SlotLine->Parent != INDEX_NONE && !Host)
+			{
+				Error(Widget.Line, FString::Printf(TEXT("`%s` was not created, so `%s` has nowhere to go."),
+					*Widgets[SlotLine->Parent].Name, *Widget.Name));
+				continue;
+			}
+
+			FAssetData Asset = Widget.Class->ClassGeneratedBy
+				? FAssetData(Widget.Class->ClassGeneratedBy.Get()) : FAssetData(Widget.Class);
+
+			FText Why;
+			UWidget* Created = FWidgetBlueprintOperationUtils::CreateWidgetFromAsset(Blueprint, Asset, Tree, Why);
+			if (!Created)
+			{
+				Error(Widget.Line, FString::Printf(TEXT("could not create `%s`: %s"), *Widget.Name, *Why.ToString()));
+				continue;
+			}
+			if (!FWidgetBlueprintOperationUtils::VerifyWidgetRename(Blueprint, Created,
+				FText::FromString(Widget.Name), Why))
+			{
+				FWidgetBlueprintOperationUtils::RemoveTransientWidgetFromTree(Blueprint, Created);
+				Error(Widget.Line, FString::Printf(TEXT("cannot name it `%s`: %s"), *Widget.Name, *Why.ToString()));
+				continue;
+			}
+
+			// The host keeps the binding: the instance for a user widget's slot,
+			// the tree for a slot this Blueprint inherits.
+			if (UUserWidget* UserWidget = Cast<UUserWidget>(Host))
+			{
+				UserWidget->SetFlags(RF_Transactional);
+				UserWidget->Modify();
+				UserWidget->SetContentForSlot(SlotLine->SlotName, Created);
+			}
+			else
+			{
+				Tree->SetContentForSlot(SlotLine->SlotName, Created);
+			}
+
+			// What AddWidget does for a panel's child: without the widget's
+			// variable GUID, the rename below trips an ensure in the Engine.
+			Blueprint->OnVariableAdded(Created->GetFName());
+
+			FWidgetBlueprintOperationUtils::RenameWidget(Blueprint, Created, Widget.Name);
+			if (!Created->GetName().Equals(Widget.Name, ESearchCase::IgnoreCase))
+			{
+				Result.Diagnostics.Add(FString::Printf(
+					TEXT("line %d [warning]: the Engine named it `%s`, not `%s`."),
+					Widget.Line, *Created->GetName(), *Widget.Name));
+			}
+
+			Widget.Widget = Created;
+			++Result.Applied;
 		}
 		else
 		{
@@ -1128,32 +1529,7 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 				continue;
 			}
 
-			// The place comes from the neighbours in the text: right after the
-			// sibling written above it, or right before the one written below.
-			// With neither, at the end -- the case of a parent written alone as
-			// an anchor, with only the new child under it.
-			int32 ChildIndex = INDEX_NONE;
-			if (Parent)
-			{
-				const TArray<int32>& Siblings = Widgets[Widget.Parent].Children;
-				const int32 Position = Siblings.IndexOfByKey(Self);
-
-				if (Position > 0 && Widgets[Siblings[Position - 1]].Widget)
-				{
-					ChildIndex = Parent->GetChildIndex(Widgets[Siblings[Position - 1]].Widget) + 1;
-				}
-				else
-				{
-					for (int32 Next = Position + 1; Next < Siblings.Num(); ++Next)
-					{
-						if (const UWidget* Below = Widgets[Siblings[Next]].Existing)
-						{
-							ChildIndex = Parent->GetChildIndex(Below);
-							break;
-						}
-					}
-				}
-			}
+			const int32 ChildIndex = Parent ? PlaceAmongSiblings(Self, Parent) : INDEX_NONE;
 
 			FAssetData Asset = Widget.Class->ClassGeneratedBy
 				? FAssetData(Widget.Class->ClassGeneratedBy.Get()) : FAssetData(Widget.Class);
@@ -1234,7 +1610,8 @@ FResult Write(UWidgetBlueprint* Blueprint, const FString& Text)
 			else
 			{
 				Error(Widget.Line, FString::Printf(
-					TEXT("`%s` has no slot to write into: it is the root."), *Widget.Name));
+					TEXT("`%s` has no slot to write into: it is the root, or a named slot's content."),
+					*Widget.Name));
 			}
 		}
 

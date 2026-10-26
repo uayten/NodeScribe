@@ -870,10 +870,16 @@ private:
 		return Node;
 	}
 
+	/**
+	 * Pins first, then the placement hook -- the order of the Blueprint
+	 * action menu (`UBlueprintNodeSpawner`), not the generic schema's. In 5.8
+	 * Spawn Actor from Class looks up its Scale Method pin inside
+	 * PostPlacedNewNode, and the other order brought the editor down.
+	 */
 	static void FinalizeNode(UEdGraphNode* Node)
 	{
-		Node->PostPlacedNewNode();
 		Node->AllocateDefaultPins();
+		Node->PostPlacedNewNode();
 	}
 
 	UEdGraphNode* CreateNodeForStatement(const FNodeScribeStatement& Statement);

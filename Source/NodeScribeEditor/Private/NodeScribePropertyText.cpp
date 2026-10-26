@@ -6,6 +6,7 @@
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/UserDefinedEnum.h"
+#include "Internationalization/Regex.h"
 #include "Misc/StringOutputDevice.h"
 #include "UObject/EnumProperty.h"
 #include "UObject/TextProperty.h"
@@ -72,6 +73,32 @@ namespace
 			return true;
 		}
 		return TryQuote(Value, OutText);
+	}
+
+	/**
+	 * Turns the Engine's `Class'Path'` object references into a bare `Path`.
+	 *
+	 * A struct holding an asset exports it as
+	 * `"/Script/Engine.DataTable'/Game/DT_X.DT_X'"`: double quotes outside,
+	 * single inside, and a line cannot quote a value that holds both. The
+	 * AbilitySystem's `Default Starting Data` was the case -- unreadable for a
+	 * class prefix the import does not need, since a path alone resolves.
+	 */
+	FString StripObjectClassPrefixes(const FString& Exported)
+	{
+		const FRegexPattern Pattern(TEXT("(/[A-Za-z0-9_./-]+)'([^'\"]*)'"));
+		FRegexMatcher Matcher(Pattern, Exported);
+
+		FString Result;
+		int32 Copied = 0;
+		while (Matcher.FindNext())
+		{
+			Result += Exported.Mid(Copied, Matcher.GetMatchBeginning() - Copied);
+			Result += Matcher.GetCaptureGroup(2);
+			Copied = Matcher.GetMatchEnding();
+		}
+		Result += Exported.Mid(Copied);
+		return Result;
 	}
 
 	/** Strips the quotes QuoteIfNeeded adds. Without quotes, returns it as it came. */
@@ -455,6 +482,13 @@ bool ValueToText(const FProperty* Property, const void* ValuePtr, FString& OutTe
 	if (Exported.IsEmpty())
 	{
 		return false;
+	}
+
+	// Only where it would otherwise be refused: elsewhere the Engine's form
+	// already round-trips, and changing it would change every reading.
+	if (Exported.Contains(TEXT("\"")) && Exported.Contains(TEXT("'")))
+	{
+		Exported = StripObjectClassPrefixes(Exported);
 	}
 
 	return QuoteIfNeeded(Exported, OutText);

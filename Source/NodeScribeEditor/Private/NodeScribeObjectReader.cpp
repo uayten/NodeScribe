@@ -3,6 +3,9 @@
 #include "NodeScribeAIReader.h"
 #include "NodeScribeBlendSpace.h"
 #include "NodeScribeCatalog.h"
+#include "NodeScribeComponents.h"
+#include "NodeScribeInputMapping.h"
+#include "NodeScribeInstanced.h"
 #include "NodeScribeObjectTarget.h"
 #include "NodeScribePropertyText.h"
 #include "NodeScribeWidgetTree.h"
@@ -336,6 +339,27 @@ namespace
 				continue;
 			}
 
+			// A Gameplay Effect's `Components`: one line per element, by the name
+			// the Details panel shows, instead of the Engine's nested export.
+			if (NodeScribeInstanced::IsInstancedObjectArray(Property))
+			{
+				FEntry Head;
+				Head.Left = Name + TEXT(":");
+				OutEntries.Add(Head);
+
+				TArray<FString> ElementLines;
+				NodeScribeInstanced::Read(CastField<FArrayProperty>(Property), ValuePtr,
+					/*Depth*/ 1, FString(), ElementLines, Stats.Unreadable);
+
+				for (const FString& Line : ElementLines)
+				{
+					FEntry Element;
+					Element.Left = Line;
+					OutEntries.Add(MoveTemp(Element));
+				}
+				continue;
+			}
+
 			FString Value;
 			if (!ValueToText(Property, ValuePtr, Value))
 			{
@@ -476,6 +500,21 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 	const UWidgetBlueprint* WidgetBlueprint = Cast<UWidgetBlueprint>(Blueprint);
 	OwnVariables.Append(NodeScribeWidgetTree::CollectWidgetNames(WidgetBlueprint));
 
+	// A component added in the Components panel is also a property of the
+	// class pointing at it, and on the CDO it says `Hitbox = None` -- one
+	// useless line per component. The component's own block says what it is.
+	for (const TPair<FString, UObject*>& Pair : CollectComponents(Target, Blueprint))
+	{
+		OwnVariables.Add(FName(*Pair.Key));
+	}
+
+	// An Input Mapping Context's mappings come out in a section of their own.
+	const bool bInputMapping = NodeScribeInputMapping::Handles(Target);
+	if (bInputMapping)
+	{
+		OwnVariables.Add(NodeScribeInputMapping::MappingsPropertyName());
+	}
+
 	FCollectStats Stats;
 
 	// The Blueprint's own variables come out in a block of their own, with
@@ -599,6 +638,14 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 		if (InterfaceNames.Num() > 0)
 		{
 			Lines.Add(TEXT("# interfaces: ") + FString::Join(InterfaceNames, TEXT(", ")));
+		}
+
+		// Every component, changed or not: the sheet below only opens the
+		// changed ones, and `component X : Class in Parent` needs a parent's name.
+		const FString ComponentTree = NodeScribeComponents::Describe(Blueprint);
+		if (!ComponentTree.IsEmpty())
+		{
+			Lines.Add(ComponentTree);
 		}
 	}
 
@@ -734,6 +781,13 @@ FString FNodeScribeObjectReader::ReadObject(UObject* Object, const FString& Filt
 	{
 		Lines.Add(FString::Printf(TEXT("# [warning]: I do not know how to write the value of: %s"),
 			*FString::Join(Stats.Unreadable, TEXT(", "))));
+	}
+
+	// After the footer, for the same reason as the Designer below.
+	if (bInputMapping && (!bFiltering
+		|| FNodeScribeCatalog::Normalize(TEXT("Default Key Mappings")).Contains(NormalizedFilter)))
+	{
+		Lines.Add(NodeScribeInputMapping::Read(Target));
 	}
 
 	// Last, after the sheet's own footer: `write_object` splits the text at the

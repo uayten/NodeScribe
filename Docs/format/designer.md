@@ -69,9 +69,47 @@ Root : VerticalBox
   widget, never a rename.
 
 A widget line at the top of the text is an anchor and may name any widget,
-however deep it really is. Indented, it states its parent, and a different
-parent is a move -- refused, since moving is not written yet. So are
-reordering existing siblings and changing a widget's class.
+however deep it really is. Indented, it states its parent:
+
+- **A different parent is a move.** The widget goes there, at the place its
+  neighbours in the text give it -- the same rule as a new widget --, and the
+  return names every move. The root does not move, and nothing moves into its
+  own children.
+- **Siblings written in another order are reordered.** The siblings the text
+  names take, in the text's order, the places they had among themselves; a
+  sibling the text does not name keeps its place. Reordering two of five
+  children leaves the other three where they were.
+
+Changing a widget's class is refused: use Replace With in the Hierarchy.
+
+### Named slots
+
+What a user widget's named slot holds is not one of its children: it comes
+out under `named slot Name`, one level in from the widget, and the content one
+level further:
+
+```
+Frame : WBP_Frame
+  named slot Body
+    BodyText : TextBlock
+      Text = "Hello"
+```
+
+A child Widget Blueprint has no root of its own: what it designs is the
+content of its parent class's named slots, so its Designer is a list of them
+at the top, and an empty one says so:
+
+```
+designer
+named slot Title
+  TitleText : TextBlock
+named slot Footer  # empty
+```
+
+Writing a new widget under a `named slot` line fills that slot; a slot holds
+one widget, and one that is already filled is refused until its content is
+deleted. Moving an existing widget into or out of a named slot is not written
+yet, and is refused.
 
 The structure is all or nothing: a class that does not resolve, a name already
 taken, a second root, a panel that holds a single child given two, and nothing
@@ -81,5 +119,4 @@ the similar names, and the other lines are applied.
 
 Filtering `read_object` by a word gives the widgets whose name or class
 contains it, with their properties whole, under their ancestors written bare --
-which still pastes back as anchors. Not read yet, and named in a warning:
-content placed in a child Widget Blueprint's named slot.
+which still pastes back as anchors.

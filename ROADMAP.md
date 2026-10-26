@@ -4,44 +4,28 @@
 
 ## Em teste
 
+### R-003 Adicionar componentes a um Blueprint pelo texto
+1. No Content Browser, abrir a pasta BossRush/Testes e dar duplo clique em BP_TesteGolem: no painel Components aparecem AbilitySystem e Hitbox, e Hitbox fica pendurado em CharacterMesh0.
+2. Clicar em Hitbox: no painel Details, Box Extent está em 40, 40, 60.
+
+### R-004 Input Mapping Context como texto
+1. Na mesma pasta, abrir IMC_Teste: a lista de mapeamentos tem as mesmas ações e teclas do ActionInputMapping, mais E em Ataque, e Movimentação não tem a tecla W.
+2. Em Ataque, abrir a tecla E: em Triggers aparece Tap.
+3. Em Movimentação, abrir Gamepad Left Thumbstick 2D-Axis: em Modifiers aparecem To World Space e Dead Zone, com Lower Threshold em 0,3.
+
+### R-005 Mover e reordenar widgets no Designer
+1. Abrir WBP_TesteDesigner, aba Designer: na Hierarchy, debaixo de Root, BatteryRow vem antes de TemperatureRow, e na prévia a linha "Battery Volts" aparece acima de "Temperature".
+2. Na Hierarchy, abrir HorizontalBox: Footer é o último item, depois de IsStillAnswer, e na prévia o "Text Block" aparece na mesma linha de "Is Still?".
+3. Clicar em Compile: compila sem erro.
+
+### R-006 Conteúdo de named slots no Designer
+1. Ainda no WBP_TesteDesigner, na Hierarchy, abrir Framed: dentro do slot Body estão FramedRow e FramedText, e na prévia "Inside the slot" aparece logo abaixo de "Host".
+2. Abrir WBP_TesteSlotChild, aba Designer: a Hierarchy mostra os slots Body e Foot preenchidos, e na prévia aparecem "Host", "From the child" e "Text Block", nessa ordem.
+
+### R-007 Componentes de Gameplay Effect
+1. Abrir GE_TesteCooldown, na mesma pasta: Duration Policy é Has Duration, com 7 na duração.
+2. Em Components: há um Grant Tags to Target Actor, com Cooldown.Golem.Salto em Add Tags.
+
 ## Em andamento
 
 ## A fazer
-
-### R-002 [feature] Ler o Default Starting Data do AbilitySystem
-Esperado: saber, lendo o BP_Golem, se o componente AbilitySystem concede as habilidades do Golem.
-
-### R-003 [feature] Adicionar componentes a um Blueprint pelo texto
-Esperado: pedir ao assistente um componente novo num Blueprint (o que hoje se faz no painel Components) e ele aparecer lá, já configurado.
-
-### R-004 [feature] Input Mapping Context como texto
-Esperado: ler e escrever um Input Mapping Context como uma lista tecla → ação, com os triggers e modifiers de cada mapeamento, em vez da lista enorme de structs que sai hoje.
-
-### R-005 [feature] Mover e reordenar widgets no Designer
-Esperado: mudar um widget de lugar ou de ordem pelo texto do Designer.
-
-### R-006 [feature] Conteúdo de named slots no Designer
-Esperado: ver e montar o que fica dentro dos named slots de um Widget Blueprint filho, como o resto do Designer.
-
-### R-007 [feature] Componentes de Gameplay Effect
-Esperado: montar um cooldown novo sem cliques, incluindo o componente Grant Tags to Target Actor.
-
-### R-009 [ajuste] Prosa enxuta no FORMAT.md
-Ajusta: a especificação do formato (Docs/FORMAT.md)
-Esperado: o FORMAT.md dizer só as regras; o porquê de cada uma fica num documento de design à parte.
-Como:
-- As afirmações medidas ficam onde estão (README, Docs/development.md)
-
-### R-010 [feature] Teste automático de ida e volta nos grafos do projeto
-Esperado: qualquer grafo do projeto que não volta igual depois de lido e colado aparece sozinho como falha, sem alguém tropeçar nele (como o Set Visibility, os pinos do Append e os nomes de struct dividida).
-Como:
-- Para cada grafo: ler, gravar num rascunho, ler de novo, comparar
-- Rascunhos só em /Game/BossRush/Testes/, nada salvo
-- Junto da suíte de testes que já existe
-
-### R-011 [ajuste] Confirmar no editor a ida e volta da state machine
-Ajusta: state machine do AnimGraph (Docs/format/animgraph.md)
-Esperado: uma state machine com regra de transição lida, colada de volta e compilada sem erro no editor, não só na suíte automática.
-Como:
-- Rascunho `/Game/Retarget/ABP_TesteSM` no projeto Metahuman; apagar no fim
-- A regra tem que voltar como linha sob `Idle -> Running:`, sem a nota de nós órfãos

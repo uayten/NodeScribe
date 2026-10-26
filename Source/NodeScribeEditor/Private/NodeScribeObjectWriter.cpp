@@ -3,6 +3,9 @@
 #include "NodeScribeAIWriter.h"
 #include "NodeScribeBuilder.h"
 #include "NodeScribeCatalog.h"
+#include "NodeScribeComponents.h"
+#include "NodeScribeInputMapping.h"
+#include "NodeScribeInstanced.h"
 #include "NodeScribeObjectTarget.h"
 #include "NodeScribeParser.h"
 #include "NodeScribePropertyText.h"
@@ -130,7 +133,7 @@ namespace
 	 * actor's would be two formats for the same line.
 	 */
 	void ApplySheetLines(UObject* Object, UObject* Root, UBlueprint* Blueprint,
-		const TMap<FString, UObject*>& Components, const FString& Text,
+		TMap<FString, UObject*>& Components, const FString& Text,
 		FNodeScribeObjectWriter::FResult& Result, bool& bTouchedBlueprint)
 	{
 		TArray<FString> Lines;
@@ -185,6 +188,110 @@ namespace
 				CurrentObjectLabel.Empty();
 				OpenStruct = nullptr;
 				OpenStructValue = nullptr;
+			}
+
+			// `delete component Name`: the same reason as `delete variable`, below.
+			if (Line.StartsWith(TEXT("delete component "), ESearchCase::IgnoreCase))
+			{
+				const FString Written = Line.RightChop(17).TrimStartAndEnd();
+
+				FString Error;
+				if (!NodeScribeComponents::Remove(Blueprint, Written, Error))
+				{
+					Result.Diagnostics.Add(FString::Printf(
+						TEXT("line %d [error]: %s"), LineNumber, *Error));
+					continue;
+				}
+
+				Components.Remove(Written);
+				bTouchedBlueprint = true;
+				++Result.Applied;
+				continue;
+			}
+
+			// `component Name : Class [in Parent]` creates a component, and the
+			// indented lines under it configure it, like any component block.
+			//
+			// A word of its own, not a `Name : Class` block line that happens to
+			// name nothing: that is also what a typo in an existing component's
+			// name looks like, and creating a component for a typo is a guess.
+			// When the name already exists with that class, the line is an
+			// anchor -- pasting the same text twice creates nothing twice.
+			// No `=`: `Component Tags = ...` is a property, not a declaration.
+			if (Line.StartsWith(TEXT("component "), ESearchCase::IgnoreCase) && !Line.Contains(TEXT("=")))
+			{
+				FString Declaration = Line.RightChop(10).TrimStart();
+				Declaration.RemoveFromEnd(TEXT(":"));
+
+				int32 Colon = INDEX_NONE;
+				if (!Declaration.FindChar(TEXT(':'), Colon))
+				{
+					Result.Diagnostics.Add(FString::Printf(
+						TEXT("line %d [error]: state the class: `component %s : Box Collision`."),
+						LineNumber, *Declaration.TrimEnd()));
+					continue;
+				}
+
+				const FString WrittenName = Declaration.Left(Colon).TrimStartAndEnd();
+				FString ClassText = Declaration.RightChop(Colon + 1).TrimStartAndEnd();
+				FString ParentName;
+				const int32 In = ClassText.Find(TEXT(" in "), ESearchCase::IgnoreCase);
+				if (In != INDEX_NONE)
+				{
+					ParentName = ClassText.RightChop(In + 4).TrimStartAndEnd();
+					ClassText = ClassText.Left(In).TrimEnd();
+				}
+
+				if (!Blueprint)
+				{
+					Result.Diagnostics.Add(FString::Printf(
+						TEXT("line %d [error]: `%s` is not a Blueprint; there is nowhere to add a component."),
+						LineNumber, *Object->GetName()));
+					continue;
+				}
+
+				if (UObject* const* Existing = Components.Find(WrittenName))
+				{
+					const FString ExistingClass = (*Existing)->GetClass()->GetName();
+					const FString Wanted = FNodeScribeCatalog::Normalize(ClassText);
+					if (FNodeScribeCatalog::Normalize(ExistingClass) != Wanted
+						&& FNodeScribeCatalog::Normalize(ExistingClass.LeftChop(2)) != Wanted
+						&& FNodeScribeCatalog::Normalize((*Existing)->GetClass()->GetDisplayNameText().ToString()) != Wanted)
+					{
+						Result.Diagnostics.Add(FString::Printf(
+							TEXT("line %d [error]: `%s` already exists as a %s; changing a component's class is not done by text."),
+							LineNumber, *WrittenName, *ExistingClass));
+						continue;
+					}
+
+					CurrentObject = *Existing;
+					CurrentObjectLabel = WrittenName;
+					continue;
+				}
+
+				FString Error;
+				UObject* Created = NodeScribeComponents::Add(Blueprint, WrittenName, ClassText, ParentName, Error);
+				if (!Created)
+				{
+					Result.Diagnostics.Add(FString::Printf(
+						TEXT("line %d [error]: %s"), LineNumber, *Error));
+
+					// The indented lines below were meant for it. Applied to the
+					// actor instead, a `Box Extent` that does not exist there is
+					// noise, and one that does is a silent wrong write.
+					while (Index + 1 < Lines.Num() && MeasureIndent(Lines[Index + 1]) > 0)
+					{
+						++Index;
+					}
+					continue;
+				}
+
+				Components.Add(WrittenName, Created);
+				CurrentObject = Created;
+				CurrentObjectLabel = WrittenName;
+				bTouchedBlueprint = true;
+				++Result.Applied;
+				continue;
 			}
 
 			// `delete variable Name`. It needs a word of its own: this writer deletes
@@ -352,6 +459,60 @@ namespace
 				// Not a component: it may be a struct block of the current object.
 				TArray<FString> Near;
 				FProperty* Property = FindProperty(CurrentObject->GetClass(), Label, Near);
+
+				// Or the array of instanced objects the reader opens as a block: one
+				// element per line one level in, its properties under it. The block
+				// is the array's whole value.
+				if (NodeScribeInstanced::IsInstancedObjectArray(Property))
+				{
+					const int32 ElementIndent = Indent + 1;
+					TArray<NodeScribeInstanced::FElementText> Elements;
+
+					while (Index + 1 < Lines.Num())
+					{
+						const FString& Next = Lines[Index + 1];
+						const FString Bare = FNodeScribeParser::StripComment(Next).TrimStartAndEnd();
+						if (Bare.IsEmpty())
+						{
+							++Index;
+							continue;
+						}
+
+						const int32 NextIndent = MeasureIndent(Next);
+						if (NextIndent < ElementIndent)
+						{
+							break;
+						}
+						++Index;
+
+						if (NextIndent == ElementIndent)
+						{
+							NodeScribeInstanced::FElementText& Element = Elements.AddDefaulted_GetRef();
+							Element.Class = Bare;
+						}
+						else if (Elements.Num() > 0)
+						{
+							Elements.Last().Body += Next.RightChop(FMath::Min(Next.Len(), (ElementIndent + 1) * 2))
+								+ TEXT("\n");
+						}
+					}
+
+					FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property);
+					void* ArrayPtr = ArrayProperty->ContainerPtrToValuePtr<void>(CurrentObject);
+
+					const int32 AppliedBefore = Result.Applied;
+					if (NodeScribeInstanced::Write(CurrentObject, ArrayProperty, ArrayPtr, Elements,
+						FString::Printf(TEXT("line %d, %s"), LineNumber, *Label),
+						Result.Applied, Result.Diagnostics)
+						&& Result.Applied > AppliedBefore)
+					{
+						Touched.Add(CurrentObject);
+						FPropertyChangedEvent Changed(Property, EPropertyChangeType::ValueSet);
+						CurrentObject->PostEditChangeProperty(Changed);
+					}
+					continue;
+				}
+
 				if (FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 				{
 					OpenStruct = StructProperty;
@@ -454,7 +615,14 @@ namespace
 				}
 			}
 
+			// Inside a struct block the object's own property is the struct: an
+			// owner that reacts to its change -- a Gameplay Effect component
+			// recomputing its tags -- asks for that name, not the member's.
 			FPropertyChangedEvent Changed(Property);
+			if (OpenStruct)
+			{
+				Changed.MemberProperty = OpenStruct;
+			}
 			CurrentObject->PostEditChangeProperty(Changed);
 
 			++Result.Applied;
@@ -494,7 +662,7 @@ FNodeScribeObjectWriter::FResult FNodeScribeObjectWriter::WriteObject(
 	}
 
 	UBlueprint* Blueprint = FindBlueprint(Object, Root->GetClass());
-	const TMap<FString, UObject*> Components = CollectComponents(Root, Blueprint);
+	TMap<FString, UObject*> Components = CollectComponents(Root, Blueprint);
 
 	const FScopedTransaction Transaction(
 		LOCTEXT("WriteObjectTransaction", "NodeScribe: write sheet"));
@@ -507,8 +675,22 @@ FNodeScribeObjectWriter::FResult FNodeScribeObjectWriter::WriteObject(
 	const bool bHasDesigner = WidgetBlueprint
 		&& NodeScribeWidgetTree::SplitText(Text, SheetText, DesignerText);
 
+	// An Input Mapping Context's `mappings` section, the same way.
+	FString MappingsText;
+	const bool bHasMappings = NodeScribeInputMapping::Handles(Root)
+		&& NodeScribeInputMapping::SplitText(FString(SheetText), SheetText, MappingsText);
+
 	bool bTouchedBlueprint = false;
 	ApplySheetLines(Object, Root, Blueprint, Components, SheetText, Result, bTouchedBlueprint);
+
+	if (bHasMappings)
+	{
+		const NodeScribeInputMapping::FResult MappingResult =
+			NodeScribeInputMapping::Write(Root, MappingsText);
+
+		Result.Applied += MappingResult.Applied;
+		Result.Diagnostics.Append(MappingResult.Diagnostics);
+	}
 
 	if (bHasDesigner)
 	{
@@ -562,8 +744,8 @@ FNodeScribeObjectWriter::FResult FNodeScribeObjectWriter::WriteProperties(
 	}
 
 	bool bTouchedBlueprint = false;
-	ApplySheetLines(Target, Target, nullptr, TMap<FString, UObject*>(), Text,
-		Result, bTouchedBlueprint);
+	TMap<FString, UObject*> NoComponents;
+	ApplySheetLines(Target, Target, nullptr, NoComponents, Text, Result, bTouchedBlueprint);
 	return Result;
 }
 

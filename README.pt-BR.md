@@ -88,10 +88,12 @@ escreve direto no grafo, sem você colar nada:
 
 `read_object` e `write_object` mudam de forma conforme o alvo: um
 **Blackboard** vira uma lista de `key Name : Type`, uma **Behavior Tree** vira
-uma árvore indentada, e um **Widget Blueprint** ganha, depois da ficha, a
-seção `designer` com a hierarquia do Designer.
+uma árvore indentada, um **Widget Blueprint** ganha, depois da ficha, a
+seção `designer` com a hierarquia do Designer, e um **Input Mapping Context**,
+a seção `mappings`, uma linha `Tecla -> Ação` por mapeamento. Num Blueprint de
+ator, a mesma ficha cria e apaga componentes.
 
-Medido: as ferramentas juntas têm ~2.500 tokens de descrição, contra ~18.000
+Medido: as ferramentas juntas têm ~2.600 tokens de descrição, contra ~18.000
 do toolset de Blueprint da Engine, e um grafo de 15 nodes custa ~200 tokens
 neste formato, contra ~15.000 no formato da Unreal.
 

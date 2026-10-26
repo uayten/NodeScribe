@@ -52,7 +52,10 @@ public class NodeScribeEditor : ModuleRules
 			"UMG",
 			"UMGEditor",
 			// Finding a Widget Blueprint by name before anyone has opened it.
-			"AssetRegistry"
+			"AssetRegistry",
+			// Components: added and removed through the subsystem behind the
+			// Components panel, so its rules come along.
+			"SubobjectDataInterface"
 		});
 	}
 }

@@ -1,6 +1,6 @@
 # Decisions
 
-<!-- project-docs: only what holds now. Next ID: D-020 · Next fact: F-005 -->
+<!-- project-docs: only what holds now. Next ID: D-025 · Next fact: F-007 -->
 
 ## Decisions
 
@@ -26,11 +26,12 @@ Decision: create, add, rename, delete and Is Variable go through `FWidgetBluepri
 Why: a rename then takes the graph's references along, and a widget is created as the Palette creates it (`TextBlock` gets "Text Block").
 Origin: agent's choice
 
-### D-005 Moving, reordering and changing a widget's class are refused
-Decision: an indented existing widget under a different parent, existing siblings out of order, or a different class are errors until R-005.
-Why: the anchor rule means a line can name a widget anywhere; without the refusal, a slip would move it silently.
-Origin: agent's choice
-Affects: R-005
+### D-005 Moves and reorders follow the text; a class change is refused
+Decision: an existing widget written under another parent moves there, at the place its neighbours in the text give it; existing siblings written in another order take, in that order, the places they had among themselves, and a sibling the text does not name keeps its own. Every move and reorder is named in the return. The root does not move, nothing moves into its own children, moving into or out of a named slot is refused, and so is changing a widget's class.
+Why: the text is where it is written, as for a new widget; a reading edited and pasted back should do what the edit says. The refusal existed so a slip could not move a widget silently -- the note in the return is what keeps it from being silent.
+Origin: R-005
+Not chosen: a `move X under Y` keyword -- the same intent written twice, and a pasted reading would still be refused.
+Affects: NodeScribeWidgetTree.cpp, Docs/format/designer.md
 
 ### D-006 A typo is answered, never resolved
 Decision: near misses (`TextBlok`, `Txet`) go into the error's "Similar:" list; they never resolve by themselves.
@@ -108,6 +109,37 @@ Origin: user, from the fresh agent's R-008 check
 Not chosen: deleting the stub and creating a new event, as the editor's menu does -- a Custom Event with no wire may still hold parameters someone declared.
 Affects: NodeScribeBuilder.cpp (ReuseEmptyEventOrRefuse), Docs/FORMAT.md (Events)
 
+### D-020 Components are created by a word of their own, through the panel's subsystem
+Decision: `component Name : Class [in Parent]` adds a component and `delete component Name` removes one, through `USubobjectDataSubsystem`; an existing name with the same class is an anchor. The header names every component with its parent (`# components:`).
+Why: a `Name : Class` block that names nothing is also what a typo looks like, and creating a component for a typo is a guess. The subsystem brings the panel's rules -- root attachment, valid names, inherited components not deletable, only spawnable classes.
+Origin: R-003
+Affects: NodeScribeComponents.cpp, NodeScribeObjectWriter.cpp, NodeScribeObjectReader.cpp, Docs/format/sheet.md
+
+### D-021 A block of instanced objects is the array's whole value
+Decision: an array of instanced objects reads as a block, one element per line by the Details panel's name, its changed properties under it. Written back, the block replaces the array: same-class elements are kept and changed, missing ones leave (named in the return). The lines under an element are applied only once it is in the array.
+Why: the Engine's export held both kinds of quote and the sheet could not hold it at all; an element has no name, so a list of changes would have nothing to anchor on. Applying after the array is set is what lets an owner recompute -- a Gameplay Effect's tag component recomputed nothing otherwise.
+Origin: R-007
+Affects: NodeScribeInstanced.cpp, NodeScribeObjectReader.cpp, NodeScribeObjectWriter.cpp, Docs/format/sheet.md
+
+### D-022 An Input Mapping Context is a `mappings` section, by reflection
+Decision: `Key -> Action` lines after a `mappings` line, triggers and modifiers indented under each; a list of changes, where a mapping's indented lines are its whole set of triggers and modifiers, all or nothing for that mapping. Enhanced Input is reached by reflection, not linked.
+Why: the same shape as the Designer section (D-001); NodeScribe should not need Enhanced Input to load.
+Origin: R-004
+Affects: NodeScribeInputMapping.cpp, Docs/format/input-mapping.md
+
+### D-023 FORMAT.md says the rules; why they are so lives in Docs/design.md
+Decision: the core keeps rules and examples; the reasons moved to `Docs/design.md`, which nothing serves through `get_format_docs`.
+Why: every task reads the core. Measured with two fresh agents writing the same ten typical graphs, one from each version: 8 of 10 pasted clean before and after, with the same two failures; the core went from 20,707 to 16,528 characters.
+Origin: R-009
+Affects: Docs/FORMAT.md, Docs/design.md
+
+### D-024 The project's graphs round-trip in the suite, through deleted copies
+Decision: `project_graphs_round_trip` duplicates each Blueprint under `/Game` into the scratch folder, refills each graph with the original's reading and compares; a difference the reading does not warn about fails, and each copy is deleted, with a garbage collection, before the next.
+Why: the silent differences were being found by tripping on them. Copies left in memory are second classes with the same functions and turned every call ambiguous.
+Origin: R-010
+Not chosen: `/Game/BossRush/Testes/` as the roadmap item said -- the suite's own scratch folder is never saved either, and keeps the plugin's suite independent of BossRush.
+Affects: Tests/run_tests.py, Docs/development.md
+
 ## Verified facts
 
 ### F-001 A plain Blueprint factory makes no Designer
@@ -129,3 +161,13 @@ Verified: 2026-10-26
 Fact: `UAnimationTransitionSchema` derives from `UEdGraphSchema_K2`, not from `UAnimationGraphSchema`.
 Source: Engine header; the AnimGraph round's empty-transition bug
 Verified: AnimGraph round
+
+### F-005 Default Starting Data only initialises attribute sets
+Fact: `UAbilitySystemComponent::DefaultStartingData` is `TArray<FAttributeDefaults>` -- an AttributeSet class and a DataTable -- and grants no ability. In BossRush, `BP_Golem` has `ActionAttributes` from `DT_Elisande`, and no Blueprint of the Golem calls Give Ability (only `Lobisomem_Zoo1` and `BossRushPlayer` do).
+Source: Engine `AbilitySystemComponent.h:209`, `GameplayAbilityTypes.h:360`; `read_object` on `BP_Golem`; a search of the project's assets for `GiveAbility`
+Verified: 2026-10-26
+
+### F-006 Spawn Actor from Class needs its pins before PostPlacedNewNode
+Fact: in 5.8 `UK2Node_SpawnActorFromClass::PostPlacedNewNode` calls `FindPinChecked` on the Scale Method pin; `UBlueprintNodeSpawner` allocates pins first, the generic schema action does not.
+Source: Engine `K2Node_SpawnActorFromClass.cpp:358`, `BlueprintNodeSpawner.cpp:347`; the crash in `project_graphs_round_trip`
+Verified: 2026-10-26

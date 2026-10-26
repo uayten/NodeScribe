@@ -87,10 +87,12 @@ writes into the graph directly, with nothing for you to paste:
 
 `read_object` and `write_object` change shape with the target: a
 **Blackboard** becomes a list of `key Name : Type`, a **Behavior Tree** an
-indented tree, and a **Widget Blueprint** gets, after its sheet, a `designer`
-section with the Designer's hierarchy.
+indented tree, a **Widget Blueprint** gets, after its sheet, a `designer`
+section with the Designer's hierarchy, and an **Input Mapping Context** a
+`mappings` section, one `Key -> Action` line per mapping. In an actor
+Blueprint, the same sheet adds and removes components.
 
-Measured: the tools together take ~2,500 tokens of description, against
+Measured: the tools together take ~2,600 tokens of description, against
 ~18,000 for the Engine's Blueprint toolset, and a 15-node graph costs ~200
 tokens in this format, against ~15,000 in Unreal's.
 

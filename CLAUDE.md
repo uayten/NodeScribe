@@ -58,7 +58,10 @@ ROADMAP items are Portuguese.
 | `NodeScribeReader` | the way back: nodes → text. |
 | `NodeScribeGraphActions` | the three buttons on the editor toolbar. |
 | `NodeScribeWidgetTree` | a Widget Blueprint's Designer as text, both ways: the `designer` section of `read_object` / `write_object`. |
-| `Tests/run_tests.py` | automated round trip, without an interface, plus `token_budget`: ceilings on what the docs, the tools and a reading cost. Run it before and after touching the reader, the builder or the docs; the command is in *Testing*, in `Docs/development.md`. |
+| `NodeScribeComponents` | an actor Blueprint's components: the `# components:` header, and `component` / `delete component` in `write_object`, through the Components panel's subsystem. |
+| `NodeScribeInstanced` | arrays of instanced objects as a block, both ways: a Gameplay Effect's `Components`, a mapping's triggers and modifiers. |
+| `NodeScribeInputMapping` | an Input Mapping Context's `mappings` section, both ways, by reflection (Enhanced Input is not linked). |
+| `Tests/run_tests.py` | automated round trip, without an interface, over the suite's cases and over every graph of the project (`project_graphs_round_trip`), plus `token_budget`: ceilings on what the docs, the tools and a reading cost. Run it before and after touching the reader, the builder or the docs; the command is in *Testing*, in `Docs/development.md`. |
 | `Saved/NodeScribe/vocabulary.txt` | the names nobody managed to resolve, one per line. `sort \| uniq -c \| sort -rn` gives the list of aliases missing from the catalog, by frequency. It is not an error log -- see *The missing vocabulary*, in `Docs/development.md`. |
 
 Reader and builder are mirrors: when teaching a new kind of node, both change.
@@ -72,8 +75,9 @@ Read [`Docs/development.md`](Docs/development.md), and *Status* in the README
 for where the plugin is. The first holds the cycle of closing the editor →
 compiling → reopening → testing (with the commands ready), how to test by
 round trip, the invariants that must not break, how to grow without getting heavier, and what a proposal
-for a new tool needs to answer before becoming code. `Docs/history.md` and
-`Docs/ideas.md` are not read by default.
+for a new tool needs to answer before becoming code. `Docs/design.md` holds
+why each rule of the format is what it is: read it before changing a rule, not
+to write text. `Docs/history.md` and `Docs/ideas.md` are not read by default.
 
 Current front: the next step in HANDOFF.md, and the pending work in order in
 ROADMAP.md (its items are in Portuguese, D-009). An idea for a new tool goes to

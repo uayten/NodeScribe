@@ -153,6 +153,17 @@ Refresh Screen
 ''',
     },
     {
+        # Spawn Actor from Class looks its pins up while being placed; built in
+        # the generic schema's order, it brought the editor down.
+        'name': 'spawn_actor',
+        'text': '''
+event Test
+transform = Make Transform
+spawned = Spawn Actor from Class (Class = /Script/Engine.StaticMeshActor, Spawn Transform = $transform)
+Destroy Actor (Target = $spawned)
+''',
+    },
+    {
         # A static function whose parameter is literally called `Target`. The
         # reader writes `Target = $x`, and the builder used to map `Target` to
         # the self pin only, answering "no pin `Target`. Input pins: Target".
@@ -832,9 +843,10 @@ Root : VerticalBox
         problems.append('pasting the reading back changed it:')
         problems.extend(difflib.unified_diff(tree, again, 'before', 'after', lineterm='', n=2))
 
-    # Refused, with nothing changed: a move, an unknown class, a second root.
+    # Refused, with nothing changed: a move under a widget that is not a
+    # panel, an unknown class, a second root.
     for label, text in (
-        ('move', 'designer\nRoot : VerticalBox\n  IsStillRow : HorizontalBox\n    Footer : TextBlock\n'),
+        ('move under a text', 'designer\nIsStillLabel : TextBlock\n  Footer : TextBlock\n'),
         ('unknown class', 'designer\nRoot : VerticalBox\n  Ghost : NoSuchWidget\n'),
         ('second root', 'designer\nOther : VerticalBox\n'),
     ):
@@ -865,6 +877,379 @@ Root : VerticalBox
         return False, problems
 
     return True, []
+
+
+def new_widget_blueprint(name, options=''):
+    """An empty Widget Blueprint: the factory's default root, if any, removed."""
+    path = '%s/%s' % (DESTINATION, name)
+    created = unreal.NodeScribeLibrary.create_asset(path, 'UserWidget', options)
+    if created.startswith('[error]'):
+        return None, created
+
+    bp = unreal.load_asset(path)
+    start = designer_section(unreal.NodeScribeLibrary.read_object(bp, ''))
+    if len(start) > 1 and not start[1].startswith('named slot'):
+        unreal.NodeScribeLibrary.write_object(
+            bp, 'designer\ndelete widget %s\n' % start[1].split(' : ')[0].strip())
+    return bp, ''
+
+
+def write_clean(problems, label, target, text):
+    """Writes, and records a complaint when the write reports an error."""
+    written = unreal.NodeScribeLibrary.write_object(target, text)
+    if '[error]' in written:
+        problems.append('%s complained:' % label)
+        problems.extend('  ' + l for l in written.splitlines())
+    return written
+
+
+def paste_back_changes_nothing(problems, label, target, section=body):
+    """The fixed point of any sheet: a reading pasted back reads the same."""
+    reading = unreal.NodeScribeLibrary.read_object(target, '')
+    write_clean(problems, 'pasting the %s back' % label, target, reading)
+    again = unreal.NodeScribeLibrary.read_object(target, '')
+    if section(again) != section(reading):
+        problems.append('pasting the %s back changed it:' % label)
+        problems.extend(difflib.unified_diff(section(reading), section(again), 'before', 'after',
+                                             lineterm='', n=2))
+    return reading
+
+
+def components_by_text():
+    """`component Name : Class [in Parent]` adds a configured component.
+
+    The header names every component with its parent, the block shows what
+    changed, a second `component` line for the same name is an anchor, and a
+    class the Components panel does not offer is refused.
+    """
+    graph, error = new_blueprint('NS_components')
+    if not graph:
+        return False, [error]
+    bp = unreal.load_asset('%s/NS_components' % DESTINATION)
+
+    problems = []
+    write_clean(problems, 'adding the components', bp, '''component Hitbox : Box Collision
+  Box Extent = (X=40.0,Y=40.0,Z=60.0)
+component Marker : ArrowComponent in Hitbox
+component Spinner : RotatingMovementComponent
+''')
+
+    sheet = unreal.NodeScribeLibrary.read_object(bp, '')
+    header = next((l for l in sheet.splitlines() if l.startswith('# components:')), '')
+    for wanted in ('Hitbox', 'Marker in Hitbox', 'Spinner'):
+        if wanted not in header:
+            problems.append('the components header does not say `%s`: %r' % (wanted, header))
+    if not in_order(sheet.splitlines(), ['Hitbox : BoxComponent']) or 'Box Extent' not in sheet:
+        problems.append('the Hitbox block with its Box Extent is missing.')
+    if any(l.startswith(('Hitbox =', 'Marker =')) for l in sheet.splitlines()):
+        problems.append('the variable pointing at a component came out as a property line.')
+
+    write_clean(problems, 'the same component line again', bp, 'component Hitbox : BoxComponent\n')
+    paste_back_changes_nothing(problems, 'sheet', bp)
+
+    for label, text in (
+        ('a class the panel does not offer', 'component Walker : CharacterMovementComponent\n'),
+        ('another class under a taken name', 'component Hitbox : SphereComponent\n'),
+        ('a parent that does not exist', 'component Lost : Box Collision in Nowhere\n'),
+    ):
+        refused = unreal.NodeScribeLibrary.write_object(bp, text)
+        if '[error]' not in refused:
+            problems.append('%s was not refused:' % label)
+            problems.extend('  ' + l for l in refused.splitlines())
+
+    write_clean(problems, 'deleting a component', bp, 'delete component Marker\n')
+    header = next((l for l in unreal.NodeScribeLibrary.read_object(bp, '').splitlines()
+                   if l.startswith('# components:')), '')
+    if 'Marker' in header:
+        problems.append('`delete component Marker` left it: %r' % header)
+
+    if problems:
+        problems.extend(['', '--- sheet ---'] + sheet.splitlines())
+        return False, problems
+    return True, []
+
+
+def effect_components_block():
+    """A Gameplay Effect's `Components` as a block: a whole cooldown by text."""
+    if not hasattr(unreal, 'GameplayEffect'):
+        return True, ['did not run: GameplayAbilities is not loaded']
+
+    tags = [l[4:] for l in unreal.NodeScribeLibrary.read_tags('').splitlines() if l.startswith('tag ')]
+    if not tags:
+        return True, ['did not run: the project declares no Gameplay Tag']
+    tag = tags[0]
+
+    path = '%s/NS_effect' % DESTINATION
+    created = unreal.NodeScribeLibrary.create_asset(path, 'GameplayEffect', '')
+    if created.startswith('[error]'):
+        return False, [created]
+    effect = unreal.load_asset(path)
+
+    problems = []
+    write_clean(problems, 'writing the cooldown', effect, '''Duration Policy = HasDuration
+Duration Magnitude:
+  Scalable Float Magnitude = (Value=7.0)
+Components:
+  Grant Tags to Target Actor
+    Add Tags:
+      Added = (GameplayTags=((TagName="%s")))
+''' % tag)
+
+    sheet = unreal.NodeScribeLibrary.read_object(effect, '')
+    lines = sheet.splitlines()
+    if not in_order(lines, ['Components:', '  Grant Tags to Target Actor']):
+        problems.append('the Components block did not come out with its element.')
+    granted = next((l for l in lines if 'Add Tags' in l), '')
+    # CombinedTags is what the component recomputes when told its container
+    # changed -- the sign the change reached it under the struct's name.
+    if granted.count(tag) < 2:
+        problems.append('Add Tags did not recompute its combined tags: %r' % granted)
+
+    paste_back_changes_nothing(problems, 'sheet', effect)
+
+    refused = unreal.NodeScribeLibrary.write_object(effect, 'Components:\n  No Such Component\n')
+    if '[error]' not in refused or 'Grant Tags' not in unreal.NodeScribeLibrary.read_object(effect, ''):
+        problems.append('an unknown element class was not refused, or changed the array:')
+        problems.extend('  ' + l for l in refused.splitlines())
+
+    emptied = unreal.NodeScribeLibrary.write_object(effect, 'Components:\n')
+    if 'removed' not in emptied or 'Grant Tags' in unreal.NodeScribeLibrary.read_object(effect, ''):
+        problems.append('an empty block did not empty the array, or did not say so:')
+        problems.extend('  ' + l for l in emptied.splitlines())
+
+    if problems:
+        problems.extend(['', '--- sheet ---'] + lines)
+        return False, problems
+    return True, []
+
+
+def input_mapping_section():
+    """An Input Mapping Context as `Key -> Action` lines, both ways."""
+    for name in ('NS_IA_Jump', 'NS_IA_Move'):
+        created = unreal.NodeScribeLibrary.create_asset('%s/%s' % (DESTINATION, name), 'InputAction', '')
+        if created.startswith('[error]'):
+            return True, ['did not run: %s' % created]
+
+    path = '%s/NS_mapping' % DESTINATION
+    created = unreal.NodeScribeLibrary.create_asset(path, 'InputMappingContext', '')
+    if created.startswith('[error]'):
+        return True, ['did not run: %s' % created]
+    context = unreal.load_asset(path)
+
+    problems = []
+    wanted = [
+        'mappings',
+        'SpaceBar -> NS_IA_Jump',
+        '  trigger Hold',
+        '    Hold Time Threshold = 0.75',
+        'Gamepad_Left2D -> NS_IA_Move',
+        '  modifier Dead Zone',
+        '    Lower Threshold = 0.25',
+        '  modifier Negate',
+        'W -> NS_IA_Move',
+    ]
+    write_clean(problems, 'writing the mappings', context, '\n'.join(wanted) + '\n')
+
+    reading = unreal.NodeScribeLibrary.read_object(context, '')
+    if not in_order(reading.splitlines(), wanted):
+        problems.append('the mappings did not come back as written. Expected, in order:')
+        problems.extend('  ' + l for l in wanted)
+
+    paste_back_changes_nothing(problems, 'mappings', context)
+
+    # A modifier that does not resolve leaves the whole mapping's set alone.
+    refused = unreal.NodeScribeLibrary.write_object(
+        context, 'mappings\nSpaceBar -> NS_IA_Jump\n  trigger Tap\n  modifier No Such Modifier\n')
+    after = unreal.NodeScribeLibrary.read_object(context, '')
+    if '[error]' not in refused or not in_order(after.splitlines(), wanted[1:4]):
+        problems.append('a bad modifier was not refused, or changed the triggers:')
+        problems.extend('  ' + l for l in refused.splitlines())
+
+    write_clean(problems, 'deleting a mapping', context, 'mappings\ndelete mapping W -> NS_IA_Move\n')
+    if 'W -> NS_IA_Move' in unreal.NodeScribeLibrary.read_object(context, ''):
+        problems.append('`delete mapping` left it.')
+
+    if problems:
+        problems.extend(['', '--- reading ---'] + reading.splitlines())
+        return False, problems
+    return True, []
+
+
+def designer_moves_and_slots():
+    """Reorder, move, and fill named slots -- of an instance and of a child."""
+    host, error = new_widget_blueprint('NS_slot_host')
+    if not host:
+        return False, [error]
+
+    problems = []
+    write_clean(problems, 'building the host', host,
+                'designer\nRoot : VerticalBox\n  Body : NamedSlot\n  Foot : NamedSlot\n')
+
+    bp, error = new_widget_blueprint('NS_moves')
+    if not bp:
+        return False, [error]
+    write_clean(problems, 'building the tree', bp, '''designer
+Root : VerticalBox
+  A : TextBlock
+  B : TextBlock
+  C : TextBlock
+  Row : HorizontalBox
+''')
+
+    # C and A swap the places they had; B, which the text does not name,
+    # keeps its own. Then B moves into Row, and the instance's slot is filled.
+    write_clean(problems, 'reordering', bp, 'designer\nRoot : VerticalBox\n  C : TextBlock\n  A : TextBlock\n')
+    write_clean(problems, 'moving and filling a slot', bp, '''designer
+Root : VerticalBox
+  Row : HorizontalBox
+    B : TextBlock
+  Framed : NS_slot_host
+    named slot Body
+      Inside : TextBlock
+''')
+
+    tree = designer_section(unreal.NodeScribeLibrary.read_object(bp, ''))
+    names = [l for l in tree if ' : ' in l or l.strip().startswith('named slot')]
+    expected = [
+        'Root : VerticalBox',
+        '  C : TextBlock',
+        '  A : TextBlock',
+        '  Row : HorizontalBox',
+        '    B : TextBlock',
+        '  Framed : NS_slot_host',
+        '    named slot Body',
+        '      Inside : TextBlock',
+    ]
+    if names != expected:
+        problems.append('the tree is not the expected one:')
+        problems.extend(difflib.unified_diff(expected, names, 'expected', 'read', lineterm='', n=2))
+
+    paste_back_changes_nothing(problems, 'Designer', bp, designer_section)
+
+    for label, text in (
+        ('filling a slot that is taken', 'designer\nFramed : NS_slot_host\n  named slot Body\n    Other : TextBlock\n'),
+        ('a slot that does not exist', 'designer\nFramed : NS_slot_host\n  named slot Nope\n    Other : TextBlock\n'),
+        ('moving into a slot', 'designer\nFramed : NS_slot_host\n  named slot Foot\n    A : TextBlock\n'),
+        ('moving the root', 'designer\nRow : HorizontalBox\n  Root : VerticalBox\n'),
+    ):
+        refused = unreal.NodeScribeLibrary.write_object(bp, text)
+        if '[error]' not in refused:
+            problems.append('%s was not refused:' % label)
+            problems.extend('  ' + l for l in refused.splitlines())
+
+    # A child Widget Blueprint designs its parent's named slots.
+    child, error = new_widget_blueprint(
+        'NS_slot_child', 'ParentClass = %s/NS_slot_host.NS_slot_host_C' % DESTINATION)
+    if not child:
+        problems.append(error)
+    else:
+        empty = designer_section(unreal.NodeScribeLibrary.read_object(child, ''))
+        if not any(l.startswith('named slot Body') for l in empty):
+            problems.append('the child does not list its parent\'s slots: %r' % empty)
+        write_clean(problems, 'filling the child\'s slot', child,
+                    'designer\nnamed slot Body\n  FromChild : TextBlock\n')
+        filled = designer_section(unreal.NodeScribeLibrary.read_object(child, ''))
+        if not in_order(filled, ['named slot Body', '  FromChild : TextBlock']):
+            problems.append('the child\'s slot did not come back filled: %r' % filled)
+        paste_back_changes_nothing(problems, 'child Designer', child, designer_section)
+
+    if problems:
+        problems.extend(['', '--- tree ---'] + tree)
+        return False, problems
+    return True, []
+
+
+PROJECT_SKIP = (DESTINATION, '/Game/BossRush/Testes')
+BLUEPRINT_ASSET_CLASSES = ('Blueprint', 'WidgetBlueprint', 'AnimBlueprint', 'GameplayAbilityBlueprint',
+                           'EditorUtilityBlueprint', 'EditorUtilityWidgetBlueprint')
+
+
+def project_graphs_round_trip():
+    """Every graph of the project: read, written into a copy, read again.
+
+    The copy is the Blueprint duplicated into DESTINATION -- same parent,
+    variables, functions and components, so a call to its own function
+    resolves as in the original. Each of the copy's graphs is emptied with
+    clear_graph and refilled with the original's reading. A difference the
+    reading does not warn about is a failure: the text was not the graph and
+    nothing said so -- the Set Visibility, Append pins and split-struct names
+    were found by tripping on them. One the reading warns about is listed
+    apart, as declared. Nothing is saved: the commandlet exits without saving.
+    """
+    registry = unreal.AssetRegistryHelpers.get_asset_registry()
+    assets = [a for a in registry.get_assets_by_path('/Game', recursive=True)
+              if str(a.asset_class_path.asset_name) in BLUEPRINT_ASSET_CLASSES
+              and not str(a.package_name).startswith(PROJECT_SKIP)]
+    if not assets:
+        return True, ['did not run: no Blueprint under /Game']
+
+    failures, declared, checked = [], [], 0
+
+    for index, asset in enumerate(sorted(assets, key=lambda a: str(a.package_name))):
+        source = str(asset.package_name)
+        name = str(asset.asset_name)
+        original = unreal.load_asset(source)
+        if not original:
+            failures.append('%s: could not load' % source)
+            continue
+
+        header = unreal.NodeScribeLibrary.read_object(original, '').splitlines()
+        graphs = next((l[len('# graphs: '):].split(', ') for l in header if l.startswith('# graphs: ')), [])
+        if not graphs:
+            continue
+
+        copy_path = '%s/Project/%s_%d' % (DESTINATION, name, index)
+        if not unreal.EditorAssetLibrary.duplicate_asset(source, copy_path):
+            failures.append('%s: could not duplicate it' % source)
+            continue
+        copy_name = copy_path.rsplit('/', 1)[1]
+
+        for graph_name in graphs:
+            label = '%s:%s' % (name, graph_name)
+            graph = unreal.load_object(None, '%s.%s:%s' % (source, name, graph_name))
+            target = unreal.load_object(None, '%s.%s:%s' % (copy_path, copy_name, graph_name))
+            if not graph or not target:
+                failures.append('%s: could not find the graph (or its copy)' % label)
+                continue
+
+            first = unreal.NodeScribeLibrary.read_graph(graph)
+            unreal.NodeScribeLibrary.clear_graph(target)
+            written = unreal.NodeScribeLibrary.write_graph(target, first, False)
+            second = unreal.NodeScribeLibrary.read_graph(target)
+            checked += 1
+
+            if body(first) == body(second):
+                continue
+
+            diff = list(difflib.unified_diff(body(first), body(second), 'read', 'pasted and read',
+                                             lineterm='', n=1))[2:14]
+            # Said out loud: a warning, or the note naming the data nodes that
+            # feed nothing and were left out of the text.
+            if '[warning]' in first or 'were left out of the text' in first:
+                declared.append(label)
+            else:
+                failures.append(label)
+                failures.extend('    ' + l for l in diff)
+                failures.extend('    | ' + l for l in written.splitlines() if '[error]' in l)
+
+        # Gone before the next one: a copy left in memory is a second class
+        # with the same functions, and every call to them reads as ambiguous.
+        unreal.EditorAssetLibrary.delete_asset(copy_path)
+        unreal.SystemLibrary.collect_garbage()
+
+    # The diffs go to a file of their own: with a project's worth of graphs
+    # they would bury the rest of the report.
+    details = os.path.join(unreal.Paths.project_saved_dir(), 'NodeScribe', 'project_graphs.txt')
+    os.makedirs(os.path.dirname(details), exist_ok=True)
+    with open(details, 'w', encoding='utf-8') as details_file:
+        details_file.write('\n'.join(failures + ['', 'declared: ' + ', '.join(declared)]))
+
+    silent = [l for l in failures if not l.startswith('    ')]
+    summary = '%d graph(s) of %d Blueprint(s): %d silent difference(s), %d declared by a warning' % (
+        checked, len(assets), len(silent), len(declared))
+    if silent:
+        return False, [summary, 'silent: ' + ', '.join(silent), 'diffs in ' + details]
+    return True, [summary]
 
 
 def token_budget():
@@ -934,6 +1319,11 @@ OTHERS = [
     ('sheet_round_trip_changes_nothing', sheet_round_trip_changes_nothing),
     ('state_machine_round_trip', state_machine_round_trip),
     ('blendspace_gets_grid', blendspace_gets_grid),
+    ('components_by_text', components_by_text),
+    ('effect_components_block', effect_components_block),
+    ('input_mapping_section', input_mapping_section),
+    ('designer_moves_and_slots', designer_moves_and_slots),
+    ('project_graphs_round_trip', project_graphs_round_trip),
     # Last: it reads the sizes the round trips above recorded.
     ('token_budget', token_budget),
 ]

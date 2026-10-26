@@ -2325,7 +2325,7 @@ void FNodeScribeReadContext::Run()
 
 			if (Components.Num() > 0)
 			{
-				Lines.Add(TEXT("# components (add them in the Components panel):"));
+				Lines.Add(TEXT("# components (create them with write_object's `component Name : Class` line):"));
 				Lines.Append(Components);
 			}
 

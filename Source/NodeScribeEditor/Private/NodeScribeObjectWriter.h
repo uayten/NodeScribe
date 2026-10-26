@@ -13,9 +13,10 @@ class UObject;
  *
  * It only touches what the line asks for. The text is a list of changes, not a
  * description of the final state: pasting a whole sheet back should change
- * nothing. The one thing it creates is a Blueprint variable, from a
- * `variable Name : Type` line, and the one thing it removes is a variable,
- * from `delete variable Name`. It never creates components.
+ * nothing. What it creates and removes is said by a word of its own:
+ * `variable Name : Type` / `delete variable Name`, and `component Name :
+ * Class` / `delete component Name`. A block of instanced objects is the one
+ * value that can drop elements, because the block is that array's whole value.
  *
  * Nothing here guesses. A property name that does not resolve becomes a
  * diagnostic with the similar candidates, and the other lines keep being
