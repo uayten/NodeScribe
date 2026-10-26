@@ -30,7 +30,7 @@ Esperado: montar um cooldown novo sem cliques, incluindo o componente Grant Tags
 Ajusta: a especificação do formato (Docs/FORMAT.md)
 Esperado: o FORMAT.md dizer só as regras; o porquê de cada uma fica num documento de design à parte.
 Como:
-- As afirmações medidas do README ficam onde estão
+- As afirmações medidas ficam onde estão (README, Docs/development.md)
 
 ### R-010 [feature] Teste automático de ida e volta nos grafos do projeto
 Esperado: qualquer grafo do projeto que não volta igual depois de lido e colado aparece sozinho como falha, sem alguém tropeçar nele (como o Set Visibility, os pinos do Append e os nomes de struct dividida).

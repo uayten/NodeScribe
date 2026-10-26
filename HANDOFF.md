@@ -3,25 +3,27 @@
 Updated: 2026-10-26
 
 ## State
-- R-001 (Widget Designer as text) approved by the user on 2026-10-26 and closed.
-- Token work: `Docs/FORMAT.md` is now the core (~19 KB, ~4.7k tokens, was 36 KB) and `Docs/format/` holds the topics `animgraph`, `behavior-tree`, `designer`, `reading`; `get_format_docs(topic)` returns one (D-017). The suite has `token_budget`, with ceilings in `BUDGET` at the top of `Tests/run_tests.py`. New kinds of asset ride on `read_object` / `write_object`, not new tools (D-016). R-008 and R-012 approved: a fresh agent asked for a graph read only the core, then the `reading` topic because the graph had warnings, and its graph compiled.
-- README (R-013, approved): `README.pt-BR.md` is the main one, opening with a running paragraph; `README.md` is its English translation (D-009). History went to `Docs/history.md`, proposals to `Docs/ideas.md`, and everything for working on the plugin to `Docs/development.md`, English only (D-018).
-- Built (unity); suite 26/26 (new `empty_event_is_reused`); core at 19,201 of its 20,000 ceiling, which R-009 should bring down; `get_format_docs(topic)` answers through MCP in the editor.
-- Branch `main`, committed, not pushed. Trail is set up (`.trail/`, `.claude/settings.json`, `.ignore`).
-- External: BossRush's own `CLAUDE.md` now points to the core and the topics, and mentions the `designer` section. It sits uncommitted in BossRush together with the user's own pending changes there.
+- Nothing in test. Approved and closed this session: R-001 (Widget Designer as text), R-008 (FORMAT.md as a core plus topics), R-012 (`token_budget` in the suite), R-013 (README), R-014 (an empty existing event is reused, D-019).
+- The format: `Docs/FORMAT.md` is the core, `Docs/format/` holds `animgraph`, `behavior-tree`, `designer`, `reading`; `get_format_docs(topic)` returns one (D-017).
+- Docs: `README.pt-BR.md` is the main README, `README.md` its translation (D-009); building and testing live in `Docs/development.md` (D-018).
+- Built (unity); suite 26/26. `token_budget`: core 19,201 of 20,000 (the closest ceiling), animgraph 9,271 of 10,000, descriptions 9,846, tools 11 of 11, worst reading ratio 1.86.
+- Branch `main`, all committed, not pushed. Trail is set up; its learnings are in `.trail/learnings/`.
+- External: BossRush's own `CLAUDE.md` points at the core and the topics; it sits uncommitted in BossRush with the user's own pending changes. Its *Limites conhecidos* still says writing a Behavior Tree does not exist, which is stale.
+- External: the `roadmap` and `project-docs` skills in `~/.claude` were changed this session (test steps the agent checks itself; README shape), uncommitted there.
 
 ## Next step
-R-014 (an empty existing event is reused, D-019) approved. Nothing in test. Next: R-009 (lean prose in FORMAT.md, measured by a fresh agent writing graphs from the core alone, as proposed to the user) or R-002 (read the AbilitySystem's `Default Starting Data` on BossRush's `BP_Golem`).
+R-002, first in the ROADMAP: read the AbilitySystem's `Default Starting Data` on BossRush's `BP_Golem`. Start from `read_object` on `BP_Golem` with the filter `Default Starting Data`, and see why the sheet cannot reach it.
+
+## Open questions
+- R-009 (lean prose in FORMAT.md) was proposed with a way to measure it: a fresh agent writes ~10 typical BossRush graphs from the core alone, the suite counts how many paste cleanly, then the prose is trimmed and the count must not drop. The user has not said yes; ask before doing it, and before R-002 if the core's ceiling gets in the way.
 
 ## Notes for the next session
-- Draft assets: `/Game/BossRush/Testes/BP_TesteEvento` (R-014's check, saved by the user).
-- Draft assets: `/Game/BossRush/Testes/WBP_TesteDesigner` has Battery and Temperature rows and an `NSVisTest` event from R-001's test; it may be unsaved. It is scratch.
-- `save_all_and_quit` saves every dirty asset, the user's too. Ask the user before closing the editor, and never let `/JoyShockLibrary4Unreal/LV_JoyShockDemo` be saved: it is slated to be reverted with git.
+- Drafts in `/Game/BossRush/Testes/`: `BP_TesteEvento` (R-014), `WBP_TesteDesigner` (R-001, Temperature row, `NSVisTest`), `BP_TesteGolem` (two old red comments and a `Pular` line that does not resolve). All scratch.
+- `save_all_and_quit` saves every dirty asset. When the user has used the editor in the session, ask before closing, and never let `/JoyShockLibrary4Unreal/LV_JoyShockDemo` be saved: it is slated to be reverted with git.
 - `/JoyShockLibrary4Unreal/...` assets belong to a public plugin: read, never write.
-- The suite command (`Docs/development.md`, *Testing*): pass `-script=...` as one quoted argument; `--%` swallows anything after it on the line, `> $null` included.
-- Current budget numbers: core 18,842 chars, animgraph 9,271 (ceiling 10,000, the closest), descriptions 9,846, tools 11 of 11, worst reading ratio 1.86.
+- Computer use cannot find the Unreal editor window by name; ask the user what the screen shows.
 
 ## Read first
 - CLAUDE.md, then Docs/FORMAT.md for any graph or Designer text, and the topic the task touches.
-- `Docs/development.md` only when building; DECISIONS.md when a choice comes up.
-- Not worth reading: Docs/history.md and Docs/ideas.md (history and proposals, not plans).
+- `Docs/development.md` when building or testing; DECISIONS.md when a choice comes up.
+- Not worth reading: Docs/history.md and Docs/ideas.md.
