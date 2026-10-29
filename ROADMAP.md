@@ -1,6 +1,6 @@
 # Roadmap
 
-<!-- project-docs: só pendências; aprovado é apagado. Ordem = prioridade. Próximo ID: R-015 -->
+<!-- project-docs: só pendências; aprovado é apagado. Ordem = prioridade. Próximo ID: R-016 -->
 
 ## Em teste
 
@@ -29,3 +29,11 @@
 ## Em andamento
 
 ## A fazer
+
+### R-015 [feature] Inserir nodes numa cadeia de execução que já existe
+Esperado: pelo texto, acrescentar um node no meio ou no fim de uma cadeia de execução de um grafo existente, sem apagar e recriar o grafo inteiro.
+Fatos de partida (JoyShockLibrary4Unreal, 29/10/2026):
+- `write_graph` sem `replace` só cria cadeias novas; não há como dizer "depois deste node que já existe".
+- `write_graph` com `replace` recusa no EventGraph de `/JoyShockLibrary4Unreal/UI/WBP_ConnectedJoyShockInfo`, porque a leitura perde duas reconvergências: `event Construct` e `event OnClicked of HeaderButton` entram no mesmo `IsValid`. O formato descreve árvores, então esse grafo não tem caminho de reescrita.
+- O caso que ficou travado: uma linha Battery Current no painel do demo, que precisa de um `TextBlock.SetText` dentro do evento `Update Sensor Readout`, no ramo `True` do Branch, logo depois do `SetText` de `BatteryVoltsAnswer` (R-031 do JoyShockLibrary4Unreal). Bom caso de teste.
+Em aberto: a sintaxe para apontar o node existente (pelo nome que a leitura dá, como `$jSL4UGetSwitch2Sensors`, ou por um `after`/`before`), e se vale também fazer o `replace` preservar reconvergências, o que resolveria o mesmo caso por outro lado.
