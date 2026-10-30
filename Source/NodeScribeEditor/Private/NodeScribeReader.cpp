@@ -2552,6 +2552,18 @@ void FNodeScribeReadContext::Run()
 			Orphans.Num(), *Names));
 	}
 
+	// Before the anchors are stamped: `# anchor N` is a comment, and the line
+	// someone copies into an `after` may come with it or without it.
+	for (const TTuple<UEdGraphNode*, int32>& Pair : ExecLineIndex)
+	{
+		Result.ExecLines.Emplace(Pair.Key, Lines[Pair.Value].TrimStart());
+	}
+
+	for (const TTuple<UEdGraphNode*, FString>& Pair : DataNames)
+	{
+		Result.NodeNames.Add(Pair.Value, Pair.Key);
+	}
+
 	StampAnchors();
 
 	Result.Text = FString::Join(Lines, TEXT("\n"));

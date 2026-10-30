@@ -76,7 +76,7 @@ escreve direto no grafo, sem você colar nada:
 | ferramenta | para quê |
 |---|---|
 | `read_graph(graph)` | um grafo de Blueprint inteiro como texto |
-| `write_graph(graph, text, replace)` | cria nodes a partir do texto. `replace` apaga o grafo antes -- e recusa, sem mexer em nada, se a leitura do grafo atual perderia alguma coisa |
+| `write_graph(graph, text, replace)` | cria nodes a partir do texto; `after <linha da leitura>:` insere no meio de uma cadeia que já existe. `replace` apaga o grafo antes -- e recusa, sem mexer em nada, se a leitura do grafo atual perderia alguma coisa |
 | `clear_graph(graph)` | esvazia o grafo e devolve como texto o que havia nele |
 | `read_object(target, filter)` | propriedades de qualquer objeto, classe, CDO, ator ou asset. Filtro vazio = só o que difere do padrão |
 | `write_object(target, text)` | aplica uma ficha. Uma lista de mudanças, não um estado final |

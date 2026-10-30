@@ -737,6 +737,118 @@ def chain_reaches_function_entry():
     return True, []
 
 
+def insert_into_existing_chain():
+    """`after <a line of the reading>:` inserts into a chain that is already there.
+
+    The R-015 case in small: a value computed up the chain, a Branch, and a
+    node to slip in right after another inside the `true` branch. Also at the
+    end of a branch, at the head of the other one through a label, and the
+    refusals -- ambiguous, missing, with `replace` -- that must leave the graph
+    as it was.
+    """
+    import re
+
+    graph, error = new_blueprint('NS_insert_after')
+    if not graph:
+        return False, [error]
+
+    problems = []
+
+    base = unreal.NodeScribeLibrary.write_graph(graph, '''
+variable bOn : Boolean
+event Update
+t = Get Game Time in Seconds
+Branch (Condition = $bOn)
+  true:
+    Print String (In String = "volts", Duration = $t)
+    Print String (In String = "end")
+  false:
+    Print String (In String = "off")
+''')
+    if '[error]' in base:
+        return False, ['the base graph complained:'] + base.splitlines()
+
+    # The name is the reading's, not the text's: an `after` block uses what
+    # the assistant saw.
+    before = unreal.NodeScribeLibrary.read_graph(graph)
+    found = re.search(r'In String = "?volts"?, Duration = \$(\w+)', before)
+    if not found:
+        return False, ['the reading has no named Duration on the volts line:'] + before.splitlines()
+    time_name = found.group(1)
+
+    def write(label, text, replace=False):
+        written = unreal.NodeScribeLibrary.write_graph(graph, text, replace)
+        if '[error]' in written:
+            problems.append('%s complained:' % label)
+            problems.extend('  ' + l for l in written.splitlines())
+        return written
+
+    write('the insertion in the middle', '''
+after Print String (In String = "volts"):
+  Print String (In String = "current", Duration = $%s)
+''' % time_name)
+    write('the insertion at the end', '''
+after Print String (In String = "end"):
+  Print String (In String = "tail")
+''')
+    write('the insertion through a label', '''
+after Branch (Condition = $bOn):
+  false:
+    Print String (In String = "first in false")
+''')
+
+    text = unreal.NodeScribeLibrary.read_graph(graph)
+    lines = [l.strip().replace('"', '') for l in body(text)]
+
+    wanted = [
+        'true:',
+        'Print String (In String = volts, Duration = $%s)' % time_name,
+        'Print String (In String = current, Duration = $%s)' % time_name,
+        'Print String (In String = end)',
+        'Print String (In String = tail)',
+        'false:',
+        'Print String (In String = first in false)',
+        'Print String (In String = off)',
+    ]
+    # Labels in lower case: `True:` or `true:` is the formatter's call.
+    chain = [l if l.startswith('Print String') else l.lower()
+             for l in lines if l.startswith('Print String') or l.endswith(':')]
+    if chain != wanted:
+        problems.append('the chain is not the one the insertions describe:')
+        problems.extend(difflib.unified_diff(wanted, chain, 'wanted', 'read', lineterm='', n=2))
+
+    # One Get Game Time, used twice: a second one would mean the name did not
+    # reach the existing node.
+    if text.count('Get Game Time in Seconds') != 1:
+        problems.append('`$%s` did not reuse the node already in the graph' % time_name)
+
+    if '# ->' in text:
+        problems.append('the insertion left a reconvergence or a side input behind')
+
+    # Refusals: each leaves the reading exactly as it was.
+    settled = body(text)
+    refusals = [
+        ('an ambiguous `after`', 'after Print String:\n  Print String (In String = "x")\n', False, 'matches'),
+        ('an `after` that finds nothing', 'after Print String (In String = "nope"):\n  Print String (In String = "x")\n',
+         False, 'matches no node'),
+        ('an `after` with `replace`', 'after Print String (In String = "end"):\n  Print String (In String = "x")\n',
+         True, 'replace'),
+    ]
+    for label, refused, replace, expected in refusals:
+        written = unreal.NodeScribeLibrary.write_graph(graph, refused, replace)
+        if '[error]' not in written or expected not in written:
+            problems.append('%s was not refused with %r: %s' % (label, expected, written))
+        if body(unreal.NodeScribeLibrary.read_graph(graph)) != settled:
+            problems.append('%s changed the graph' % label)
+
+    if problems:
+        problems.append('')
+        problems.extend(text.splitlines())
+        return False, problems
+
+    return True, []
+
+
 def designer_section(text):
     """The lines from `designer` on, without comments: what a write takes back."""
     lines = text.splitlines()
@@ -1314,6 +1426,7 @@ OTHERS = [
     ('chain_reaches_function_entry', chain_reaches_function_entry),
     ('replace_swaps_the_graph', replace_swaps_the_graph),
     ('empty_event_is_reused', empty_event_is_reused),
+    ('insert_into_existing_chain', insert_into_existing_chain),
     ('replace_refuses_lossy_graph', replace_refuses_lossy_graph),
     ('replace_takes_own_break', replace_takes_own_break),
     ('sheet_round_trip_changes_nothing', sheet_round_trip_changes_nothing),

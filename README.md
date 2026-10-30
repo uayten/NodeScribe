@@ -75,7 +75,7 @@ writes into the graph directly, with nothing for you to paste:
 | tool | what for |
 |---|---|
 | `read_graph(graph)` | a whole Blueprint graph as text |
-| `write_graph(graph, text, replace)` | creates nodes from text. `replace` erases the graph first -- and refuses, touching nothing, if reading the current graph would lose anything |
+| `write_graph(graph, text, replace)` | creates nodes from text; `after <a line of the reading>:` inserts into the middle of a chain that already exists. `replace` erases the graph first -- and refuses, touching nothing, if reading the current graph would lose anything |
 | `clear_graph(graph)` | empties the graph and returns as text what was in it |
 | `read_object(target, filter)` | properties of any object, class, CDO, actor or asset. An empty filter = only what differs from the default |
 | `write_object(target, text)` | applies a sheet. A list of changes, not a final state |

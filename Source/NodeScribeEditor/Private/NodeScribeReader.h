@@ -43,6 +43,18 @@ public:
 		 * separately, and not only as a note.
 		 */
 		int32 LostNodeCount = 0;
+
+		/**
+		 * Each execution node and the line it came out as, without indentation.
+		 *
+		 * The way an `after` finds its node: the line someone copied from this
+		 * reading is compared with these. Valid only while the graph is not
+		 * changed -- it is read right before the write that uses it.
+		 */
+		TArray<TPair<UEdGraphNode*, FString>> ExecLines;
+
+		/** The node behind each `$name` of this reading. */
+		TMap<FString, UEdGraphNode*> NodeNames;
 	};
 
 	/**

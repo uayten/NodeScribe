@@ -76,6 +76,14 @@ struct FNodeScribeStatement
 	FString VariableName;
 	FString VariableType;
 
+	/**
+	 * true when the line is `after <a line of the reading>:`: it names a node
+	 * already in the graph, and the block under it is inserted after that node.
+	 * NodeExpression, Args and OutputName then describe the node to find, not
+	 * one to create.
+	 */
+	bool bIsAnchor = false;
+
 	/** Value after the `=`, if any. Empty = the type's default. */
 	FString VariableDefault;
 

@@ -148,6 +148,20 @@ FString UNodeScribeLibrary::WriteGraph(UEdGraph* Graph, const FString& Text, boo
 	TArray<FNodeScribeDiagnostic> ParseDiagnostics;
 	const TArray<FNodeScribeStatement> Statements = FNodeScribeParser::Parse(Text, ParseDiagnostics);
 
+	// An `after` points at a node that is there now; erasing first would leave
+	// it pointing at nothing, after the erase was already done.
+	if (bReplace)
+	{
+		if (const FNodeScribeStatement* Anchor = Statements.FindByPredicate(
+			[](const FNodeScribeStatement& Statement) { return Statement.bIsAnchor; }))
+		{
+			return FString::Printf(
+				TEXT("[error]: line %d: `after` inserts into the graph that is there, and `replace` erases it first. ")
+				TEXT("Write without `replace`. Nothing was changed."),
+				Anchor->LineNumber);
+		}
+	}
+
 	const FScopedTransaction Transaction(LOCTEXT("WriteGraphTransaction", "NodeScribe: write graph"));
 	Blueprint->Modify();
 	Graph->Modify();

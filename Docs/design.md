@@ -93,3 +93,19 @@ comment, an empty pin or a refusal costs one look.
 - **An omitted pin is its factory value**, never "nothing linked": that is what
   keeps a reading short, and a value erased on purpose has to come out as `""`
   to survive.
+
+## Inserting into a chain that exists
+
+- **The node is named by its reading line**, not by a GUID or a path through
+  the chain: the line is what the assistant has in front of it, and a reading
+  is deterministic, so the plugin re-reads the graph and compares. The reading's
+  `$names` count in the block for the same reason.
+- **Several matches are refused, never chosen between.** Leaving arguments out
+  only widens the match, so a short `after` costs a refusal, never a wrong node.
+- **All of them or none.** An `after` that does not resolve stops the write
+  before its first node: half an insertion is a graph nobody wrote.
+- **The colon is required** so that no line that worked before changes meaning:
+  a node line never ends in `:`, so a function called "After X" stays a function.
+- **Insertion and not `replace` for graphs that reconverge.** The format only
+  describes trees, so a graph where two chains land on the same node can never
+  be rewritten whole. An insertion leaves those wires alone.

@@ -2,7 +2,9 @@
 
 #include "NodeScribeAnimGraph.h"
 #include "NodeScribeCatalog.h"
+#include "NodeScribeParser.h"
 #include "NodeScribePropertyText.h"
+#include "NodeScribeReader.h"
 
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -845,7 +847,50 @@ private:
 
 		/** How many branches were already opened from LastNode, to stack in Y. */
 		int32 BranchesOpened = 0;
+
+		/**
+		 * The block starts on a pin of a node already in the graph -- an `after`,
+		 * or a label under one -- and that pin already led somewhere.
+		 *
+		 * Linking the block's first node takes that wire's place, so whatever
+		 * followed would be cut loose. Kept here, it is linked again to the
+		 * block's last node when the block closes: that is what makes the block
+		 * an insertion instead of a replacement.
+		 */
+		FPinRef OriginPin;
+		TArray<FPinRef> Displaced;
+
+		/** The line that opened the block, for the message when it cannot be relinked. */
+		int32 OpenedAtLine = 0;
 	};
+
+	/** Keeps what OriginPin leads to now, before the block takes its place. */
+	static void CaptureDisplaced(FFrame& Frame, UEdGraphPin* Origin, int32 Line);
+
+	/** Closes the innermost block, relinking what the insertion displaced. */
+	void PopFrame();
+
+	// --- Insertion into an existing chain (`after`) ---------------------------
+
+	/**
+	 * Finds every `after` node before anything is created.
+	 *
+	 * All of them or none: when one does not resolve, the write stops before
+	 * its first node. Half an insertion -- the nodes in, the wire nowhere -- is
+	 * a graph nobody wrote and nobody would notice until playtest.
+	 */
+	bool ResolveAnchors(const TArray<FNodeScribeStatement>& Statements);
+
+	/** The node each `after` line found, by line number. */
+	TMap<int32, UEdGraphNode*> AnchorNodes;
+
+	/**
+	 * The names the graph's own reading gives its nodes, for `$name` in the
+	 * lines of an `after` block. Only filled when the text has one: those
+	 * names come from a reading the assistant has just seen. A name the text
+	 * defines itself wins over these.
+	 */
+	TMap<FString, UEdGraphNode*> ExistingNames;
 
 	// --- Node creation ----------------------------------------------------
 
@@ -2218,6 +2263,21 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 		if (UEdGraphPin* Pin = Existing->Resolve())
 		{
 			return Pin;
+		}
+	}
+
+	// A node already in the graph, by the name its reading gave it -- the
+	// value an `after` block came to use is usually computed up there. Not for
+	// a variable: the reading writes `$Health` for a Get it does not name, and
+	// a fresh Get beside the new node beats a wire across the graph.
+	if (!IsBlueprintVariable(Name))
+	{
+		if (UEdGraphNode* const* ExistingNode = ExistingNames.Find(Name))
+		{
+			if (UEdGraphPin* Pin = FindPrimaryOutput(*ExistingNode))
+			{
+				return Pin;
+			}
 		}
 	}
 
@@ -4595,6 +4655,315 @@ void FNodeScribeBuildContext::WireRule(UEdGraph* RuleGraph, UEdGraphNode* RuleRe
 // Walk
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Insertion into an existing chain
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	bool AnchorArgMatches(const FNodeScribeArg& Wanted, const FNodeScribeArg& Have)
+	{
+		if (Wanted.bIsReference != Have.bIsReference)
+		{
+			return false;
+		}
+
+		// A reference is a name, compared as every name is; a literal is a value,
+		// and a value the reading wrote is copied exactly.
+		return Wanted.bIsReference
+			? FNodeScribeCatalog::Normalize(Wanted.Value) == FNodeScribeCatalog::Normalize(Have.Value)
+			: Wanted.Value.Equals(Have.Value, ESearchCase::CaseSensitive);
+	}
+
+	/**
+	 * Whether a line of the reading is the one an `after` names.
+	 *
+	 * The `after` may say less than the whole line: each argument it writes has
+	 * to be there with the same value, and the ones it leaves out are not
+	 * compared. Saying less only widens the match -- two nodes left are refused,
+	 * never chosen between.
+	 */
+	bool AnchorLineMatches(const FNodeScribeStatement& Wanted, const FNodeScribeStatement& Have)
+	{
+		if (FNodeScribeCatalog::Normalize(Wanted.NodeExpression) != FNodeScribeCatalog::Normalize(Have.NodeExpression))
+		{
+			return false;
+		}
+
+		if (!Wanted.OutputName.IsEmpty()
+			&& FNodeScribeCatalog::Normalize(Wanted.OutputName) != FNodeScribeCatalog::Normalize(Have.OutputName))
+		{
+			return false;
+		}
+
+		for (int32 Index = 0; Index < Wanted.Args.Num(); ++Index)
+		{
+			const FNodeScribeArg& Arg = Wanted.Args[Index];
+			const FNodeScribeArg* Found = nullptr;
+
+			if (Arg.PinName.IsEmpty())
+			{
+				// Positional: where the reading itself wrote it.
+				Found = Have.Args.IsValidIndex(Index) ? &Have.Args[Index] : nullptr;
+			}
+			else
+			{
+				const FString WantedPin = FNodeScribeCatalog::Normalize(Arg.PinName);
+				Found = Have.Args.FindByPredicate([&WantedPin](const FNodeScribeArg& Candidate)
+				{
+					return FNodeScribeCatalog::Normalize(Candidate.PinName) == WantedPin;
+				});
+			}
+
+			if (!Found || !AnchorArgMatches(Arg, *Found))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+}
+
+bool FNodeScribeBuildContext::ResolveAnchors(const TArray<FNodeScribeStatement>& Statements)
+{
+	const FNodeScribeStatement* FirstAnchor = Statements.FindByPredicate([](const FNodeScribeStatement& Statement)
+	{
+		return Statement.bIsAnchor;
+	});
+
+	if (!FirstAnchor)
+	{
+		return true;
+	}
+
+	if (bAnimGraph)
+	{
+		AddError(FirstAnchor->LineNumber,
+			TEXT("`after` inserts into an execution chain, and an AnimGraph has none. Nothing was written."));
+		return false;
+	}
+
+	// The graph as it is now, read the way the assistant saw it: the line in an
+	// `after` was copied from this same reading, and the `$names` in the block
+	// are this reading's names.
+	const FNodeScribeReader::FResult Reading = FNodeScribeReader::ReadGraph(Graph, Blueprint);
+	ExistingNames = Reading.NodeNames;
+
+	struct FAnchorCandidate
+	{
+		UEdGraphNode* Node = nullptr;
+		FString Line;
+		FNodeScribeStatement Parsed;
+	};
+
+	TArray<FAnchorCandidate> Candidates;
+	for (const TPair<UEdGraphNode*, FString>& Entry : Reading.ExecLines)
+	{
+		TArray<FNodeScribeDiagnostic> Ignored;
+		TArray<FNodeScribeStatement> Parsed = FNodeScribeParser::Parse(Entry.Value, Ignored);
+
+		if (Parsed.Num() == 1 && !Parsed[0].bIsLabel && !Parsed[0].bIsVariable)
+		{
+			Candidates.Add({ Entry.Key, FNodeScribeParser::StripComment(Entry.Value).TrimEnd(), MoveTemp(Parsed[0]) });
+		}
+	}
+
+	bool bAllFound = true;
+
+	for (int32 Index = 0; Index < Statements.Num(); ++Index)
+	{
+		const FNodeScribeStatement& Statement = Statements[Index];
+		if (!Statement.bIsAnchor)
+		{
+			continue;
+		}
+
+		const FString Written = Statement.RawLine;
+
+		// The block under it is a chain of its own; inside another block, where
+		// that chain would end and the outer one resume is anybody's guess.
+		if (Statement.Indent > 0)
+		{
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("`%s` is indented. `after` opens a block of its own: write it at the start of the line. Nothing was written."),
+				*Written));
+			bAllFound = false;
+			continue;
+		}
+
+		TArray<const FAnchorCandidate*> Matches;
+		TArray<FString> SameName;
+		const FString WantedExpression = FNodeScribeCatalog::Normalize(Statement.NodeExpression);
+
+		for (const FAnchorCandidate& Candidate : Candidates)
+		{
+			if (AnchorLineMatches(Statement, Candidate.Parsed))
+			{
+				Matches.Add(&Candidate);
+			}
+			else if (FNodeScribeCatalog::Normalize(Candidate.Parsed.NodeExpression) == WantedExpression)
+			{
+				SameName.Add(TEXT("`") + Candidate.Line + TEXT("`"));
+			}
+		}
+
+		if (Matches.Num() == 0)
+		{
+			AddError(Statement.LineNumber, SameName.Num() > 0
+				? FString::Printf(
+					TEXT("`%s` matches no node of this graph. With that name there are: %s. Nothing was written."),
+					*Written, *FString::Join(SameName, TEXT(", ")))
+				: FString::Printf(
+					TEXT("`%s` matches no execution node of this graph. Copy the line from read_graph. Nothing was written."),
+					*Written));
+			bAllFound = false;
+			continue;
+		}
+
+		if (Matches.Num() > 1)
+		{
+			TArray<FString> Lines;
+			for (const FAnchorCandidate* Match : Matches)
+			{
+				Lines.Add(TEXT("`") + Match->Line + TEXT("`"));
+			}
+
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("`%s` matches %d nodes: %s. Write the arguments that tell them apart. Nothing was written."),
+				*Written, Matches.Num(), *FString::Join(Lines, TEXT(", "))));
+			bAllFound = false;
+			continue;
+		}
+
+		UEdGraphNode* Node = Matches[0]->Node;
+		const TArray<UEdGraphPin*> Outputs = GetFlowOutputs(Node);
+
+		if (Outputs.Num() == 0)
+		{
+			AddError(Statement.LineNumber, FString::Printf(
+				TEXT("`%s` has no execution output to insert after. Nothing was written."), *Written));
+			bAllFound = false;
+			continue;
+		}
+
+		// Several outputs and no label: which one the block continues is the same
+		// guess the chain refuses everywhere else.
+		if (Outputs.Num() > 1)
+		{
+			const FNodeScribeStatement* Next = nullptr;
+			for (int32 After = Index + 1; After < Statements.Num(); ++After)
+			{
+				if (!Statements[After].bIsVariable)
+				{
+					Next = &Statements[After];
+					break;
+				}
+			}
+
+			if (Next && Next->Indent > Statement.Indent && !Next->bIsLabel)
+			{
+				TArray<FString> Names;
+				for (const UEdGraphPin* Pin : Outputs)
+				{
+					Names.Add(Pin->PinName.ToString());
+				}
+
+				AddError(Statement.LineNumber, FString::Printf(
+					TEXT("`%s` has several outputs (%s). Open a label under `after` to say which one. Nothing was written."),
+					*Written, *FString::Join(Names, TEXT(", "))));
+				bAllFound = false;
+				continue;
+			}
+		}
+
+		AnchorNodes.Add(Statement.LineNumber, Node);
+	}
+
+	return bAllFound;
+}
+
+void FNodeScribeBuildContext::CaptureDisplaced(FFrame& Frame, UEdGraphPin* Origin, int32 Line)
+{
+	Frame.OpenedAtLine = Line;
+
+	// A pin of a node this write created has nothing linked yet: only a pin
+	// of a node already in the graph displaces anything.
+	if (!Origin || Origin->LinkedTo.Num() == 0)
+	{
+		return;
+	}
+
+	Frame.OriginPin = FPinRef(Origin);
+	for (UEdGraphPin* Linked : Origin->LinkedTo)
+	{
+		Frame.Displaced.Add(FPinRef(Linked));
+	}
+}
+
+void FNodeScribeBuildContext::PopFrame()
+{
+	const FFrame Closed = Frames.Pop();
+
+	if (Closed.Displaced.Num() == 0)
+	{
+		return;
+	}
+
+	UEdGraphPin* OriginPin = Closed.OriginPin.Resolve();
+
+	TArray<UEdGraphPin*> Targets;
+	for (const FPinRef& Ref : Closed.Displaced)
+	{
+		if (UEdGraphPin* Pin = Ref.Resolve())
+		{
+			Targets.Add(Pin);
+		}
+	}
+
+	// The old wire is still there: the block only had data nodes, or started a
+	// chain of its own. Nothing was inserted, and nothing needs relinking.
+	const bool bUntouched = OriginPin && Targets.ContainsByPredicate([OriginPin](UEdGraphPin* Target)
+	{
+		return OriginPin->LinkedTo.Contains(Target);
+	});
+
+	if (!OriginPin || bUntouched)
+	{
+		return;
+	}
+
+	UEdGraphPin* Tail = Closed.PendingExec.Resolve();
+	if (Tail && Tail != OriginPin)
+	{
+		for (UEdGraphPin* Target : Targets)
+		{
+			Connect(Tail, Target, Closed.OpenedAtLine);
+		}
+		return;
+	}
+
+	// The block ends in a node with several outputs, or in none: which of them
+	// the old continuation hangs from is a guess. It stays loose, and loudly.
+	TArray<FString> Names;
+	for (UEdGraphPin* Target : Targets)
+	{
+		if (UEdGraphNode* Node = Target->GetOwningNodeUnchecked())
+		{
+			FString Title = Node->GetNodeTitle(ENodeTitleType::ListView).ToString();
+			Title.ReplaceInline(TEXT("\n"), TEXT(" "));
+			Names.Add(TEXT("`") + Title.TrimStartAndEnd() + TEXT("`"));
+		}
+	}
+
+	AddError(Closed.OpenedAtLine, FString::Printf(
+		TEXT("The inserted chain does not end in a single execution output, so %s, which came next, was left unlinked. ")
+		TEXT("Link it by hand to where the chain should continue."),
+		*FString::Join(Names, TEXT(", "))));
+}
+
+// ---------------------------------------------------------------------------
+
 void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements)
 {
 	FFrame Root;
@@ -4602,6 +4971,13 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 	Root.BaseX = FMath::RoundToInt(Origin.X);
 	Root.BaseY = FMath::RoundToInt(Origin.Y);
 	Frames.Add(Root);
+
+	// Before anything is created: the reading behind it has to be the graph as
+	// the assistant saw it, and a refusal has to leave that graph untouched.
+	if (!ResolveAnchors(Statements))
+	{
+		return;
+	}
 
 	PreCreateCustomEvents(Statements);
 
@@ -4619,13 +4995,50 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 			continue;
 		}
 
+		if (Statement.bIsAnchor)
+		{
+			// Always at the top level (ResolveAnchors refuses the rest), so it
+			// closes every open block.
+			while (Frames.Num() > 1)
+			{
+				PopFrame();
+			}
+
+			// What comes after the block at the top level starts a chain of its
+			// own, not the one that was open before it.
+			Frames.Top().PendingExec = FPinRef();
+			Frames.Top().LastNode = nullptr;
+
+			UEdGraphNode* Existing = AnchorNodes.FindRef(Statement.LineNumber);
+
+			FFrame Insertion;
+			Insertion.Indent = Statement.Indent;
+			Insertion.LastNode = Existing;
+			Insertion.OpenedAtLine = Statement.LineNumber;
+
+			// Below the node, not to its right: there sits what used to follow it.
+			Insertion.BaseX = Existing->NodePosX + ColumnWidth;
+			Insertion.BaseY = Existing->NodePosY + BranchRowHeight;
+
+			// Several outputs: the labels under it choose, as under a new Branch.
+			const TArray<UEdGraphPin*> Outputs = GetFlowOutputs(Existing);
+			if (Outputs.Num() == 1)
+			{
+				Insertion.PendingExec = FPinRef(Outputs[0]);
+				CaptureDisplaced(Insertion, Outputs[0], Statement.LineNumber);
+			}
+
+			Frames.Add(Insertion);
+			continue;
+		}
+
 		if (Statement.bIsLabel)
 		{
 			// A label closes any block at the same level or deeper, so that
 			// `true:` and `false:` are siblings, not nested.
 			while (Frames.Num() > 1 && Frames.Top().Indent >= Statement.Indent)
 			{
-				Frames.Pop();
+				PopFrame();
 			}
 
 			FFrame& Parent = Frames.Top();
@@ -4720,6 +5133,10 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 			else
 			{
 				Branch.PendingExec = FPinRef(Chosen);
+
+				// Under an `after`, the label may open a pin that already leads
+				// somewhere: the block goes in between, as it does after the node.
+				CaptureDisplaced(Branch, Chosen, Statement.LineNumber);
 			}
 
 			// A pose branch draws to the left: there the flow walks towards the
@@ -4736,7 +5153,7 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 		while (Frames.Num() > 1 && Statement.Indent <= Frames.Top().Indent)
 		{
-			Frames.Pop();
+			PopFrame();
 		}
 
 		UEdGraphNode* Node = CreateNodeForStatement(Statement);
@@ -4852,6 +5269,13 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		}
 
 		Frame.LastNode = Node;
+	}
+
+	// The blocks still open at the end of the text close here, and an insertion
+	// among them relinks what it displaced.
+	while (Frames.Num() > 1)
+	{
+		PopFrame();
 	}
 
 	// Only now is it possible to know which ones really stayed without a label.

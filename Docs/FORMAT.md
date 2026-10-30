@@ -32,6 +32,7 @@ each rule is the way it is: [design.md](design.md) -- not needed to write text.
 - [Comments](#comments)
 - [What the parser ignores by itself](#what-the-parser-ignores-by-itself)
 - [The way back](#the-way-back)
+- [Inserting into a chain that exists](#inserting-into-a-chain-that-exists)
 - [When it cannot be done](#when-it-cannot-be-done)
 - [Keyword reference](#keyword-reference)
 
@@ -386,6 +387,33 @@ erased on purpose comes out explicitly: `""`. Anchors, side inputs,
 conversions, and what does not come back the same: the
 [reading](format/reading.md) topic.
 
+## Inserting into a chain that exists
+
+`after`, a line copied from `read_graph` and `:` open a block that goes into
+that node's chain, right after it. What used to follow the node now follows the
+block's last node:
+
+```
+after Set Text (Target = $BatteryVoltsAnswer, In Text = $volts):
+  Set Text (Target = $BatteryCurrentAnswer, In Text = $sensors.Battery Current)
+```
+
+The `$names` of that reading work inside the block (`$sensors` above is a node
+already in the graph). The line may leave arguments out, as long as only one node
+still matches. On a node with several outputs, a label says which one, and the
+block goes at the head of that branch:
+
+```
+after Branch (Condition = $bOn):
+  false:
+    Print String (In String = "first")
+```
+
+`after` is not indented. Without `replace`: it inserts into the graph that is
+there. If an `after` matches no node, or more than one, the whole write is
+refused and nothing changes. If the block ends in a node with several outputs,
+whatever came next is left unlinked, with an error.
+
 ---
 
 ## When it cannot be done
@@ -396,6 +424,7 @@ Nothing fails silently:
 |---|---|
 | Node name not found | **red** comment in the graph with the original line |
 | Event that already exists in the graph, with a wire | red comment; nothing is created or changed |
+| `after` that matches no node, or several | error; the whole write is refused |
 | Ambiguous name | red comment listing the candidates, none chosen |
 | Nonexistent pin | error in the panel listing the pins the node really has |
 | `$something` that does not exist | error in the panel |
@@ -426,6 +455,7 @@ Every word the format reserves, in one place.
 | `Switch on X` | line | enum, `Int`, `String` or `Name` switch |
 | `EnhancedInputAction Path` | line | Input Action event |
 | `Comment Text` | line | comment box |
+| `after Line:` | top level | inserts the block under it after the node that reads as `Line` |
 | `true:`, `then:`, `false:`, `else:`, `loop body:`, `loop:`, `completed:` | label | execution output aliases |
 | `state Name:`, `conduit Name:`, `alias Name:` | label under a state machine | state machine nodes |
 | `From -> To:` (optionally `transition From -> To:`) | label under a state machine | transition |

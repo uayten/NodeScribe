@@ -377,9 +377,34 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 			}
 		}
 
+		// Insertion point: `after Set Text (Target = $Volts):`. The rest is a line
+		// of the reading, copied as it came out, and is parsed like any node line.
+		//
+		// The colon is required, and it is what keeps this from taking a function
+		// called "After Something": a node line never ends in `:` -- that is a
+		// label --, so no line that worked before changes meaning.
+		{
+			static const TCHAR* const AnchorKeyword = TEXT("after ");
+
+			if (Line.StartsWith(AnchorKeyword, ESearchCase::IgnoreCase) && Line.EndsWith(TEXT(":")))
+			{
+				Line = Line.RightChop(FCString::Strlen(AnchorKeyword)).LeftChop(1);
+				Line.TrimStartAndEndInline();
+				Statement.bIsAnchor = true;
+
+				if (Line.IsEmpty())
+				{
+					OutDiagnostics.Emplace(ENodeScribeSeverity::Error, LineNumber,
+						TEXT("`after` without a node. Copy the node's line from the reading: `after Print String (In String = \"hi\"):`."));
+					continue;
+				}
+			}
+		}
+
 		const int32 ParenIndex = FindArgsOpenParen(Line);
 
-		// Block label: ends in `:`.
+		// Block label: ends in `:`. Never for an insertion point: its colon was
+		// already taken off, and a label inside it would be a typo, not a block.
 		//
 		// With parentheses closing right before the colon, what is inside them is
 		// an argument, as on any other line -- `state Jump
@@ -391,7 +416,7 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 		// node, as it always was.
 		const bool bLabelHasArgs = ParenIndex != INDEX_NONE && Line.EndsWith(TEXT("):"));
 
-		if (Line.EndsWith(TEXT(":")) && (ParenIndex == INDEX_NONE || bLabelHasArgs))
+		if (!Statement.bIsAnchor && Line.EndsWith(TEXT(":")) && (ParenIndex == INDEX_NONE || bLabelHasArgs))
 		{
 			Statement.bIsLabel = true;
 			Statement.Label = Line.LeftChop(1);

@@ -1,39 +1,35 @@
 # Roadmap
 
-<!-- project-docs: só pendências; aprovado é apagado. Ordem = prioridade. Próximo ID: R-016 -->
+<!-- project-docs: só pendências; aprovado é apagado. Ordem = prioridade. Próximo ID: R-022 -->
 
 ## Em teste
-
-### R-003 Adicionar componentes a um Blueprint pelo texto
-1. No Content Browser, abrir a pasta BossRush/Testes e dar duplo clique em BP_TesteGolem: no painel Components aparecem AbilitySystem e Hitbox, e Hitbox fica pendurado em CharacterMesh0.
-2. Clicar em Hitbox: no painel Details, Box Extent está em 40, 40, 60.
-
-### R-004 Input Mapping Context como texto
-1. Na mesma pasta, abrir IMC_Teste: a lista de mapeamentos tem as mesmas ações e teclas do ActionInputMapping, mais E em Ataque, e Movimentação não tem a tecla W.
-2. Em Ataque, abrir a tecla E: em Triggers aparece Tap.
-3. Em Movimentação, abrir Gamepad Left Thumbstick 2D-Axis: em Modifiers aparecem To World Space e Dead Zone, com Lower Threshold em 0,3.
-
-### R-005 Mover e reordenar widgets no Designer
-1. Abrir WBP_TesteDesigner, aba Designer: na Hierarchy, debaixo de Root, BatteryRow vem antes de TemperatureRow, e na prévia a linha "Battery Volts" aparece acima de "Temperature".
-2. Na Hierarchy, abrir HorizontalBox: Footer é o último item, depois de IsStillAnswer, e na prévia o "Text Block" aparece na mesma linha de "Is Still?".
-3. Clicar em Compile: compila sem erro.
-
-### R-006 Conteúdo de named slots no Designer
-1. Ainda no WBP_TesteDesigner, na Hierarchy, abrir Framed: dentro do slot Body estão FramedRow e FramedText, e na prévia "Inside the slot" aparece logo abaixo de "Host".
-2. Abrir WBP_TesteSlotChild, aba Designer: a Hierarchy mostra os slots Body e Foot preenchidos, e na prévia aparecem "Host", "From the child" e "Text Block", nessa ordem.
-
-### R-007 Componentes de Gameplay Effect
-1. Abrir GE_TesteCooldown, na mesma pasta: Duration Policy é Has Duration, com 7 na duração.
-2. Em Components: há um Grant Tags to Target Actor, com Cooldown.Golem.Salto em Add Tags.
 
 ## Em andamento
 
 ## A fazer
 
-### R-015 [feature] Inserir nodes numa cadeia de execução que já existe
-Esperado: pelo texto, acrescentar um node no meio ou no fim de uma cadeia de execução de um grafo existente, sem apagar e recriar o grafo inteiro.
-Fatos de partida (JoyShockLibrary4Unreal, 29/10/2026):
-- `write_graph` sem `replace` só cria cadeias novas; não há como dizer "depois deste node que já existe".
-- `write_graph` com `replace` recusa no EventGraph de `/JoyShockLibrary4Unreal/UI/WBP_ConnectedJoyShockInfo`, porque a leitura perde duas reconvergências: `event Construct` e `event OnClicked of HeaderButton` entram no mesmo `IsValid`. O formato descreve árvores, então esse grafo não tem caminho de reescrita.
-- O caso que ficou travado: uma linha Battery Current no painel do demo, que precisa de um `TextBlock.SetText` dentro do evento `Update Sensor Readout`, no ramo `True` do Branch, logo depois do `SetText` de `BatteryVoltsAnswer` (R-031 do JoyShockLibrary4Unreal). Bom caso de teste.
-Em aberto: a sintaxe para apontar o node existente (pelo nome que a leitura dá, como `$jSL4UGetSwitch2Sensors`, ou por um `after`/`before`), e se vale também fazer o `replace` preservar reconvergências, o que resolveria o mesmo caso por outro lado.
+### R-016 [feature] Parâmetros de eventos customizados e de interface
+Esperado: um evento customizado ou de interface com parâmetros, lido e colado de volta, volta com os mesmos parâmetros.
+Como:
+- Hoje o formato não tem como declarar parâmetro de evento; é a maior parte das 24 diferenças silenciosas que a suíte acha nos grafos do projeto (`project_graphs_round_trip`, diffs em `Saved/NodeScribe/project_graphs.txt`).
+- Cada item daqui até o R-021 fecha quando o seu grupo some da lista de diferenças silenciosas da suíte; quem confere é o agente.
+
+### R-017 [ajuste] Pinos de struct divididos em Spawn Actor e Set Color and Opacity
+Ajusta: a leitura e a escrita de `$x.Pin` em struct dividido (Docs/FORMAT.md > When the node has more than one output)
+Esperado: um pino de struct dividido (Split Struct Pin) nesses nodes volta dividido, com os mesmos valores.
+
+### R-018 [ajuste] Nomes que começam com dígito e rótulos numéricos de Switch
+Ajusta: nomes de variável e rótulos de Switch (Docs/FORMAT.md > Switch)
+Esperado: uma variável como `3 Corações` e um `Switch on Int` com rótulos `0:`, `1:` voltam iguais.
+
+### R-019 [ajuste] Funções de interface
+Ajusta: chamada de função e de mensagem de interface (Docs/FORMAT.md > When two nodes share a name)
+Esperado: uma função de interface que também tem implementação no Blueprint volta sem ficar ambígua, e uma mensagem de interface volta com o seu Target.
+
+### R-020 [ajuste] Expose on Spawn com a classe vinda de variável
+Ajusta: Docs/FORMAT.md > Creating widgets and spawning actors
+Esperado: um Spawn Actor ou Create Widget cuja classe vem de uma variável volta com os pinos Expose on Spawn e os seus valores.
+
+### R-021 [ajuste] Comentário com parênteses
+Ajusta: Docs/FORMAT.md > Comments
+Esperado: um comentário cujo texto tem uma parte entre parênteses volta com ela.

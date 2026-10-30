@@ -25,7 +25,9 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
         Does not raise: a line that does not resolve becomes a red comment in
         the graph, and the rest keeps being created. The return says what
-        happened.
+        happened. `after <a line of read_graph>:` inserts the block under it
+        into that node's chain; an `after` that does not find exactly one
+        node refuses the whole write.
 
         Args:
             graph: The graph to populate.
