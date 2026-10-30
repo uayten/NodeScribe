@@ -865,6 +865,89 @@ def chain_reaches_function_entry():
     return True, []
 
 
+def layout_leaves_no_overlap():
+    """No node lands on top of another when a text is written (R-023).
+
+    The reading cannot see this: positions stay out of the format, and a graph
+    with every node in one spot reads the same. So this one measures. The text
+    has what used to collide: an event after a chain with branches, a value
+    nobody consumes after them, a sub-branch beside its uncle, a node whose data
+    stack is taller than a row.
+    """
+    path = '%s/NS_layout' % DESTINATION
+
+    report = unreal.NodeScribeLibrary.create_asset(path, 'Actor', '')
+    if report.startswith('[error]'):
+        return False, [report]
+
+    bp = unreal.load_asset(path)
+    graph = unreal.load_object(bp, 'EventGraph') if bp else None
+    if not graph:
+        return False, ['could not find the EventGraph of %s' % path]
+
+    written = unreal.NodeScribeLibrary.write_graph(graph, '''
+variable Word : String
+
+event First
+Print String (In String = "first")
+Switch on String (Selection = $Word, Pin Names = '("a","b")', Has Default Pin = false)
+  a:
+    Print String (In String = "a")
+    Branch (Condition = true)
+      true:
+        Print String (In String = "a true")
+      false:
+        Print String (In String = "a false")
+  b:
+    Print String (In String = "b")
+    Print String (In String = "b again")
+
+event Second
+one = Get Actor Location
+two = Get Actor Rotation
+three = Get Actor Scale 3D
+four = Get Actor Forward Vector
+Spawn Actor from Class (Class = /Script/Engine.StaticMeshActor, Spawn Transform Location = $one, Spawn Transform Rotation = $two, Spawn Transform Scale = $three)
+Set Actor Location (New Location = $four)
+
+event Third
+Print String (In String = "third")
+Branch (Condition = true)
+  true:
+    Print String (In String = "third true")
+Print String (In String = "after the branch")
+
+event Fourth
+Print String (In String = "fourth")
+Branch (Condition = false)
+  false:
+    Print String (In String = "fourth false")
+
+nobody = Get Actor Location
+''')
+
+    if '[error]' in written:
+        return False, ['the write complained:'] + written.splitlines()
+
+    nodes = []
+    for line in unreal.NodeScribeLibrary.read_node_positions(graph).splitlines():
+        x, y, title = line.split(' ', 2)
+        nodes.append((int(x), int(y), title))
+
+    # Smaller than a node really is: what trips this is a real collision, not two
+    # nodes that are merely close. A data node sits 200 below its consumer.
+    width, height = 300, 150
+
+    problems = []
+    for index, (x, y, title) in enumerate(nodes):
+        for other_x, other_y, other_title in nodes[index + 1:]:
+            if abs(x - other_x) < width and abs(y - other_y) < height:
+                problems.append('`%s` at (%d, %d) is on top of `%s` at (%d, %d)' % (
+                    title, x, y, other_title, other_x, other_y))
+
+    return not problems, problems
+
+
 def insert_into_existing_chain():
     """`after <a line of the reading>:` inserts into a chain that is already there.
 
@@ -1603,6 +1686,7 @@ OTHERS = [
     ('empty_event_is_reused', empty_event_is_reused),
     ('empty_graph_keeps_header', empty_graph_keeps_header),
     ('compile_errors_point_at_lines', compile_errors_point_at_lines),
+    ('layout_leaves_no_overlap', layout_leaves_no_overlap),
     ('insert_into_existing_chain', insert_into_existing_chain),
     ('replace_refuses_lossy_graph', replace_refuses_lossy_graph),
     ('replace_takes_own_break', replace_takes_own_break),

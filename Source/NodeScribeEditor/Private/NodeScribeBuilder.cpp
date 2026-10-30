@@ -871,6 +871,16 @@ private:
 	/** Closes the innermost block, relinking what the insertion displaced. */
 	void PopFrame();
 
+	/**
+	 * The first Y below everything this text placed so far, data stacks included.
+	 * MIN_int32 when nothing was placed yet: callers keep the larger of this and
+	 * their own row.
+	 */
+	int32 NextFreeRowY();
+
+	/** Moves the frame to a row of its own when the node cannot stay on the current one. */
+	void OpenRowIfNeeded(FFrame& Frame, UEdGraphNode* Node);
+
 	// --- Insertion into an existing chain (`after`) ---------------------------
 
 	/**
@@ -1374,6 +1384,69 @@ int32 FNodeScribeBuildContext::DataChainRemaining(UEdGraphNode* Node) const
 	return Hops;
 }
 
+int32 FNodeScribeBuildContext::NextFreeRowY()
+{
+	int32 FreeY = MIN_int32;
+
+	TArray<UEdGraphNode*> Placed = Result.CreatedNodes;
+	Placed.Append(ConversionNodes);
+
+	// A data stack hangs below its consumer and is only positioned at the end,
+	// but its size is already known: the arguments of a line are applied before
+	// the next line opens a row.
+	TMap<UEdGraphNode*, int32> StackSizes;
+
+	for (UEdGraphNode* Node : Placed)
+	{
+		if (!IsPureDataNode(Node))
+		{
+			FreeY = FMath::Max(FreeY, Node->NodePosY + BranchRowHeight);
+			continue;
+		}
+
+		int32 Depth = 0;
+		if (UEdGraphNode* Consumer = FindConsumingExecNode(Node, Depth))
+		{
+			++StackSizes.FindOrAdd(Consumer);
+		}
+	}
+
+	for (const TPair<UEdGraphNode*, int32>& Stack : StackSizes)
+	{
+		FreeY = FMath::Max(FreeY,
+			Stack.Key->NodePosY + DataRowOffsetY + (Stack.Value * DataRowHeight));
+	}
+
+	return FreeY;
+}
+
+void FNodeScribeBuildContext::OpenRowIfNeeded(FFrame& Frame, UEdGraphNode* Node)
+{
+	// There LayoutAnimNodes places what matters, and it walks the tree, not the text.
+	if (bPoseGraph)
+	{
+		return;
+	}
+
+	// An event, or a node nothing leads to: what follows has no wire tying it to
+	// this row, and the next column of a node with branches is where they went.
+	// A comment takes no part in a chain, so it does not start one.
+	const bool bStartsChain = !Node->IsA<UEdGraphNode_Comment>()
+		&& (!FindFlowInput(Node) || !Frame.PendingExec.Resolve());
+
+	if (bStartsChain && Frame.Column > 0)
+	{
+		Frame.Column = 0;
+	}
+	else if (Frame.BranchesOpened == 0)
+	{
+		return;
+	}
+
+	Frame.BaseY = FMath::Max(Frame.BaseY + BranchRowHeight, NextFreeRowY());
+	Frame.BranchesOpened = 0;
+}
+
 void FNodeScribeBuildContext::LayoutDataNodes()
 {
 	struct FDataNode
@@ -1447,10 +1520,15 @@ void FNodeScribeBuildContext::LayoutDataNodes()
 
 		const FFrame& Frame = Frames[0];
 
+		// After the end of the chain is where its branches went, if it opened any.
+		const int32 TopY = !bPoseGraph && Frame.BranchesOpened > 0
+			? FMath::Max(Frame.BaseY, NextFreeRowY())
+			: Frame.BaseY;
+
 		for (int32 Index = 0; Index < Orphans.Num(); ++Index)
 		{
 			Orphans[Index]->NodePosX = Frame.BaseX + (Frame.Column * ColumnWidth);
-			Orphans[Index]->NodePosY = Frame.BaseY + (Index * DataRowHeight);
+			Orphans[Index]->NodePosY = TopY + (Index * DataRowHeight);
 		}
 	}
 }
@@ -5602,6 +5680,14 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 				? Owner->NodePosX - ColumnWidth
 				: Owner->NodePosX + ColumnWidth;
 			Branch.BaseY = Parent.BaseY + (Parent.BranchesOpened * BranchRowHeight);
+
+			// The previous branch may have grown past one row: sub-branches, or
+			// a data stack taller than the row.
+			if (Parent.BranchesOpened > 0 && !bLabelsAreInputs)
+			{
+				Branch.BaseY = FMath::Max(Branch.BaseY, NextFreeRowY());
+			}
+
 			++Parent.BranchesOpened;
 
 			Frames.Add(Branch);
@@ -5639,6 +5725,8 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		// LayoutDataNodes() takes care of that, at the end.
 		if (!bAdopted && !IsPureDataNode(Node))
 		{
+			OpenRowIfNeeded(Frame, Node);
+
 			Node->NodePosX = Frame.BaseX + (Frame.Column * ColumnWidth);
 			Node->NodePosY = Frame.BaseY;
 			++Frame.Column;

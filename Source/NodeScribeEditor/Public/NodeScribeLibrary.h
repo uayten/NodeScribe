@@ -46,6 +46,16 @@ public:
 	static FString ReadGraph(UEdGraph* Graph);
 
 	/**
+	 * Where each node of the graph sits, one per line: `X Y Title`.
+	 *
+	 * Positions are the plugin's job and stay out of the format, so the reading
+	 * cannot show them. This is what lets the suite measure a layout; it is not
+	 * a tool of the toolset.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
+	static FString ReadNodePositions(UEdGraph* Graph);
+
+	/**
 	 * Empties the graph, and **returns as text what was in it**.
 	 *
 	 * It is the missing gesture. `WriteGraph`'s replacement refuses to erase a

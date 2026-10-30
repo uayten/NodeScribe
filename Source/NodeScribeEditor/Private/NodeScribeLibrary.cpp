@@ -377,6 +377,26 @@ FString UNodeScribeLibrary::ReadGraph(UEdGraph* Graph)
 	return Result.Text + TEXT("\n\n") + FString::Join(Commented, TEXT("\n"));
 }
 
+FString UNodeScribeLibrary::ReadNodePositions(UEdGraph* Graph)
+{
+	if (!Graph)
+	{
+		return TEXT("[error]: no graph given.");
+	}
+
+	TArray<FString> Lines;
+	for (const UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (Node)
+		{
+			Lines.Add(FString::Printf(TEXT("%d %d %s"), Node->NodePosX, Node->NodePosY,
+				*Node->GetNodeTitle(ENodeTitleType::ListView).ToString()));
+		}
+	}
+
+	return FString::Join(Lines, TEXT("\n"));
+}
+
 FString UNodeScribeLibrary::ReadObject(UObject* Object, const FString& Filter)
 {
 	return FNodeScribeObjectReader::ReadObject(Object, Filter);

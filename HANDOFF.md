@@ -3,12 +3,12 @@
 Updated: 2026-10-30
 
 ## State
-- R-016, R-018, R-019 and R-022 are done. R-017, R-020 and R-021 are committed and in test, each with its remaining step in ROADMAP > Em teste. The user pasted `Saved/teste_r016_r021.txt` into `BP_TesteGolem`: all fine except R-023 (overlap).
-- Suite: 44 of 44. `project_graphs_round_trip`: 213 graphs, 0 silent differences. It compares readings only: whether each copy compiles is not checked. The commandlet exits 1 from an Engine ensure when deleting the copy of `BossRushGameMode` (already in the logs before this session): judge by `Saved/NodeScribe/tests.txt`.
-- External, in BossRush (not committed by this session): `Content/BossRush/Testes/NS_Validacao` is a saved scratch asset, to delete after the tests; `BP_TesteGolem` may hold the pasted test nodes. `BP_TesteGolem` was also saved earlier with the AbilitySystem component re-created (the saved asset had lost it; cause not found). The other changes there (`Zoo`, the Tigre animations, `Grant_BlendSpace`, the JoyShock pointer) are the user's.
+- R-016 to R-023 are done: the user read R-017 back and approved R-023 in the editor; R-020 and R-021 were confirmed through `read_graph` of `NS_Validacao` before it was deleted. The ROADMAP has nothing pending.
+- Suite: 45 of 45, with `layout_leaves_no_overlap` measuring positions through `ReadNodePositions` (library only, not a tool). It failed before the fix. `project_graphs_round_trip`: 213 graphs, 0 silent differences. It compares readings only: whether each copy compiles is not checked. The commandlet exits 1 from an Engine ensure when deleting the copy of `BossRushGameMode` (already in the logs before this session): judge by `Saved/NodeScribe/tests.txt`.
+- External, in BossRush (not committed by this session): 13 assets of `Content/BossRush/Testes` deleted at the user's request, leaving `BP_TesteGolem` and `BB_Teste`, the sandbox the project's CLAUDE.md names. The deletions are not committed there. `BP_TesteGolem` may hold the pasted test nodes, and was saved earlier with the AbilitySystem component re-created (the saved asset had lost it; cause not found). The other changes there (`Zoo`, the Tigre animations, `Grant_BlendSpace`, the JoyShock pointer) are the user's.
 
 ## Next step
-R-023: reproduce the overlap, starting from the frame layout in `FNodeScribeBuildContext::Run` (`BaseY`, `BranchesOpened`): an event after a chain with branches gets a row the branches already use. Then ask the user for the remaining steps in test.
+None chosen: the ROADMAP is empty. The open question below is the candidate.
 
 ## Open questions
 - Should `project_graphs_round_trip` also check that each copy compiles? Proposed to the user, not answered.
