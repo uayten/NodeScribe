@@ -48,6 +48,15 @@ struct FNodeScribeArg
 	bool bIsReference = false;
 };
 
+/** A parameter declared on an event line: `event Hit (Damage : Float)`. */
+struct FNodeScribeEventParam
+{
+	FString Name;
+
+	/** The type as the interface shows it, the same vocabulary as `variable`. */
+	FString Type;
+};
+
 /**
  * One line of the script, already split into parts.
  * The structure is flat on purpose: nesting is rebuilt by the builder from
@@ -94,4 +103,10 @@ struct FNodeScribeStatement
 	FString NodeExpression;
 
 	TArray<FNodeScribeArg> Args;
+
+	/**
+	 * On an `event` line, what the parentheses declare: the event's parameters.
+	 * An event has no inputs to fill, so there they are never Args.
+	 */
+	TArray<FNodeScribeEventParam> EventParams;
 };

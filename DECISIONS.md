@@ -1,6 +1,6 @@
 # Decisions
 
-<!-- project-docs: only what holds now. Next ID: D-026 · Next fact: F-007 -->
+<!-- project-docs: only what holds now. Next ID: D-027 · Next fact: F-007 -->
 
 ## Decisions
 
@@ -146,6 +146,13 @@ Why: the line is what the assistant has in front of it, and a reading is determi
 Origin: R-015
 Not chosen: making `replace` keep reconvergences -- the format only describes trees, so a graph that reconverges could never be rewritten whole; a `before` keyword, since `after` the node upstream covers it.
 Affects: NodeScribeParser, NodeScribeBuilder, NodeScribeReader (ExecLines, NodeNames), Docs/FORMAT.md
+
+### D-026 A Custom Event's parameters are `(Name : Type)` on the event line
+Decision: `event X (A : Float, B : Actor)` declares a Custom Event's parameters, with the types of `variable`; the reading writes them only for Custom Events. An event of the parent class, of an implemented interface or of a dispatcher takes its signature from there: a declared list that differs is a warning. An existing Custom Event with other parameters is refused, not changed. By-reference parameters, replication and Call in Editor have no form yet and are warned about on reading.
+Why: an event has no inputs, so its parentheses were free; `:` already pairs name and type in `variable`. Reasons per rule in `Docs/design.md` > Events.
+Origin: R-016
+Not chosen: indented `param` lines under the event -- indentation already means an execution block; writing the signature of interface and override events too -- it is the class's, and repeating it only creates a way to disagree.
+Affects: NodeScribeParser (EventParams), NodeScribeBuilder, NodeScribeReader, Docs/FORMAT.md
 
 ## Verified facts
 

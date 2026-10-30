@@ -175,8 +175,19 @@ event BeginPlay
 event MyAbilityActivated
 ```
 
-A name the parent class has becomes the override event; any other becomes a
-Custom Event with that name, and the plugin says so. A name that is an Engine
+A name the parent class or an interface the Blueprint implements has becomes
+that event; any other becomes a Custom Event with that name, and the plugin
+says so. A Custom Event's parameters go in parentheses, as `Name : Type` --
+the types of [Declaring variables](#declaring-variables):
+
+```
+hit = event TakeHit (Damage : Float, Source : Actor)
+Print String (In String = $hit.Damage)
+```
+
+An event of the class, of an interface or of a dispatcher takes its parameters
+from where it is declared: they are not written, and a list that differs gets
+a yellow warning. A name that is an Engine
 event but not this class's -- `BeginPlay` in a Widget Blueprint, which has
 `Construct` -- gets a yellow warning listing the events the class offers.
 
@@ -446,7 +457,8 @@ Every word the format reserves, in one place.
 | `?` | argument value | declared hole: the pin stays empty on purpose |
 | `variable Name : Type [= value]` | top level | declares a Blueprint variable |
 | `Array of X`, `Set of X`, `Map of X to Y`, `X Class` | variable type | containers and class references |
-| `event Name` | line | overridden event or Custom Event |
+| `event Name` | line | overridden event, interface event or Custom Event |
+| `event Name (P : Type, ...)` | line | Custom Event with parameters |
 | `event Dispatcher of Variable` | line | event bound to another object's dispatcher |
 | `Call`, `Bind`, `Unbind`, `Clear` | line prefix | dispatcher nodes |
 | `Get X`, `Set X` | line prefix | variable nodes |

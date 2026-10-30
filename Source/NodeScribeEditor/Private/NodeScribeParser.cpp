@@ -164,6 +164,41 @@ FString FNodeScribeParser::Unquote(const FString& In)
 	return In;
 }
 
+bool FNodeScribeParser::ParseEventParam(const FString& Raw, FNodeScribeEventParam& OutParam)
+{
+	// The first `:` outside quotes. A type never has one, and a name that does
+	// comes quoted.
+	TCHAR OpenQuote = 0;
+	for (int32 Index = 0; Index < Raw.Len(); ++Index)
+	{
+		const TCHAR C = Raw[Index];
+
+		if (OpenQuote != 0)
+		{
+			if (C == OpenQuote)
+			{
+				OpenQuote = 0;
+			}
+			continue;
+		}
+
+		if (IsQuoteChar(C))
+		{
+			OpenQuote = C;
+			continue;
+		}
+
+		if (C == TEXT(':'))
+		{
+			OutParam.Name = Unquote(Raw.Left(Index).TrimStartAndEnd());
+			OutParam.Type = Raw.Mid(Index + 1).TrimStartAndEnd();
+			return !OutParam.Name.IsEmpty() && !OutParam.Type.IsEmpty();
+		}
+	}
+
+	return false;
+}
+
 FNodeScribeArg FNodeScribeParser::ParseArg(const FString& Raw)
 {
 	FNodeScribeArg Arg;
@@ -511,6 +546,36 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 		{
 			OutDiagnostics.Emplace(ENodeScribeSeverity::Error, LineNumber,
 				FString::Printf(TEXT("Could not find the node name in: %s"), *Statement.RawLine));
+			continue;
+		}
+
+		// `event Hit (Damage : Float, Source : Actor)`: on an event line the
+		// parentheses declare parameters. An event has no inputs, so nothing is
+		// lost by giving them this meaning -- and `=` there is refused instead of
+		// read as `:`, which ParseArg would accept for an argument.
+		if (Statement.NodeExpression.StartsWith(TEXT("event "), ESearchCase::IgnoreCase))
+		{
+			bool bAllValid = true;
+
+			for (const FString& RawParam : SplitArgs(ArgsPart))
+			{
+				FNodeScribeEventParam Param;
+				if (!ParseEventParam(RawParam, Param))
+				{
+					OutDiagnostics.Emplace(ENodeScribeSeverity::Error, LineNumber, FString::Printf(
+						TEXT("`%s` is not a parameter. On an event line the parentheses declare its parameters, as `Name : Type`."),
+						*RawParam.TrimStartAndEnd()));
+					bAllValid = false;
+					break;
+				}
+
+				Statement.EventParams.Add(MoveTemp(Param));
+			}
+
+			if (bAllValid)
+			{
+				Statements.Add(MoveTemp(Statement));
+			}
 			continue;
 		}
 

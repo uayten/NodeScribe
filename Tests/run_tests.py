@@ -80,6 +80,29 @@ Print String (In String = "collections")
 ''',
     },
     {
+        # R-016: without the parameter list the event came back with no outputs
+        # and both `$hit.X` failed. The call above the event needs them in the
+        # skeleton before its line.
+        'name': 'custom_event_parameters',
+        'text': '''
+event Test
+Scored (Points = 3, Who = "golem")
+
+hit = event Scored (Points : Integer, Who : String, Targets : Array of Actor)
+text = Append (A = $hit.Who, B = $hit.Points (Integer -> String))
+Print String (In String = $text)
+''',
+    },
+    {
+        # A class event's signature is the class's: a list that differs is said.
+        'name': 'override_event_ignores_declared_parameters',
+        'text': '''
+event BeginPlay (Damage : Float)
+Print String (In String = "begin")
+''',
+        'expects_warning': ['takes its parameters from where it is declared'],
+    },
+    {
         'name': 'types',
         'text': '''
 variable A : Vector

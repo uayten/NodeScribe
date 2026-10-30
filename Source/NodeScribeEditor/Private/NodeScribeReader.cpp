@@ -694,6 +694,13 @@ private:
 	FString BuildArgumentList(UEdGraphNode* Node, int32 Indent);
 
 	/**
+	 * A Custom Event's parameters, ` (Damage : Float, Source : Actor)`, empty
+	 * when it has none. What the line cannot carry -- a parameter by
+	 * reference, replication, Call in Editor -- is warned about.
+	 */
+	FString DescribeCustomEventParams(const UK2Node_CustomEvent* Event);
+
+	/**
 	 * The details panel options that differ from a freshly created node.
 	 *
 	 * They are arguments like any other on the line -- the builder recognises
@@ -1338,6 +1345,78 @@ FString FNodeScribeReadContext::DescribeLiteral(UEdGraphPin* Pin, bool& bOutRepr
 	return Quoted;
 }
 
+FString FNodeScribeReadContext::DescribeCustomEventParams(const UK2Node_CustomEvent* Event)
+{
+	const FString EventName = Event->CustomFunctionName.ToString();
+	TArray<FString> Params;
+
+	for (const TSharedPtr<FUserPinInfo>& Info : Event->UserDefinedPins)
+	{
+		if (!Info.IsValid() || Info->DesiredPinDirection != EGPD_Output)
+		{
+			continue;
+		}
+
+		const FString Name = Info->PinName.ToString();
+		const FString TypeName = DescribePinType(Info->PinType);
+
+		// Leaving it out would recreate the event one parameter short, and
+		// every `$x.Pin` on it would point at nothing.
+		if (TypeName.IsEmpty())
+		{
+			AddWarning(FString::Printf(
+				TEXT("Parameter `%s` of `%s` has a type the format cannot write; it was left out of the line. ")
+				TEXT("Add it back by hand after pasting."),
+				*Name, *EventName));
+			continue;
+		}
+
+		// The parser splits the list at commas and the name at the first colon.
+		FString WrittenName = Name;
+		if (Name.Contains(TEXT(",")) || Name.Contains(TEXT(":"))
+			|| Name.Contains(TEXT("(")) || Name.Contains(TEXT(")")))
+		{
+			if (!TryQuote(Name, WrittenName))
+			{
+				AddWarning(FString::Printf(
+					TEXT("Parameter `%s` of `%s` has a name the format cannot write; it was left out of the line."),
+					*Name, *EventName));
+				continue;
+			}
+		}
+
+		if (Info->PinType.bIsReference)
+		{
+			AddWarning(FString::Printf(
+				TEXT("Parameter `%s` of `%s` is passed by reference; pasting back creates it by value."),
+				*Name, *EventName));
+		}
+
+		Params.Add(FString::Printf(TEXT("%s : %s"), *WrittenName, *TypeName));
+	}
+
+	// Panel options with no form in the text yet. Lost without a word, a
+	// Run on Server event would come back running where it was called.
+	if (Event->GetNetFlags() != 0)
+	{
+		AddWarning(FString::Printf(
+			TEXT("`%s` is replicated (Run on Server, Multicast or Run on owning Client). ")
+			TEXT("The format does not carry that: pasting back creates it not replicated."),
+			*EventName));
+	}
+
+	if (Event->bCallInEditor)
+	{
+		AddWarning(FString::Printf(
+			TEXT("`%s` has Call in Editor ticked. The format does not carry that: pasting back leaves it unticked."),
+			*EventName));
+	}
+
+	return Params.Num() > 0
+		? TEXT(" (") + FString::Join(Params, TEXT(", ")) + TEXT(")")
+		: FString();
+}
+
 FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Indent)
 {
 	TArray<FString> Args;
@@ -1624,7 +1703,11 @@ void FNodeScribeReadContext::EmitNodeLine(UEdGraphNode* Node, int32 Indent)
 	const FString AssignedName = DataNames.FindRef(Node);
 
 	// The arguments may emit data lines, which need to come before this one.
-	const FString Arguments = BuildArgumentList(Node, Indent);
+	// An event has no inputs: on its line the parentheses are its parameters.
+	const UK2Node_CustomEvent* CustomEvent = Cast<UK2Node_CustomEvent>(Node);
+	const FString Arguments = CustomEvent
+		? DescribeCustomEventParams(CustomEvent)
+		: BuildArgumentList(Node, Indent);
 
 	const FString Prefix = AssignedName.IsEmpty()
 		? FString()

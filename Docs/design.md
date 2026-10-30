@@ -43,6 +43,18 @@ comment, an empty pin or a refusal costs one look.
   refusing `event BeginPlay` there gave no way to see why (D-019).
 - **A dispatcher event that does not exist lists the real ones** instead of
   creating a loose event, which would compile and never be bound.
+- **A Custom Event's parameters are `(Name : Type)` on its own line**: an
+  event has no inputs, so its parentheses were free, and `:` is how
+  `variable` already pairs a name with a type. Without them the event came
+  back with no outputs and every `$x.Pin` on it broke (D-026).
+- **Interface events are looked up before Custom Events**: missed, `event X`
+  of an interface became a Custom Event called X, which compiles, looks the
+  same and is never called through the interface. Two interfaces with the same
+  event are not chosen between.
+- **A declared signature on an event of the class, an interface or a
+  dispatcher only warns**: the signature is not the line's to choose, and the
+  event is right either way. On an existing Custom Event a different one is an
+  error: changing it would break every call to it elsewhere.
 
 ## Dispatchers
 

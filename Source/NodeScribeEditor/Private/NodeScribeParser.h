@@ -38,6 +38,9 @@ private:
 
 	static FNodeScribeArg ParseArg(const FString& Raw);
 
+	/** `Damage : Float` -> name and type. false when either is missing. */
+	static bool ParseEventParam(const FString& Raw, FNodeScribeEventParam& OutParam);
+
 	/** Strips single or double quotes from the ends, if present. */
 	static FString Unquote(const FString& In);
 };

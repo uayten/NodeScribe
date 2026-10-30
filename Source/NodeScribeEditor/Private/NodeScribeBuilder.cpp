@@ -969,6 +969,37 @@ private:
 	 */
 	UEdGraphNode* ReuseEmptyEventOrRefuse(const FNodeScribeStatement& Statement, UEdGraphNode* Existing, const FString& EventLabel);
 
+	/**
+	 * The function an `event X` line implements when it is not a Custom Event:
+	 * an event of the parent class, or of an interface this Blueprint
+	 * implements. Null when there is none -- or when two interfaces offer the
+	 * name: then OutCandidates lists them, and none is chosen.
+	 */
+	UFunction* FindEventToImplement(const FString& EventName, TArray<FString>& OutCandidates) const;
+
+	/**
+	 * The types of the parameters an event line declares. false when a type is
+	 * unknown or a name repeats; the error is said only with bReportErrors, so
+	 * the pre-pass can leave the saying to the line itself.
+	 */
+	bool ResolveDeclaredEventParams(const FNodeScribeStatement& Statement,
+		TArray<TPair<FName, FEdGraphPinType>>& OutParams, bool bReportErrors);
+
+	/** A new Custom Event with the parameters its line declares. */
+	UK2Node_CustomEvent* CreateCustomEvent(const FName& Name, const TArray<TPair<FName, FEdGraphPinType>>& Params);
+
+	/**
+	 * Whether the event's data outputs are the ones the line declares, in
+	 * order. OutActual is the node's own list, as the format writes it.
+	 */
+	bool EventSignatureMatches(const FNodeScribeStatement& Statement, UEdGraphNode* EventNode, FString& OutActual);
+
+	/**
+	 * An event whose signature comes from a class, an interface or a
+	 * dispatcher: the line may repeat it, and a different one is said out loud.
+	 */
+	void WarnOnForeignSignature(const FNodeScribeStatement& Statement, UEdGraphNode* EventNode, const FString& EventLabel);
+
 	// --- Linking ----------------------------------------------------------
 
 	void ApplyArguments(UEdGraphNode* Node, const FNodeScribeStatement& Statement);
@@ -2769,30 +2800,19 @@ void FNodeScribeBuildContext::PreCreateCustomEvents(const TArray<FNodeScribeStat
 			continue;
 		}
 
-		// An event the parent class offers becomes an override, not a Custom Event.
-		bool bIsParentEvent = false;
-		if (UClass* ParentClass = Blueprint->ParentClass.Get())
+		// An event the parent class or an interface offers becomes an override,
+		// not a Custom Event. Two interfaces offering it is the line's error to
+		// say, in the main pass.
+		TArray<FString> InterfaceCandidates;
+		if (FindEventToImplement(EventName, InterfaceCandidates) || InterfaceCandidates.Num() > 0)
 		{
-			const TArray<FString> Attempts = {
-				EventName,
-				FString(TEXT("Receive")) + EventName,
-				FString(TEXT("K2_")) + EventName
-			};
-
-			for (const FString& Attempt : Attempts)
-			{
-				if (UFunction* Found = ParentClass->FindFunctionByName(FName(*Attempt)))
-				{
-					if (Found->HasAnyFunctionFlags(FUNC_BlueprintEvent))
-					{
-						bIsParentEvent = true;
-						break;
-					}
-				}
-			}
+			continue;
 		}
 
-		if (bIsParentEvent)
+		// A parameter with an unknown type: no event here, and the main pass
+		// says why on the line.
+		TArray<TPair<FName, FEdGraphPinType>> Params;
+		if (!ResolveDeclaredEventParams(Statement, Params, /*bReportErrors*/ false))
 		{
 			continue;
 		}
@@ -2807,9 +2827,7 @@ void FNodeScribeBuildContext::PreCreateCustomEvents(const TArray<FNodeScribeStat
 			continue;
 		}
 
-		UK2Node_CustomEvent* Node = AllocateNode<UK2Node_CustomEvent>();
-		Node->CustomFunctionName = WantedName;
-		FinalizeNode(Node);
+		UK2Node_CustomEvent* Node = CreateCustomEvent(WantedName, Params);
 
 		PreCreatedEvents.Add(EventName, Node);
 		bCreatedAny = true;
@@ -2955,6 +2973,189 @@ UEdGraphNode* FNodeScribeBuildContext::ReuseEmptyEventOrRefuse(
 		TEXT("Used the empty `%s` that was already in this graph."), *EventLabel));
 
 	return Existing;
+}
+
+UFunction* FNodeScribeBuildContext::FindEventToImplement(const FString& EventName, TArray<FString>& OutCandidates) const
+{
+	OutCandidates.Reset();
+
+	if (!Blueprint)
+	{
+		return nullptr;
+	}
+
+	// The Engine prefixes implementable events; the user writes `BeginPlay`,
+	// the real function is called `ReceiveBeginPlay`.
+	const TArray<FString> Attempts = {
+		EventName,
+		FString(TEXT("Receive")) + EventName,
+		FString(TEXT("K2_")) + EventName
+	};
+
+	if (UClass* ParentClass = Blueprint->ParentClass.Get())
+	{
+		for (const FString& Attempt : Attempts)
+		{
+			if (UFunction* Found = ParentClass->FindFunctionByName(FName(*Attempt)))
+			{
+				if (Found->HasAnyFunctionFlags(FUNC_BlueprintEvent))
+				{
+					return Found;
+				}
+			}
+		}
+	}
+
+	// The interfaces this Blueprint implements are not the parent class's, so
+	// the search above misses them. Without this, `event X` of an interface
+	// came back as a Custom Event called X: it compiles, looks the same, and
+	// is never called through the interface.
+	//
+	// A function with outputs is implemented as a function graph, not as an
+	// event, so it does not count here.
+	UFunction* Chosen = nullptr;
+	for (const FBPInterfaceDescription& Implemented : Blueprint->ImplementedInterfaces)
+	{
+		UClass* InterfaceClass = Implemented.Interface.Get();
+		if (!InterfaceClass)
+		{
+			continue;
+		}
+
+		UFunction* Found = InterfaceClass->FindFunctionByName(FName(*EventName));
+		if (Found && UEdGraphSchema_K2::FunctionCanBePlacedAsEvent(Found))
+		{
+			OutCandidates.Add(InterfaceClass->GetName() + TEXT(".") + EventName);
+			Chosen = Found;
+		}
+	}
+
+	if (OutCandidates.Num() > 1)
+	{
+		return nullptr;
+	}
+
+	OutCandidates.Reset();
+	return Chosen;
+}
+
+bool FNodeScribeBuildContext::ResolveDeclaredEventParams(const FNodeScribeStatement& Statement,
+	TArray<TPair<FName, FEdGraphPinType>>& OutParams, bool bReportErrors)
+{
+	OutParams.Reset();
+	TSet<FString> Seen;
+
+	for (const FNodeScribeEventParam& Param : Statement.EventParams)
+	{
+		FEdGraphPinType PinType;
+		if (!ResolvePinTypeFromNameInternal(Param.Type, PinType))
+		{
+			if (bReportErrors)
+			{
+				AddError(Statement.LineNumber, FString::Printf(
+					TEXT("Did not recognise type `%s` of parameter `%s`. Use the name shown in the interface, such as Float, Name, Timer Handle."),
+					*Param.Type, *Param.Name));
+			}
+			return false;
+		}
+
+		bool bAlreadySeen = false;
+		Seen.Add(FNodeScribeCatalog::Normalize(Param.Name), &bAlreadySeen);
+		if (bAlreadySeen)
+		{
+			if (bReportErrors)
+			{
+				AddError(Statement.LineNumber, FString::Printf(
+					TEXT("Parameter `%s` is declared twice."), *Param.Name));
+			}
+			return false;
+		}
+
+		OutParams.Emplace(FName(*Param.Name), PinType);
+	}
+
+	return true;
+}
+
+UK2Node_CustomEvent* FNodeScribeBuildContext::CreateCustomEvent(
+	const FName& Name, const TArray<TPair<FName, FEdGraphPinType>>& Params)
+{
+	UK2Node_CustomEvent* Node = AllocateNode<UK2Node_CustomEvent>();
+	Node->CustomFunctionName = Name;
+	FinalizeNode(Node);
+
+	// After the default pins, as the details panel's `+` does it: a user pin
+	// created before AllocateDefaultPins would be made a second time by it.
+	for (const TPair<FName, FEdGraphPinType>& Param : Params)
+	{
+		Node->CreateUserDefinedPin(Param.Key, Param.Value, EGPD_Output, /*bUseUniqueName*/ false);
+	}
+
+	return Node;
+}
+
+bool FNodeScribeBuildContext::EventSignatureMatches(
+	const FNodeScribeStatement& Statement, UEdGraphNode* EventNode, FString& OutActual)
+{
+	TArray<const UEdGraphPin*> Outputs;
+	TArray<FString> ActualParts;
+
+	for (const UEdGraphPin* Pin : EventNode->Pins)
+	{
+		if (!Pin || Pin->Direction != EGPD_Output || Pin->bHidden
+			|| Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec
+			|| Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Delegate)
+		{
+			continue;
+		}
+
+		Outputs.Add(Pin);
+		ActualParts.Add(FString::Printf(TEXT("%s : %s"),
+			*Pin->PinName.ToString(), *DescribePinType(Pin->PinType)));
+	}
+
+	OutActual = ActualParts.Num() > 0
+		? TEXT("(") + FString::Join(ActualParts, TEXT(", ")) + TEXT(")")
+		: TEXT("no parameters");
+
+	if (Outputs.Num() != Statement.EventParams.Num())
+	{
+		return false;
+	}
+
+	for (int32 Index = 0; Index < Outputs.Num(); ++Index)
+	{
+		const FNodeScribeEventParam& Declared = Statement.EventParams[Index];
+
+		FEdGraphPinType DeclaredType;
+		if (FNodeScribeCatalog::Normalize(Declared.Name) != FNodeScribeCatalog::Normalize(Outputs[Index]->PinName.ToString())
+			|| !ResolvePinTypeFromNameInternal(Declared.Type, DeclaredType)
+			|| !DescribePinType(DeclaredType).Equals(DescribePinType(Outputs[Index]->PinType), ESearchCase::IgnoreCase))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+void FNodeScribeBuildContext::WarnOnForeignSignature(
+	const FNodeScribeStatement& Statement, UEdGraphNode* EventNode, const FString& EventLabel)
+{
+	// Nothing declared is the usual case: the reading never writes these.
+	if (!EventNode || Statement.EventParams.Num() == 0)
+	{
+		return;
+	}
+
+	FString Actual;
+	if (!EventSignatureMatches(Statement, EventNode, Actual))
+	{
+		AddWarning(Statement.LineNumber, FString::Printf(
+			TEXT("`%s` takes its parameters from where it is declared, not from this line: it has %s. ")
+			TEXT("The declared ones were ignored."),
+			*EventLabel, *Actual));
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -3383,33 +3584,26 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		{
 			EventName.TrimStartAndEndInline();
 
-			UFunction* EventFunction = nullptr;
-			if (UClass* ParentClass = Blueprint ? Blueprint->ParentClass.Get() : nullptr)
-			{
-				// The Engine prefixes implementable events; the user writes
-				// `BeginPlay`, the real function is called `ReceiveBeginPlay`.
-				const TArray<FString> Attempts = {
-					EventName,
-					FString(TEXT("Receive")) + EventName,
-					FString(TEXT("K2_")) + EventName
-				};
+			TArray<FString> InterfaceCandidates;
+			UFunction* EventFunction = FindEventToImplement(EventName, InterfaceCandidates);
 
-				for (const FString& Attempt : Attempts)
-				{
-					if (UFunction* Found = ParentClass->FindFunctionByName(FName(*Attempt)))
-					{
-						if (Found->HasAnyFunctionFlags(FUNC_BlueprintEvent))
-						{
-							EventFunction = Found;
-							break;
-						}
-					}
-				}
+			if (InterfaceCandidates.Num() > 1)
+			{
+				AddError(Statement.LineNumber, FString::Printf(
+					TEXT("`%s` is an event of more than one interface this Blueprint implements: %s. ")
+					TEXT("The format cannot say which; create it by hand."),
+					*EventName, *FString::Join(InterfaceCandidates, TEXT(", "))));
+
+				return CreateErrorComment(Statement, FString::Printf(
+					TEXT("`%s` exists in more than one interface (%s), and I did not choose."),
+					*EventName, *FString::Join(InterfaceCandidates, TEXT(", "))));
 			}
 
 			if (EventFunction)
 			{
 				const FName WantedEvent = EventFunction->GetFName();
+
+				UEdGraphNode* Node = nullptr;
 
 				if (UEdGraphNode* Existing = FindExistingEvent([&](UEdGraphNode* Candidate)
 					{
@@ -3419,13 +3613,21 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 							&& EventNode->EventReference.GetMemberName() == WantedEvent;
 					}))
 				{
-					return ReuseEmptyEventOrRefuse(Statement, Existing, EventName);
+					Node = ReuseEmptyEventOrRefuse(Statement, Existing, EventName);
+				}
+				else
+				{
+					UK2Node_Event* NewNode = AllocateNode<UK2Node_Event>();
+					NewNode->EventReference.SetExternalMember(EventFunction->GetFName(), EventFunction->GetOwnerClass());
+					NewNode->bOverrideFunction = true;
+					FinalizeNode(NewNode);
+					Node = NewNode;
 				}
 
-				UK2Node_Event* Node = AllocateNode<UK2Node_Event>();
-				Node->EventReference.SetExternalMember(EventFunction->GetFName(), EventFunction->GetOwnerClass());
-				Node->bOverrideFunction = true;
-				FinalizeNode(Node);
+				if (Cast<UK2Node_Event>(Node))
+				{
+					WarnOnForeignSignature(Statement, Node, EventName);
+				}
 				return Node;
 			}
 
@@ -3491,13 +3693,20 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 								&& Bound->GetComponentPropertyName() == WantedComponent;
 						}))
 					{
-						return ReuseEmptyEventOrRefuse(Statement, Existing,
+						UEdGraphNode* Reused = ReuseEmptyEventOrRefuse(Statement, Existing,
 							FString::Printf(TEXT("%s of %s"), *DelegateName, *ComponentName));
+
+						if (Cast<UK2Node_Event>(Reused))
+						{
+							WarnOnForeignSignature(Statement, Reused, EventName);
+						}
+						return Reused;
 					}
 
 					UK2Node_ComponentBoundEvent* Node = AllocateNode<UK2Node_ComponentBoundEvent>();
 					Node->InitializeComponentBoundEventParams(ComponentProperty, DelegateProperty);
 					FinalizeNode(Node);
+					WarnOnForeignSignature(Statement, Node, EventName);
 					return Node;
 				}
 			}
@@ -3538,12 +3747,33 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 					return CustomEvent && CustomEvent->CustomFunctionName == WantedCustomEvent;
 				}))
 			{
+				// Reused only with the parameters the line asks for. Changing them
+				// would break every call to the event elsewhere, and keeping the old
+				// ones would leave this line's `$x.Pin` pointing at nothing.
+				FString Actual;
+				if (!EventSignatureMatches(Statement, Existing, Actual))
+				{
+					AddError(Statement.LineNumber, FString::Printf(
+						TEXT("Custom Event `%s` already exists in this graph with %s. Nothing was created or changed."),
+						*EventName, *Actual));
+
+					return CreateErrorComment(Statement, FString::Printf(
+						TEXT("`%s` already exists with %s, which is not what this line declares.\n\n")
+						TEXT("I did not touch it: change its parameters by hand, or delete it before pasting."),
+						*EventName, *Actual));
+				}
+
 				return ReuseEmptyEventOrRefuse(Statement, Existing, EventName);
 			}
 
-			UK2Node_CustomEvent* Node = AllocateNode<UK2Node_CustomEvent>();
-			Node->CustomFunctionName = FName(*EventName);
-			FinalizeNode(Node);
+			TArray<TPair<FName, FEdGraphPinType>> Params;
+			if (!ResolveDeclaredEventParams(Statement, Params, /*bReportErrors*/ true))
+			{
+				return CreateErrorComment(Statement, FString::Printf(
+					TEXT("`%s` declares a parameter I could not create, so I created no event."), *EventName));
+			}
+
+			UK2Node_CustomEvent* Node = CreateCustomEvent(WantedCustomEvent, Params);
 
 			// Without this, a later line that CALLS this event does not find it:
 			// the skeleton class only gets the function when it is regenerated,
