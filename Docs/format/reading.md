@@ -72,7 +72,7 @@ output and link to another pin on the way back.
 | Data node that feeds nobody | note, with each one's name |
 | Event bound to a dispatcher/delegate | warning on reading; red comment on pasting |
 | Interface function called on an interface reference | warning: it comes back as the interface's message |
-| Function entry (`Function Entry`) | warning with the signature: create the function and paste inside it |
+| Function entry (`Function Entry`) | warning with the signature: paste inside a function that has it, and the line finds the entry |
 
 Reroutes (the little dots for arranging wires) vanish on the way back -- they
 are layout, not logic. A Get of the Blueprint's own variable becomes `$Name`

@@ -969,6 +969,50 @@ nobody = Get Actor Location
     return not problems, problems
 
 
+def function_entry_line_finds_the_entry():
+    """`Function Entry` in the text is the entry the function was born with.
+
+    The reading writes it to reach a parameter (`$functionEntry.My Target`). Without
+    this the line became a red comment and every pin it fed stayed empty -- which
+    two matching readings do not show. On a chain that exists, it must not erase it.
+    """
+    path = '%s/NS_function_entry_line' % DESTINATION
+
+    report = unreal.NodeScribeLibrary.create_asset(path, 'Actor', '')
+    if report.startswith('[error]'):
+        return False, [report]
+
+    bp = unreal.load_asset(path)
+    graph = unreal.load_object(bp, 'UserConstructionScript') if bp else None
+    if not graph:
+        return False, ['could not find the UserConstructionScript of %s' % path]
+
+    written = unreal.NodeScribeLibrary.write_graph(
+        graph, 'Function Entry\nPrint String (In String = "first")')
+    if '[error]' in written:
+        return False, ['the write complained:'] + written.splitlines()
+
+    lines = body(unreal.NodeScribeLibrary.read_graph(graph))
+    if len(lines) < 2 or lines[0].strip() != 'Function Entry' or 'first' not in lines[1]:
+        return False, ['the entry does not lead to the chain:'] + lines
+
+    again = unreal.NodeScribeLibrary.write_graph(
+        graph, 'Function Entry\nPrint String (In String = "second")')
+    if 'went in loose' not in again:
+        return False, ['the second chain did not say it went in loose:'] + again.splitlines()
+
+    lines = body(unreal.NodeScribeLibrary.read_graph(graph))
+    if len(lines) < 2 or 'first' not in lines[1]:
+        return False, ['the second write took the entry from the first chain:'] + lines
+
+    event_graph = unreal.load_object(bp, 'EventGraph')
+    refused = unreal.NodeScribeLibrary.write_graph(event_graph, 'Function Entry')
+    if '[error]' not in refused:
+        return False, ['an EventGraph took a Function Entry line:'] + refused.splitlines()
+
+    return True, []
+
+
 def insert_into_existing_chain():
     """`after <a line of the reading>:` inserts into a chain that is already there.
 
@@ -1735,6 +1779,7 @@ def empty_graph_keeps_header():
 OTHERS = [
     ('designer_writes_rows', designer_writes_rows),
     ('chain_reaches_function_entry', chain_reaches_function_entry),
+    ('function_entry_line_finds_the_entry', function_entry_line_finds_the_entry),
     ('replace_swaps_the_graph', replace_swaps_the_graph),
     ('empty_event_is_reused', empty_event_is_reused),
     ('empty_graph_keeps_header', empty_graph_keeps_header),

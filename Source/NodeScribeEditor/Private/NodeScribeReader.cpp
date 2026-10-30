@@ -1182,7 +1182,7 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 
 		OutRoundTripIssue = FString::Printf(
 			TEXT("`%s` is the function's entry, and it is born together with it -- no line creates it. ")
-			TEXT("Create the function with the parameters (%s) and paste the rest inside it."),
+			TEXT("Paste this text inside a function with the parameters (%s): the `Function Entry` line finds its entry."),
 			*ShortTitle(Node),
 			Parameters.Num() > 0 ? *FString::Join(Parameters, TEXT(", ")) : TEXT("none"));
 

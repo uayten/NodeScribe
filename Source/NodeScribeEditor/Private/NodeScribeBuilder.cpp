@@ -4210,6 +4210,27 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		return Node;
 	}
 
+	// --- Function Entry --------------------------------------------------
+	// Like the Output Pose: born with its graph, so the line finds it. It is the
+	// reading's way to reach a parameter, as `$functionEntry.My Target`.
+	if (Normalized == TEXT("functionentry"))
+	{
+		for (UEdGraphNode* Existing : Graph->Nodes)
+		{
+			if (Existing && Existing->IsA<UK2Node_FunctionEntry>())
+			{
+				AdoptedNodes.Add(Existing);
+				return Existing;
+			}
+		}
+
+		AddError(Statement.LineNumber,
+			TEXT("This graph has no Function Entry: it is born with a function. Paste this text inside one."));
+
+		return CreateErrorComment(Statement,
+			TEXT("Only a function has a Function Entry, and it is not created: it is born with the function."));
+	}
+
 	// --- Call / Bind / Unbind / Clear dispatcher -------------------------
 	{
 		struct FDelegateForm
@@ -5927,7 +5948,11 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 		if (ExecOutputs.Num() == 1)
 		{
-			Frame.PendingExec = FPinRef(ExecOutputs[0]);
+			// A Function Entry that already leads somewhere: the next link would
+			// erase that chain. ConnectFunctionEntry says the new one went in loose.
+			Frame.PendingExec = bAdopted && ExecOutputs[0]->LinkedTo.Num() > 0
+				? FPinRef()
+				: FPinRef(ExecOutputs[0]);
 		}
 		else if (ExecOutputs.Num() > 1)
 		{
