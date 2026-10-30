@@ -1,6 +1,6 @@
 # Decisions
 
-<!-- project-docs: only what holds now. Next ID: D-025 · Next fact: F-007 -->
+<!-- project-docs: only what holds now. Next ID: D-026 · Next fact: F-007 -->
 
 ## Decisions
 
@@ -139,6 +139,13 @@ Why: the silent differences were being found by tripping on them. Copies left in
 Origin: R-010
 Not chosen: `/Game/BossRush/Testes/` as the roadmap item said -- the suite's own scratch folder is never saved either, and keeps the plugin's suite independent of BossRush.
 Affects: Tests/run_tests.py, Docs/development.md
+
+### D-025 Inserting into an existing chain is `after <a line of the reading>:`
+Decision: the node is found by re-reading the graph and comparing the `after` line with each execution node's line; the block goes in after it and what followed is relinked to the block's last node. The reading's `$names` resolve inside the block. An `after` matching no node or several refuses the whole write; with `replace` it is refused.
+Why: the line is what the assistant has in front of it, and a reading is deterministic. Reasons per rule in `Docs/design.md` > Inserting into a chain that exists.
+Origin: R-015
+Not chosen: making `replace` keep reconvergences -- the format only describes trees, so a graph that reconverges could never be rewritten whole; a `before` keyword, since `after` the node upstream covers it.
+Affects: NodeScribeParser, NodeScribeBuilder, NodeScribeReader (ExecLines, NodeNames), Docs/FORMAT.md
 
 ## Verified facts
 
