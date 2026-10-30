@@ -397,6 +397,17 @@ FString UNodeScribeLibrary::ReadNodePositions(UEdGraph* Graph)
 	return FString::Join(Lines, TEXT("\n"));
 }
 
+FString UNodeScribeLibrary::ReadCompileErrors(UBlueprint* Blueprint)
+{
+	if (!Blueprint)
+	{
+		return TEXT("[error]: no Blueprint given.");
+	}
+
+	// No node here came from a text, so only the errors come back, not the warnings.
+	return FormatDiagnostics(CompileAndPointAtLines(Blueprint, TMap<UEdGraphNode*, int32>()));
+}
+
 FString UNodeScribeLibrary::ReadObject(UObject* Object, const FString& Filter)
 {
 	return FNodeScribeObjectReader::ReadObject(Object, Filter);

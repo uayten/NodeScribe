@@ -1498,7 +1498,14 @@ def project_graphs_round_trip():
     nothing said so -- the Set Visibility, Append pins and split-struct names
     were found by tripping on them. One the reading warns about is listed
     apart, as declared. Nothing is saved: the commandlet exits without saving.
+
+    Each original and its refilled copy are also compiled: readings that match
+    say nothing about compiling. An error only the copy has is a failure, unless
+    the reading of one of its graphs warned that it would not come back, which
+    is listed apart like the rest of what is declared.
     """
+    broken, broken_declared, already_broken = [], [], 0
+
     registry = unreal.AssetRegistryHelpers.get_asset_registry()
     assets = [a for a in registry.get_assets_by_path('/Game', recursive=True)
               if str(a.asset_class_path.asset_name) in BLUEPRINT_ASSET_CLASSES
@@ -1520,6 +1527,9 @@ def project_graphs_round_trip():
         graphs = next((l[len('# graphs: '):].split(', ') for l in header if l.startswith('# graphs: ')), [])
         if not graphs:
             continue
+
+        original_errors = set(unreal.NodeScribeLibrary.read_compile_errors(original).splitlines())
+        already_broken += 1 if original_errors else 0
 
         copy_path = '%s/Project/%s_%d' % (DESTINATION, name, index)
         if not unreal.EditorAssetLibrary.duplicate_asset(source, copy_path):
@@ -1555,6 +1565,16 @@ def project_graphs_round_trip():
                 failures.extend('    ' + l for l in diff)
                 failures.extend('    | ' + l for l in written.splitlines() if '[error]' in l)
 
+        # After every graph is back: a write in the loop above compiles too, but
+        # with the graphs still to come empty.
+        copy_errors = unreal.NodeScribeLibrary.read_compile_errors(unreal.load_asset(copy_path))
+        new_errors = set(copy_errors.replace(copy_name, name).splitlines()) - original_errors
+        if new_errors:
+            warned = any(label.startswith(name + ':') for label in declared)
+            listing = broken_declared if warned else broken
+            listing.append(name)
+            listing.extend('    ' + l for l in sorted(new_errors))
+
         # Gone before the next one: a copy left in memory is a second class
         # with the same functions, and every call to them reads as ambiguous.
         unreal.EditorAssetLibrary.delete_asset(copy_path)
@@ -1565,14 +1585,26 @@ def project_graphs_round_trip():
     details = os.path.join(unreal.Paths.project_saved_dir(), 'NodeScribe', 'project_graphs.txt')
     os.makedirs(os.path.dirname(details), exist_ok=True)
     with open(details, 'w', encoding='utf-8') as details_file:
-        details_file.write('\n'.join(failures + ['', 'declared: ' + ', '.join(declared)]))
+        details_file.write('\n'.join(failures + ['', 'declared: ' + ', '.join(declared)]
+                                     + ['', 'stopped compiling:'] + broken
+                                     + ['', 'stopped compiling, with a warning in the reading:'] + broken_declared))
 
     silent = [l for l in failures if not l.startswith('    ')]
     summary = '%d graph(s) of %d Blueprint(s): %d silent difference(s), %d declared by a warning' % (
         checked, len(assets), len(silent), len(declared))
+
+    report = [summary]
+    stopped = [l for l in broken if not l.startswith('    ')]
+    warned_count = len([l for l in broken_declared if not l.startswith('    ')])
+    report.append('compiled: %d stopped compiling silently, %d with a warning in the reading, '
+                  '%d already had errors in the original' % (len(stopped), warned_count, already_broken))
     if silent:
-        return False, [summary, 'silent: ' + ', '.join(silent), 'diffs in ' + details]
-    return True, [summary]
+        report.append('silent: ' + ', '.join(silent))
+    if stopped:
+        report.append('stopped compiling: ' + ', '.join(stopped))
+    if silent or stopped:
+        report.append('details in ' + details)
+    return not silent and not stopped, report
 
 
 def token_budget():

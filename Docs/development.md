@@ -75,7 +75,8 @@ paste the text into an empty Blueprint, read again, compare. Reader and writer
 are mirrors, so when the text does not close, one of them is lying and the diff
 says which.
 
-`Tests/run_tests.py` does it without an interface, in ~20 seconds:
+`Tests/run_tests.py` does it without an interface, in under 3 minutes on this
+project (161 s, measured 2026-10-30):
 
 ```powershell
 & "E:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" --% "C:/Unreal Projects/BossRush/BossRush.uproject" -run=pythonscript -script="C:/Unreal Projects/BossRush/Plugins/NodeScribe/Tests/run_tests.py" -unattended -nopause -nosplash -NullRHI
@@ -102,6 +103,17 @@ name; the diffs and the writer's errors go to
 in its *left out* note) is counted apart, as declared. Each copy is deleted
 before the next: a copy left in memory is a second class with the same
 functions, and every call to them reads as ambiguous.
+
+It also compiles each original and its refilled copy: matching readings say
+nothing about compiling. An error only the copy has fails the case, unless the
+reading of one of its graphs warned; that one is listed apart, in the same file.
+A warning covers the whole Blueprint, not the error, so that list is worth
+reading. It costs next to nothing, since each write already compiles.
+
+**Check that the report is new.** It is only written at the end, so a run that
+never started leaves the last one in place, reading like a result. In
+PowerShell, `$args` is emptied inside a `Measure-Command` block: the editor opens
+with no script and sits idle. Name the variable something else.
 
 To move into the Engine's suite one day, the template is
 `ToolsetRegistry/Source/ToolsetRegistry/Private/Tests/ToolsetLibraryTest.cpp`

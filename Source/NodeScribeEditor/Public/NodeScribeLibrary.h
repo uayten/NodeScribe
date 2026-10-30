@@ -5,6 +5,7 @@
 #include "NodeScribeLibrary.generated.h"
 
 class UBlendSpace;
+class UBlueprint;
 class UEdGraph;
 
 /**
@@ -54,6 +55,14 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
 	static FString ReadNodePositions(UEdGraph* Graph);
+
+	/**
+	 * Compiles the Blueprint and returns its errors, one per line. Empty = it
+	 * compiles. Like ReadNodePositions, it is for the suite: `write_graph` already
+	 * compiles and answers by line, so this is not a tool of the toolset.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NodeScribe")
+	static FString ReadCompileErrors(UBlueprint* Blueprint);
 
 	/**
 	 * Empties the graph, and **returns as text what was in it**.
