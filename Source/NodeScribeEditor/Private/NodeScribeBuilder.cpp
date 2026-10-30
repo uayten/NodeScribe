@@ -54,6 +54,7 @@
 #include "K2Node_CallDelegate.h"
 #include "K2Node_ClearDelegate.h"
 #include "K2Node_RemoveDelegate.h"
+#include "K2Node_MakeArray.h"
 #include "K2Node_Select.h"
 #include "K2Node_Self.h"
 #include "K2Node_SwitchEnum.h"
@@ -1018,6 +1019,27 @@ private:
 
 	void ApplyArguments(UEdGraphNode* Node, const FNodeScribeStatement& Statement);
 	void ApplyLiteral(UEdGraphPin* Pin, const FString& Value, int32 Line);
+
+	/**
+	 * An argument of a Make Array, kept until the array has its type.
+	 *
+	 * The node is born a wildcard. A value written on a wildcard pin is thrown away
+	 * when the type arrives, and the first element linked would set the type: `$self`
+	 * first makes an array of this class, and the `$owner` after it no longer fits.
+	 * What the array feeds is what knows the type.
+	 */
+	struct FDeferredElement
+	{
+		FPinRef Pin;
+		bool bIsReference = false;
+		FString Value;
+		int32 Line = 0;
+	};
+
+	TArray<FDeferredElement> DeferredElements;
+
+	/** Applies what waits on an array that got its consumer; with bFinal, all that is left. */
+	void ApplyDeferredElements(bool bFinal);
 
 	/** @param ConsumerPin  where the value goes in; a new variable's type comes from it. */
 	UEdGraphPin* ResolveReference(const FString& Name, int32 Line, UEdGraphPin* ConsumerPin);
@@ -3003,7 +3025,11 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 			Pin = PositionalPins[NextPositional++];
 		}
 
-		if (Arg.bIsReference)
+		if (Node->IsA<UK2Node_MakeArray>())
+		{
+			DeferredElements.Add({ FPinRef(Pin), Arg.bIsReference, Arg.Value, Statement.LineNumber });
+		}
+		else if (Arg.bIsReference)
 		{
 			if (UEdGraphPin* Source = ResolveReference(Arg.Value, Statement.LineNumber, Pin))
 			{
@@ -3013,6 +3039,86 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 		else
 		{
 			ApplyLiteral(Pin, Arg.Value, Statement.LineNumber);
+		}
+	}
+
+	// `Make Array` with nothing is the empty array, and the node is born with one
+	// element: left there, it would be an array of one default value.
+	if (UK2Node_MakeArray* MakeArray = Cast<UK2Node_MakeArray>(Node); MakeArray && Statement.Args.Num() == 0)
+	{
+		const TArray<UEdGraphPin*> Elements = PositionalPins;
+		for (UEdGraphPin* Element : Elements)
+		{
+			MakeArray->RemoveInputPin(Element);
+		}
+	}
+}
+
+void FNodeScribeBuildContext::ApplyDeferredElements(bool bFinal)
+{
+	TArray<FDeferredElement> Ready;
+
+	DeferredElements.RemoveAll([bFinal, &Ready](const FDeferredElement& Element)
+	{
+		UEdGraphPin* Pin = Element.Pin.Resolve();
+		bool bReady = bFinal || !Pin;
+
+		if (Pin && !bReady)
+		{
+			for (const UEdGraphPin* Other : Pin->GetOwningNode()->Pins)
+			{
+				bReady = bReady || (Other->Direction == EGPD_Output && Other->LinkedTo.Num() > 0);
+			}
+		}
+
+		if (bReady)
+		{
+			Ready.Add(Element);
+		}
+		return bReady;
+	});
+
+	// With no consumer, the links are the only thing that can give a value its type.
+	Ready.StableSort([](const FDeferredElement& A, const FDeferredElement& B)
+	{
+		return A.bIsReference && !B.bIsReference;
+	});
+
+	for (const FDeferredElement& Element : Ready)
+	{
+		UEdGraphPin* Pin = Element.Pin.Resolve();
+		if (!Pin)
+		{
+			continue;
+		}
+
+		const TSet<UEdGraphNode*> NodesBefore(Graph->Nodes);
+
+		if (Element.bIsReference)
+		{
+			if (UEdGraphPin* Source = ResolveReference(Element.Value, Element.Line, Pin))
+			{
+				Connect(Source, Pin, Element.Line);
+			}
+		}
+		else if (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Wildcard && !Element.Value.StartsWith(TEXT("?")))
+		{
+			AddError(Element.Line, FString::Printf(
+				TEXT("`%s = %s` did not go in: nothing gives this Make Array a type. Link the array to a pin, or link one of its elements."),
+				*Pin->PinName.ToString(), *Element.Value));
+		}
+		else
+		{
+			ApplyLiteral(Pin, Element.Value, Element.Line);
+		}
+
+		// The Get a reference made by itself is this line's, as in Run.
+		for (UEdGraphNode* Added : Graph->Nodes)
+		{
+			if (Added && !NodesBefore.Contains(Added) && !Result.NodeLines.Contains(Added))
+			{
+				Result.NodeLines.Add(Added, Element.Line);
+			}
 		}
 	}
 }
@@ -4092,6 +4198,14 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 	if (Normalized == TEXT("select"))
 	{
 		UK2Node_Select* Node = AllocateNode<UK2Node_Select>();
+		FinalizeNode(Node);
+		return Node;
+	}
+
+	// --- Make Array ------------------------------------------------------
+	if (Normalized == TEXT("makearray"))
+	{
+		UK2Node_MakeArray* Node = AllocateNode<UK2Node_MakeArray>();
 		FinalizeNode(Node);
 		return Node;
 	}
@@ -5742,6 +5856,7 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		if (!Node->IsA<UEdGraphNode_Comment>())
 		{
 			ApplyArguments(Node, Statement);
+			ApplyDeferredElements(false);
 		}
 
 		// The node itself even when it existed before: a pre-created event, a
@@ -5842,6 +5957,8 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 	{
 		PopFrame();
 	}
+
+	ApplyDeferredElements(true);
 
 	// Only now is it possible to know which ones really stayed without a label.
 	for (const FUnbranchedNode& Entry : UnbranchedNodes)

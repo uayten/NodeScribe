@@ -390,6 +390,27 @@ Set Visibility (Target = $Panel, In Visibility = Hidden)
 ''',
     },
     {
+        # R-025: the literal was thrown away when the array got its type, and
+        # `$self` first made an array the `$owner` no longer fit. An element at its
+        # default still counts, and no argument at all is the empty array.
+        'name': 'make_array',
+        'text': '''
+variable Enemies : Array of Actor
+
+event Test
+location = Get Actor Location
+self = Self
+owner = Get Owner
+types = Make Array ([0] = ObjectTypeQuery3, [1] = ?)
+ignored = Make Array ($self, $owner)
+empty = Make Array
+Sphere Overlap Actors (Sphere Pos = $location, Sphere Radius = 50.0, Object Types = $types, Actors to Ignore = $ignored)
+Set Enemies (Enemies = $empty)
+''',
+        'expects_in_reading': ['[0] = ObjectTypeQuery3, [1] = ObjectTypeQuery1)', '[1] = $', 'Make Array\n'],
+        'forbids_warning': ['I do not know how to write'],
+    },
+    {
         'name': 'declared_hole',
         'text': '''
 event Test

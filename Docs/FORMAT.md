@@ -21,6 +21,7 @@ each rule is the way it is: [design.md](design.md) -- not needed to write text.
 - [Input Action events](#input-action-events)
 - [Dispatchers](#dispatchers)
 - [Select](#select)
+- [Make Array](#make-array)
 - [Cast](#cast)
 - [Variables](#variables)
 - [Structs](#structs)
@@ -253,6 +254,17 @@ For a dispatcher's **event**, see
 Select (Index = $bIsAlive, Option 0 = "dead", Option 1 = "alive")
 ```
 
+## Make Array
+
+```
+types = Make Array ([0] = ObjectTypeQuery3, [1] = ?)
+ignored = Make Array ($self, $owner)
+none = Make Array
+```
+
+One argument per element, and `?` keeps its default. With no arguments, the
+array is empty. The type comes from the pin it feeds.
+
 ## Cast
 
 ```
@@ -484,6 +496,7 @@ Every word the format reserves, in one place.
 | `Get X`, `Set X` | line prefix | variable nodes |
 | `Cast to Class` | line | dynamic cast |
 | `Make Struct`, `Break Struct` | line | struct nodes |
+| `Make Array` | line | array of its arguments; empty without them |
 | `Switch on X` | line | enum, `Int`, `String` or `Name` switch |
 | `EnhancedInputAction Path` | line | Input Action event |
 | `Comment Text` | line | comment box |

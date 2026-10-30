@@ -8,12 +8,6 @@
 
 ## A fazer
 
-### R-025 [feature] Make Array volta ao recriar o grafo
-Esperado: Blueprint com Make Array, como a lista de Object Types de um Overlap, continua compilando depois de recriado.
-Como:
-- Hoje a leitura avisa que não sabe escrever `Make Array`, e a cópia dá erro no pino `Object Types`
-- Afeta `GA_AtaqueBásico`, `GA_Investida`, `GA_3Hits`, `BTService_LocalizarJogador`, `OndaSpawnavel`; `BP_Pedra` também tem o aviso
-
 ### R-026 [pesquisa] Parâmetros da função perdem a ligação ao recriar o grafo
 Esperado: por que os pinos ligados aos parâmetros da função ficam sem ligação na cópia, e se isso é limite do teste ou do plugin.
 Como:
