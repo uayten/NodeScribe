@@ -457,6 +457,19 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 		return Result;
 	}
 
+	// No Target is a call on self, and on self the Blueprint's own function is
+	// the only one that compiles. Before, another Blueprint's function with the
+	// same name won the score: `0 Corações` became Vida's, and the graph failed
+	// with "this blueprint (self) is not a Vida_C".
+	if (OwnerQuery.IsEmpty() && !ContextClass)
+	{
+		if (UFunction* Own = FindOwnFunction(SelfClass, NormalizedQuery))
+		{
+			Result.Function = Own;
+			return Result;
+		}
+	}
+
 	struct FScored
 	{
 		const FEntry* Entry;

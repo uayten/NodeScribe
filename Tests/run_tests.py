@@ -136,6 +136,20 @@ Print String (In String = "no hearts")
 ''',
     },
     {
+        # With no Target, the Blueprint's own `Jump` wins over Character's:
+        # another class's function on self does not compile, and the fixed
+        # point alone would not see it -- both readings say `Character.Jump`.
+        'name': 'own_function_beats_another_class',
+        'text': '''
+event Test
+Jump
+
+event Jump
+Print String (In String = "own jump")
+''',
+        'expects_in_reading': ['event Test\nJump\n'],
+    },
+    {
         # R-019: an interface function is a message, whose Target takes any
         # object. As a plain call the Actor's wire was dropped.
         'name': 'interface_message',

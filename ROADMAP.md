@@ -1,6 +1,6 @@
 # Roadmap
 
-<!-- project-docs: só pendências; aprovado é apagado. Ordem = prioridade. Próximo ID: R-022 -->
+<!-- project-docs: só pendências; aprovado é apagado. Ordem = prioridade. Próximo ID: R-023 -->
 
 ## Em teste
 
@@ -28,3 +28,9 @@ Esperado: um comentário cujo texto tem uma parte entre parênteses volta com el
 
 ## A fazer
 
+### R-022 [feature] write_graph compila e aponta a linha de cada erro
+Esperado: depois de colar, os erros de compilação do Blueprint voltam na mesma resposta, cada um apontando a linha do texto que criou o node com problema, sem precisar clicar em Compile nem ler o log.
+Como:
+- Sem ferramenta nova: o `write_graph` compila ao fim da escrita e acrescenta `line N [error]: <mensagem do compilador>` às notas que já devolve.
+- Erro em node que o texto não criou (já estava no grafo) sai sem linha, com o título do node (escolha do agente).
+- Caso que motivou: no `NS_Validacao`, `0 Corações` virou a função do widget `Vida` e só o Compile mostrou; o `compile_blueprint` nativo só diz que falhou, e a mensagem saiu do log.
