@@ -243,7 +243,8 @@ Clear OnHealthChanged
 
 Without `Target`, the dispatcher is this Blueprint's; with `Target = $obj`, it
 is that object's. The event bound with `Event = $done` may be declared further
-down (`done = event Done`). For a dispatcher's **event**, see
+down (`done = event Done`); declaring no parameters, it takes the dispatcher's.
+For a dispatcher's **event**, see
 `event X of Variable`.
 
 ## Select
@@ -459,6 +460,7 @@ Nothing fails silently:
 | `$something` that does not exist | error in the panel |
 | Incompatible types | node goes in, link does not; warning in the panel |
 | Asset not decided | empty pin → the Blueprint does not compile |
+| Node that does not compile | `write_graph` compiles at the end: `line N [error]: does not compile: ...`, on the line that made it |
 
 `Ctrl+Z` undoes the whole paste at once.
 

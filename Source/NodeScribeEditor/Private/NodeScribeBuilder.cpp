@@ -2235,6 +2235,61 @@ void FNodeScribeBuildContext::Connect(UEdGraphPin* From, UEdGraphPin* To, int32 
 		return;
 	}
 
+	// `Bind X (Event = $done)` with `done = event Done` declaring nothing: the
+	// event takes the dispatcher's signature, as the editor's "create matching
+	// event" does. Without it the schema refused the wire -- no parameters is
+	// not OnDestroyed's signature --, and the Blueprint did not compile. An
+	// event that declared parameters keeps them, and a mismatch is said below.
+	if (From->PinType.PinCategory == UEdGraphSchema_K2::PC_Delegate
+		&& To->PinType.PinCategory == UEdGraphSchema_K2::PC_Delegate)
+	{
+		UK2Node_CustomEvent* BoundEvent = Cast<UK2Node_CustomEvent>(From->GetOwningNode());
+		const UFunction* Signature = FMemberReference::ResolveSimpleMemberReference<UFunction>(
+			To->PinType.PinSubCategoryMemberReference);
+
+		if (BoundEvent && Signature && BoundEvent->UserDefinedPins.Num() == 0)
+		{
+			for (TFieldIterator<FProperty> It(Signature); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+			{
+				const FProperty* Param = *It;
+				if (Param->HasAnyPropertyFlags(CPF_ReturnParm)
+					|| (Param->HasAnyPropertyFlags(CPF_OutParm) && !Param->HasAnyPropertyFlags(CPF_ReferenceParm)))
+				{
+					continue;
+				}
+
+				FEdGraphPinType ParamType;
+				if (Schema->ConvertPropertyToPinType(Param, ParamType))
+				{
+					BoundEvent->CreateUserDefinedPin(Param->GetFName(), ParamType, EGPD_Output, /*bUseUniqueName*/ false);
+				}
+			}
+
+			// The schema compares the dispatcher with the event's function in the
+			// skeleton, which still has none of these. Regenerating may rebuild
+			// pins, so they are found again by name.
+			if (BoundEvent->UserDefinedPins.Num() > 0)
+			{
+				UEdGraphNode* ToNode = To->GetOwningNode();
+				const FName FromName = From->PinName;
+				const FName ToName = To->PinName;
+
+				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+				FKismetEditorUtilities::GenerateBlueprintSkeleton(Blueprint, true);
+
+				From = BoundEvent->FindPin(FromName);
+				To = ToNode->FindPin(ToName);
+				if (!From || !To)
+				{
+					AddWarning(Line, FString::Printf(
+						TEXT("`%s` lost a pin when it took the dispatcher's parameters. The link was not made."),
+						*BoundEvent->CustomFunctionName.ToString()));
+					return;
+				}
+			}
+		}
+	}
+
 	// The K2 schema's TryCreateConnection inserts a conversion node by itself
 	// when the types are compatible through an implicit cast (int -> float, etc).
 	if (Schema->TryCreateConnection(From, To))
@@ -5558,6 +5613,15 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 			PopFrame();
 		}
 
+		// What is in the graph before the line: everything new after its
+		// arguments is the line's, the Gets and conversions it made by itself too.
+		TSet<UEdGraphNode*> NodesBeforeLine;
+		NodesBeforeLine.Reserve(Graph->Nodes.Num());
+		for (UEdGraphNode* Existing : Graph->Nodes)
+		{
+			NodesBeforeLine.Add(Existing);
+		}
+
 		UEdGraphNode* Node = CreateNodeForStatement(Statement);
 		if (!Node)
 		{
@@ -5590,6 +5654,17 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		if (!Node->IsA<UEdGraphNode_Comment>())
 		{
 			ApplyArguments(Node, Statement);
+		}
+
+		// The node itself even when it existed before: a pre-created event, a
+		// reused stub.
+		Result.NodeLines.Add(Node, Statement.LineNumber);
+		for (UEdGraphNode* Added : Graph->Nodes)
+		{
+			if (Added && !NodesBeforeLine.Contains(Added) && !Result.NodeLines.Contains(Added))
+			{
+				Result.NodeLines.Add(Added, Statement.LineNumber);
+			}
 		}
 
 		if (Statement.OutputName.IsEmpty() && !Node->IsA<UEdGraphNode_Comment>())

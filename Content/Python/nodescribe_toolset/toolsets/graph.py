@@ -27,7 +27,8 @@ class NodeScribeTools(unreal.ToolsetDefinition):
         the graph, and the rest keeps being created. The return says what
         happened. `after <a line of read_graph>:` inserts the block under it
         into that node's chain; an `after` that does not find exactly one
-        node refuses the whole write.
+        node refuses the whole write. Compiles the Blueprint at the end: a
+        compile error comes back on the line that made the node.
 
         Args:
             graph: The graph to populate.

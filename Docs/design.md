@@ -58,6 +58,10 @@ comment, an empty pin or a refusal costs one look.
   event has no inputs, so its parentheses were free, and `:` is how
   `variable` already pairs a name with a type. Without them the event came
   back with no outputs and every `$x.Pin` on it broke (D-026).
+- **A bound event that declared nothing takes the dispatcher's signature**, as
+  the editor's "create matching event" does: no parameters is not the
+  dispatcher's signature, the schema refused the wire, and the Blueprint did
+  not compile. One that declared parameters keeps them, and a mismatch is said.
 - **Interface events are looked up before Custom Events**: missed, `event X`
   of an interface became a Custom Event called X, which compiles, looks the
   same and is never called through the interface. Two interfaces with the same

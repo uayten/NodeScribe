@@ -46,6 +46,13 @@ public:
 		TArray<FNodeScribeDiagnostic> Diagnostics;
 		TArray<UEdGraphNode*> CreatedNodes;
 
+		/**
+		 * The line of the text each node came from, the ones a line made by
+		 * itself included (a variable's Get, a conversion). It is how a compile
+		 * error is pointed back at the text.
+		 */
+		TMap<UEdGraphNode*, int32> NodeLines;
+
 		int32 ErrorCount = 0;
 		int32 WarningCount = 0;
 

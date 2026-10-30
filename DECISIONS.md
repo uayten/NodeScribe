@@ -1,6 +1,6 @@
 # Decisions
 
-<!-- project-docs: only what holds now. Next ID: D-028 · Next fact: F-007 -->
+<!-- project-docs: only what holds now. Next ID: D-029 · Next fact: F-007 -->
 
 ## Decisions
 
@@ -160,6 +160,13 @@ Why: the implementation tied with its interface and made every call ambiguous; a
 Origin: R-019
 Not chosen: recreating the plain call when the Target is an interface reference -- the text cannot tell the Target's type without guessing, and both do the same at runtime.
 Affects: NodeScribeCatalog, NodeScribeBuilder, NodeScribeReader, Docs/FORMAT.md
+
+### D-028 write_graph compiles the Blueprint and points each error at its line
+Decision: `write_graph` compiles after the write, outside its transaction, and answers `line N [error]: does not compile: ...` for a node a line made, nodes the line made by itself included. An error on a node the text did not make names its graph and title; that node's warnings stay out. The Paste button does not compile.
+Why: a plausible wrong node goes in without a word: only the Compile button showed `0 Corações` bound to another widget, and two suite cases had never compiled (a dispatcher's event wire). The native `compile_blueprint` only says it failed, and its toolset's description is 72 thousand characters.
+Origin: R-022
+Not chosen: a `compile` tool or parameter -- one more door to forget, for a check every write needs; the cost is the time of a compile per write.
+Affects: NodeScribeLibrary, NodeScribeBuilder (NodeLines), Docs/FORMAT.md, the tool's description
 
 ## Verified facts
 

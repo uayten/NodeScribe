@@ -20,6 +20,8 @@
 #include "HAL/FileManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/CompilerResultsLog.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "ScopedTransaction.h"
@@ -61,6 +63,106 @@ namespace
 		}
 
 		return FString::Join(Lines, TEXT("\n"));
+	}
+
+	/**
+	 * Compiles the Blueprint and turns what the compiler said into diagnostics
+	 * pointed at the text.
+	 *
+	 * A node a line made is answered with that line. A plausible wrong node --
+	 * another Blueprint's function on self -- goes in without a word and only
+	 * the Compile button showed it, with a message naming no line. An error on
+	 * a node the text did not make (already in the Blueprint) comes with its
+	 * graph and title instead; that one's warnings stay out, they are not this
+	 * write's.
+	 */
+	TArray<FNodeScribeDiagnostic> CompileAndPointAtLines(UBlueprint* Blueprint, const TMap<UEdGraphNode*, int32>& NodeLines)
+	{
+		TArray<FNodeScribeDiagnostic> Diagnostics;
+
+		FCompilerResultsLog Log;
+		Log.bSilentMode = true;
+		Log.bLogInfoOnly = false;
+		FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::SkipGarbageCollection, &Log);
+
+		TArray<UEdGraph*> Graphs;
+		Blueprint->GetAllGraphs(Graphs);
+
+		TArray<FString> Attributed;
+		for (const UEdGraph* Graph : Graphs)
+		{
+			if (!Graph)
+			{
+				continue;
+			}
+
+			for (const UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (!Node || !Node->bHasCompilerMessage || Node->ErrorMsg.IsEmpty())
+				{
+					continue;
+				}
+
+				const bool bIsError = Node->ErrorType <= EMessageSeverity::Error;
+				const bool bIsWarning = !bIsError && Node->ErrorType <= EMessageSeverity::Warning;
+				if (!bIsError && !bIsWarning)
+				{
+					continue;
+				}
+
+				const int32* Line = NodeLines.Find(const_cast<UEdGraphNode*>(Node));
+				if (!Line && !bIsError)
+				{
+					continue;
+				}
+
+				// A node keeps all its messages in one string, a line each.
+				TArray<FString> Messages;
+				Node->ErrorMsg.ParseIntoArrayLines(Messages);
+
+				for (const FString& Raw : Messages)
+				{
+					const FString Message = Raw.TrimStartAndEnd();
+					if (Message.IsEmpty())
+					{
+						continue;
+					}
+
+					Attributed.Add(Message);
+
+					Diagnostics.Emplace(
+						bIsError ? ENodeScribeSeverity::Error : ENodeScribeSeverity::Warning,
+						Line ? *Line : 0,
+						Line
+							? FString::Printf(TEXT("does not compile: %s"), *Message)
+							: FString::Printf(TEXT("does not compile, in a node this text did not make (%s > %s): %s"),
+								*Graph->GetName(),
+								*Node->GetNodeTitle(ENodeTitleType::ListView).ToString(),
+								*Message));
+				}
+			}
+		}
+
+		// What the compiler said about no node in particular: a missing function
+		// signature, a variable of a type that no longer exists.
+		for (const TSharedRef<FTokenizedMessage>& Message : Log.Messages)
+		{
+			if (Message->GetSeverity() > EMessageSeverity::Error)
+			{
+				continue;
+			}
+
+			const FString Text = Message->ToText().ToString();
+			if (!Attributed.ContainsByPredicate([&Text](const FString& Known)
+				{
+					return Text.Contains(Known) || Known.Contains(Text);
+				}))
+			{
+				Diagnostics.Emplace(ENodeScribeSeverity::Error, 0, FString::Printf(TEXT("does not compile: %s"), *Text));
+			}
+		}
+
+		return Diagnostics;
 	}
 }
 
@@ -162,23 +264,29 @@ FString UNodeScribeLibrary::WriteGraph(UEdGraph* Graph, const FString& Text, boo
 		}
 	}
 
-	const FScopedTransaction Transaction(LOCTEXT("WriteGraphTransaction", "NodeScribe: write graph"));
-	Blueprint->Modify();
-	Graph->Modify();
-
-	// Inside the transaction: Ctrl+Z undoes the erase and the write at once.
 	int32 Removed = 0;
-	if (bReplace)
+	FNodeScribeBuilder::FResult Result;
 	{
-		Removed = RemoveDeletableNodes(Graph, Blueprint);
+		const FScopedTransaction Transaction(LOCTEXT("WriteGraphTransaction", "NodeScribe: write graph"));
+		Blueprint->Modify();
+		Graph->Modify();
+
+		// Inside the transaction: Ctrl+Z undoes the erase and the write at once.
+		if (bReplace)
+		{
+			Removed = RemoveDeletableNodes(Graph, Blueprint);
+		}
+
+		Result = FNodeScribeBuilder::Build(
+			Statements, Graph, Blueprint, FNodeScribeTarget::FindFreeOrigin(Graph));
+
+		Result.Diagnostics.Insert(ParseDiagnostics, 0);
+
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 	}
 
-	FNodeScribeBuilder::FResult Result = FNodeScribeBuilder::Build(
-		Statements, Graph, Blueprint, FNodeScribeTarget::FindFreeOrigin(Graph));
-
-	Result.Diagnostics.Insert(ParseDiagnostics, 0);
-
-	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	// Outside the transaction: compiling is not part of what Ctrl+Z undoes.
+	Result.Diagnostics.Append(CompileAndPointAtLines(Blueprint, Result.NodeLines));
 
 	const FString Report = FormatDiagnostics(Result.Diagnostics);
 

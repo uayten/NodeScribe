@@ -1549,6 +1549,32 @@ def token_budget():
     return not problems, problems + numbers
 
 
+def compile_errors_point_at_lines():
+    """write_graph compiles, and an error comes back on the line that made it.
+
+    `Character.Jump` with no Target, in an Actor, goes in without a word and
+    does not compile: self is not a Character. Before, only the Compile
+    button said so, naming no line.
+    """
+    graph, error = new_blueprint('NS_compile_errors')
+    if not graph:
+        return False, [error]
+
+    text = 'event Test\nPrint String (In String = "a")\nCharacter.Jump\n'
+    written = unreal.NodeScribeLibrary.write_graph(graph, text, False)
+
+    if 'line 3 [error]: does not compile' not in written:
+        return False, ['the compile error did not come back on line 3:'] + written.splitlines()
+    if 'line 2 [error]' in written:
+        return False, ['line 2 compiles and was blamed:'] + written.splitlines()
+
+    # Once per message: the compiler's log repeats what the node already says.
+    lines = [l.split(': ', 1)[1] for l in written.splitlines() if 'does not compile' in l]
+    if len(lines) != len(set(lines)):
+        return False, ['a compile error came back twice:'] + written.splitlines()
+    return True, []
+
+
 def empty_graph_keeps_header():
     """An emptied graph still reads with its refPath and the variables.
 
@@ -1576,6 +1602,7 @@ OTHERS = [
     ('replace_swaps_the_graph', replace_swaps_the_graph),
     ('empty_event_is_reused', empty_event_is_reused),
     ('empty_graph_keeps_header', empty_graph_keeps_header),
+    ('compile_errors_point_at_lines', compile_errors_point_at_lines),
     ('insert_into_existing_chain', insert_into_existing_chain),
     ('replace_refuses_lossy_graph', replace_refuses_lossy_graph),
     ('replace_takes_own_break', replace_takes_own_break),
