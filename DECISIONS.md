@@ -1,6 +1,6 @@
 # Decisions
 
-<!-- project-docs: only what holds now. Next ID: D-029 · Next fact: F-007 -->
+<!-- project-docs: only what holds now. Next ID: D-032 · Next fact: F-007 -->
 
 ## Decisions
 
@@ -174,6 +174,19 @@ Why: that node holds the outputs of the signature. Deleted, they are gone, every
 Origin: R-027
 Not chosen: creating the output pins from the `Return` line -- the text does not say their types, and the pin's real name (`ReturnValue`) differs from the written one.
 Affects: NodeScribeLibrary, NodeScribeBuilder
+
+### D-030 The suite always compiles each original and its copy
+Decision: `project_graphs_round_trip` compiles each Blueprint and its refilled copy on every run. An error only the copy has fails the case, unless the reading of one of its graphs warned; that one is listed apart in `Saved/NodeScribe/project_graphs.txt`.
+Why: matching readings say nothing about compiling. It costs next to nothing, since each write already compiles. The user chose always on after the cost was measured.
+Origin: R-024, user
+Not chosen: an optional run behind an environment variable -- it was the first form, proposed for a cost that the measurement did not show.
+Affects: Tests/run_tests.py, Docs/development.md
+
+### D-031 A warning means something is lost
+Decision: a reading warns only when the text does not bring something back. The function entry is a note, and only when the function has parameters or local variables to create elsewhere.
+Why: `replace` refuses a graph with a warning, and the suite counts a difference under a warning as declared. The warning on every function made `replace` refuse them all and hid 20 silent differences, one of them an override calling itself.
+Origin: R-031
+Affects: NodeScribeReader, Docs/format/reading.md, Tests/run_tests.py
 
 ## Verified facts
 

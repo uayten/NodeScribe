@@ -61,7 +61,7 @@ ROADMAP items are Portuguese.
 | `NodeScribeComponents` | an actor Blueprint's components: the `# components:` header, and `component` / `delete component` in `write_object`, through the Components panel's subsystem. |
 | `NodeScribeInstanced` | arrays of instanced objects as a block, both ways: a Gameplay Effect's `Components`, a mapping's triggers and modifiers. |
 | `NodeScribeInputMapping` | an Input Mapping Context's `mappings` section, both ways, by reflection (Enhanced Input is not linked). |
-| `Tests/run_tests.py` | automated round trip, without an interface, over the suite's cases and over every graph of the project (`project_graphs_round_trip`), plus `token_budget`: ceilings on what the docs, the tools and a reading cost. Run it before and after touching the reader, the builder or the docs; the command is in *Testing*, in `Docs/development.md`. |
+| `Tests/run_tests.py` | automated round trip, without an interface, over the suite's cases and over every graph of the project (`project_graphs_round_trip`, which also compiles each copy), plus `token_budget`: ceilings on what the docs, the tools and a reading cost. Run it before and after touching the reader, the builder or the docs; the command is in *Testing*, in `Docs/development.md`. |
 | `Saved/NodeScribe/vocabulary.txt` | the names nobody managed to resolve, one per line. `sort \| uniq -c \| sort -rn` gives the list of aliases missing from the catalog, by frequency. It is not an error log -- see *The missing vocabulary*, in `Docs/development.md`. |
 
 Reader and builder are mirrors: when teaching a new kind of node, both change.
