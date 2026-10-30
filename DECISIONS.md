@@ -1,6 +1,6 @@
 # Decisions
 
-<!-- project-docs: only what holds now. Next ID: D-027 · Next fact: F-007 -->
+<!-- project-docs: only what holds now. Next ID: D-028 · Next fact: F-007 -->
 
 ## Decisions
 
@@ -153,6 +153,13 @@ Why: an event has no inputs, so its parentheses were free; `:` already pairs nam
 Origin: R-016
 Not chosen: indented `param` lines under the event -- indentation already means an execution block; writing the signature of interface and override events too -- it is the class's, and repeating it only creates a way to disagree.
 Affects: NodeScribeParser (EventParams), NodeScribeBuilder, NodeScribeReader, Docs/FORMAT.md
+
+### D-027 An interface function is a message, and its implementations are not candidates
+Decision: the catalog skips a class's implementation of an interface function unless the line names the class (`BossRushPlayer.Obter Facção`); the interface's function is created as `UK2Node_Message`. A plain call on an interface reference reads with a warning: it comes back as the message.
+Why: the implementation tied with its interface and made every call ambiguous; as a plain call the Target wants an interface reference, and an Actor's wire was dropped. The message is the editor menu's form and takes any object.
+Origin: R-019
+Not chosen: recreating the plain call when the Target is an interface reference -- the text cannot tell the Target's type without guessing, and both do the same at runtime.
+Affects: NodeScribeCatalog, NodeScribeBuilder, NodeScribeReader, Docs/FORMAT.md
 
 ## Verified facts
 

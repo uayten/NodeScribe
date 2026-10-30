@@ -126,7 +126,16 @@ Print String ("hi", 5.0)
 
 Names are compared tolerantly -- `In String`, `instring` and `In_String` are
 the same, and accents are ignored (`$Duracao` finds `Duração`) for every name
-in the format. `Target` is the self pin.
+in the format. `Target` is the self pin; on a function with a parameter of its
+own called `Target`, the self pin is `self`.
+
+A field of a struct input is the pin's name and the field's, and the pin is
+split (*Split Struct Pin*), as many levels as the name goes down:
+
+```
+Spawn Actor from Class (Class = BP_Rock, Spawn Transform Location = $loc)
+sum = KismetMathLibrary.Add_VectorVector (A = $loc, B Z = 100.0)
+```
 
 ## When two nodes share a name
 
@@ -138,6 +147,10 @@ EnhancedInputUserSettings.ApplySettings (Target = $settings)
 ```
 
 Parentheses do **not** work for this: they are the argument list.
+
+A function of an interface becomes its message node, whose `Target` takes any
+object. A class's implementation of it is not a second candidate: `Obter
+Facção` is the interface's, even in a project where three classes implement it.
 
 ## Branches (Branch, loops)
 
@@ -305,7 +318,8 @@ Spawn Actor from Class (Class = BP_Boss, Spawn Transform = $t)
 
 Also `Construct Object from Class`. The *Expose on Spawn* pins only exist once
 the class is set; the plugin applies `Class` first, so the arguments go in any
-order. Without `Class`, the node goes in without those pins, with a warning.
+order. `Class = $Rock Class` takes them from the variable's class. Without
+`Class`, the node goes in without those pins, with a warning.
 
 ## Standard macros
 
@@ -360,13 +374,17 @@ stays empty.
 `#` or `//` up to the end of the line. A comment box in the graph:
 
 ```
-Comment Rebind logic starts here
+Comment Rebind logic starts here (only on the server)
 ```
+
+Everything after `Comment` is the box's text, parentheses and a final `:`
+included.
 
 ## What the parser ignores by itself
 
 ```` ``` ```` fences, `-` and `*` bullets, and step numbering in any common form
--- `1.`, `1)`, `[2]`, `3.1`.
+-- `1.`, `1)`, `[2]`, `3.1`. A number and a space is not numbering: `0 Hearts`
+is a name.
 
 ---
 
@@ -471,7 +489,7 @@ Every word the format reserves, in one place.
 | `true:`, `then:`, `false:`, `else:`, `loop body:`, `loop:`, `completed:` | label | execution output aliases |
 | `state Name:`, `conduit Name:`, `alias Name:` | label under a state machine | state machine nodes |
 | `From -> To:` (optionally `transition From -> To:`) | label under a state machine | transition |
-| `Target` | argument name | the self pin |
+| `Target`, `self` | argument name | the self pin; `self` when the function has a parameter called `Target` |
 
 The sheet (`read_object` / `write_object`) and the other tools add their own:
 

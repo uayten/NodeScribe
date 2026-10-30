@@ -342,9 +342,14 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 			{
 				const TCHAR Terminator = Line[Cursor];
 
+				// A bare number and a space is not numbering: `0 Corações` is a
+				// function's name, and taking the `0` off left a name that matched
+				// four others. `3.1 Print String` still is -- the dot says so.
+				const FString Number = Line.Mid(NumberStart, Cursor - NumberStart);
 				const bool bValidEnd = bBracketed
 					? (Terminator == TEXT(']'))
-					: (Terminator == TEXT('.') || Terminator == TEXT(')') || Terminator == TEXT(' '));
+					: (Terminator == TEXT('.') || Terminator == TEXT(')')
+						|| (Terminator == TEXT(' ') && Number.Contains(TEXT("."))));
 
 				if (bValidEnd)
 				{
@@ -434,6 +439,17 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 					continue;
 				}
 			}
+		}
+
+		// A comment box's line is all text: `(used in state machine)` is part of
+		// what the box says, not arguments, and a trailing `:` does not make it a
+		// label. Cut at the parenthesis, the text came back shorter and nothing
+		// said so.
+		if (!Statement.bIsAnchor && Line.StartsWith(TEXT("Comment "), ESearchCase::IgnoreCase))
+		{
+			Statement.NodeExpression = Line;
+			Statements.Add(MoveTemp(Statement));
+			continue;
 		}
 
 		const int32 ParenIndex = FindArgsOpenParen(Line);

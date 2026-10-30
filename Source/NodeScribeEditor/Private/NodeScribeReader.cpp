@@ -40,6 +40,7 @@
 #include "K2Node_GetEnumeratorNameAsString.h"
 #include "K2Node_GetSubsystem.h"
 #include "K2Node_MakeStruct.h"
+#include "K2Node_Message.h"
 #include "K2Node_DynamicCast.h"
 #include "K2Node_Event.h"
 #include "K2Node_ExecutionSequence.h"
@@ -458,6 +459,25 @@ namespace
 	/** The name the user sees and types, which is rarely the internal name. */
 	FString GetWrittenPinName(const UEdGraphPin* Pin)
 	{
+		// A field of a split struct carries its parent's name, as the screen
+		// usually shows it (`Spawn Transform Location`). Where the screen shows
+		// only the field -- `B` of Add (Vector) split into `X`, `Y`, `Z` --, a
+		// bare `X` named nothing the builder could find: on a node with an Add
+		// pin button it even grew pins until one was called `X`.
+		if (const UEdGraphPin* Parent = Pin->ParentPin)
+		{
+			const FString ParentName = GetWrittenPinName(Parent);
+			const FString Field = Pin->PinFriendlyName.IsEmpty()
+				? Pin->PinName.ToString()
+				: Pin->PinFriendlyName.ToString();
+
+			if (!ParentName.IsEmpty()
+				&& !FNodeScribeCatalog::Normalize(Field).StartsWith(FNodeScribeCatalog::Normalize(ParentName)))
+			{
+				return ParentName + TEXT(" ") + Field;
+			}
+		}
+
 		if (!Pin->PinFriendlyName.IsEmpty())
 		{
 			return Pin->PinFriendlyName.ToString();
@@ -623,6 +643,9 @@ public:
 	void Run();
 
 	FNodeScribeReader::FResult Result;
+
+	/** Set when the whole graph is read, not a selection: the header comes out even when it is empty. */
+	UEdGraph* WholeGraph = nullptr;
 
 private:
 	void EmitLine(int32 Indent, const FString& Text);
@@ -1193,6 +1216,18 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		{
 			const FString DisplayName = Function->GetDisplayNameText().ToString();
 
+			// An interface function comes back as a message, the form the
+			// editor's menu offers. A plain call on an interface reference
+			// does the same at runtime, but it is another node.
+			const UClass* FunctionOwner = Function->GetOwnerClass();
+			if (FunctionOwner && FunctionOwner->HasAnyClassFlags(CLASS_Interface) && !Cast<UK2Node_Message>(Call))
+			{
+				OutRoundTripIssue = FString::Printf(
+					TEXT("`%s` calls the interface on an interface reference; pasting back makes it a message, ")
+					TEXT("which does the same and whose Target takes any object."),
+					*DisplayName);
+			}
+
 			// The short name only works if it leads back to this same function.
 			// `Apply Settings` exists in GameUserSettings and in
 			// EnhancedInputUserSettings; writing the ambiguous name here would
@@ -1421,6 +1456,28 @@ FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Inde
 {
 	TArray<FString> Args;
 
+	// The self pin is written `Target`, as the screen shows it -- unless the
+	// function has a parameter of its own called `Target`
+	// (`BP_ApplyGameplayEffectToTarget`). Then the line had two `Target`s, both
+	// went into the parameter, and the call came back on the wrong component.
+	bool bHasParameterCalledTarget = false;
+	for (const UEdGraphPin* Pin : Node->Pins)
+	{
+		if (Pin && Pin->Direction == EGPD_Input && Pin->PinName != UEdGraphSchema_K2::PN_Self
+			&& FNodeScribeCatalog::Normalize(Pin->PinName.ToString()) == TEXT("target"))
+		{
+			bHasParameterCalledTarget = true;
+			break;
+		}
+	}
+
+	auto ArgumentName = [bHasParameterCalledTarget](const UEdGraphPin* Pin)
+	{
+		return bHasParameterCalledTarget && Pin->PinName == UEdGraphSchema_K2::PN_Self
+			? FString(TEXT("self"))
+			: GetWrittenPinName(Pin);
+	};
+
 	for (UEdGraphPin* Pin : Node->Pins)
 	{
 		if (!Pin || Pin->Direction != EGPD_Input || IsFlowPin(Pin) || Pin->bHidden)
@@ -1458,7 +1515,7 @@ FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Inde
 						*DescribePinType(SourcePin->PinType), *DescribePinType(Pin->PinType));
 				}
 
-				Args.Add(FString::Printf(TEXT("%s = %s"), *GetWrittenPinName(Pin), *Reference));
+				Args.Add(FString::Printf(TEXT("%s = %s"), *ArgumentName(Pin), *Reference));
 			}
 			continue;
 		}
@@ -1489,7 +1546,7 @@ FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Inde
 
 		if (!Literal.IsEmpty())
 		{
-			Args.Add(FString::Printf(TEXT("%s = %s"), *GetWrittenPinName(Pin), *Literal));
+			Args.Add(FString::Printf(TEXT("%s = %s"), *ArgumentName(Pin), *Literal));
 		}
 	}
 
@@ -2218,7 +2275,11 @@ void FNodeScribeReadContext::EmitSubGraph(UEdGraph* SubGraph, int32 Indent)
 
 void FNodeScribeReadContext::Run()
 {
-	if (Scope.Num() == 0)
+	// A whole graph with no nodes still has a header: its refPath is what the
+	// first write needs, and its variables are the Blueprint's. Without it a
+	// Blueprint whose EventGraph held only the greyed-out stubs read with its
+	// variables, and once emptied read as nothing at all.
+	if (Scope.Num() == 0 && !WholeGraph)
 	{
 		AddInfo(TEXT("Nothing to read: no node selected."));
 		return;
@@ -2226,10 +2287,16 @@ void FNodeScribeReadContext::Run()
 
 	CollectConsumedNodes();
 
+	UEdGraph* SourceGraph = WholeGraph;
+	if (!SourceGraph && Nodes.Num() > 0 && Nodes[0])
+	{
+		SourceGraph = Nodes[0]->GetGraph();
+	}
+
 	// Header: whoever reads this text in a chat has no way to know where it
 	// came from, and "which asset is this" is the first question. It comes out
 	// as a comment, so the parser ignores it when the text comes back.
-	if (UEdGraph* SourceGraph = !bNested && Nodes.Num() > 0 && Nodes[0] ? Nodes[0]->GetGraph() : nullptr)
+	if (SourceGraph && !bNested)
 	{
 		FString Header = FString::Printf(TEXT("# %s -> %s"),
 			Blueprint ? *Blueprint->GetName() : TEXT("?"),
@@ -2671,5 +2738,8 @@ FNodeScribeReader::FResult FNodeScribeReader::ReadGraph(UEdGraph* Graph, UBluepr
 		return Empty;
 	}
 
-	return Read(Graph->Nodes, Blueprint);
+	FNodeScribeReadContext Context(Graph->Nodes, Blueprint);
+	Context.WholeGraph = Graph;
+	Context.Run();
+	return MoveTemp(Context.Result);
 }

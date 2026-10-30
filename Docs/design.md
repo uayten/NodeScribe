@@ -27,6 +27,17 @@ comment, an empty pin or a refusal costs one look.
 - **`Class.Function` and not parentheses**: parentheses already are the
   argument list. And the plugin does not pick between `GameUserSettings` and
   `EnhancedInputUserSettings` -- both compile, one is wrong.
+- **An interface implementation is not a candidate**: it is the same call as
+  the interface's, and counting it made every call to a function three classes
+  implement ambiguous. The interface's is created as a message, the editor
+  menu's form, because its Target takes any object.
+
+## Arguments of split structs
+
+- **A split field is found by prefix only** (`Spawn Transform Location`,
+  `B Z`): the reader always writes the parent's name. A bare `Z` would have
+  to choose between struct pins, and on a node with an Add pin button it was
+  taken for a pin to add. A split that finds nothing is undone.
 
 ## Branches
 

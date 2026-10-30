@@ -38,6 +38,7 @@
 #include "K2Node_ComponentBoundEvent.h"
 #include "K2Node_ConstructObjectFromClass.h"
 #include "K2Node_CustomEvent.h"
+#include "K2Node_Message.h"
 #include "K2Node_GetSubsystem.h"
 #include "K2Node_MakeStruct.h"
 #include "K2Node_DynamicCast.h"
@@ -947,6 +948,9 @@ private:
 	/** Events already created by the pre-pass, by name. */
 	TMap<FString, UEdGraphNode*> PreCreatedEvents;
 
+	/** Arguments applied while creating the node, which ApplyArguments skips. */
+	TSet<const FNodeScribeArg*> ArgsAppliedEarly;
+
 	/**
 	 * An event with the same identity already in the graph.
 	 *
@@ -1023,6 +1027,16 @@ private:
 	 * splitting, the requested half simply does not exist and the link is lost.
 	 */
 	UEdGraphPin* TrySplitToFindPin(UEdGraphNode* Node, const FString& PinPath);
+
+	/**
+	 * An input named after a field of a struct pin -- `Spawn Transform
+	 * Location`, `In Color And Opacity Specified Color R`, `B X` -- splits that
+	 * pin (Split Struct Pin), as many levels as the name goes down. Only by
+	 * prefix: the reader always writes the parent's name, and a bare field
+	 * would have to choose between struct pins. Splits that found nothing are
+	 * undone, so a typo leaves the node as it was.
+	 */
+	UEdGraphPin* SplitInputToFindPin(UEdGraphNode* Node, const FString& PinPath);
 	static UEdGraphPin* FindExecInput(UEdGraphNode* Node);
 	static TArray<UEdGraphPin*> GetExecOutputs(UEdGraphNode* Node);
 	static UEdGraphPin* FindPrimaryOutput(UEdGraphNode* Node);
@@ -1930,21 +1944,24 @@ UEdGraphPin* FNodeScribeBuildContext::FindPinByFuzzyName(UEdGraphNode* Node, con
 	Attempts.Add(FNodeScribeCatalog::Normalize(Name));
 	Attempts.AddUnique(ResolvePinAlias(Name));
 
+	// Internal names before display names, over all the pins: the self pin is
+	// displayed as `Target`, and on `BP_ApplyGameplayEffectToTarget`, whose
+	// parameter is called `Target`, the first pin in the list won -- the
+	// parameter's value went into self.
 	for (const FString& Wanted : Attempts)
 	{
 		for (UEdGraphPin* Pin : Node->Pins)
 		{
-			if (Pin->Direction != Direction || Pin->bHidden)
-			{
-				continue;
-			}
-
-			if (FNodeScribeCatalog::Normalize(Pin->PinName.ToString()) == Wanted)
+			if (Pin->Direction == Direction && !Pin->bHidden
+				&& FNodeScribeCatalog::Normalize(Pin->PinName.ToString()) == Wanted)
 			{
 				return Pin;
 			}
+		}
 
-			if (!Pin->PinFriendlyName.IsEmpty()
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin->Direction == Direction && !Pin->bHidden && !Pin->PinFriendlyName.IsEmpty()
 				&& FNodeScribeCatalog::Normalize(Pin->PinFriendlyName.ToString()) == Wanted)
 			{
 				return Pin;
@@ -2128,6 +2145,83 @@ UEdGraphPin* FNodeScribeBuildContext::TrySplitToFindPin(UEdGraphNode* Node, cons
 			{
 				return Sub;
 			}
+		}
+	}
+
+	return nullptr;
+}
+
+UEdGraphPin* FNodeScribeBuildContext::SplitInputToFindPin(UEdGraphNode* Node, const FString& PinPath)
+{
+	const FString Wanted = FNodeScribeCatalog::Normalize(PinPath);
+	TArray<UEdGraphPin*> SplitHere;
+
+	// Each round splits one level: an FSlateColor holds an FLinearColor, and
+	// `... Specified Color R` is two splits down.
+	for (int32 Depth = 0; Depth < 4; ++Depth)
+	{
+		UEdGraphPin* Prefix = nullptr;
+		int32 PrefixLength = 0;
+		bool bTied = false;
+
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (!Pin || Pin->Direction != EGPD_Input || Pin->bHidden || Pin->SubPins.Num() > 0
+				|| IsExecPin(Pin) || Pin->LinkedTo.Num() > 0
+				|| Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Struct
+				|| !Schema->CanSplitStructPin(*Pin))
+			{
+				continue;
+			}
+
+			TArray<FString, TInlineAllocator<2>> Names;
+			Names.Add(FNodeScribeCatalog::Normalize(Pin->PinName.ToString()));
+			if (!Pin->PinFriendlyName.IsEmpty())
+			{
+				Names.AddUnique(FNodeScribeCatalog::Normalize(Pin->PinFriendlyName.ToString()));
+			}
+
+			for (const FString& Name : Names)
+			{
+				if (Name.IsEmpty() || Name.Len() >= Wanted.Len() || !Wanted.StartsWith(Name))
+				{
+					continue;
+				}
+
+				if (Name.Len() > PrefixLength)
+				{
+					Prefix = Pin;
+					PrefixLength = Name.Len();
+					bTied = false;
+				}
+				else if (Name.Len() == PrefixLength && Pin != Prefix)
+				{
+					bTied = true;
+				}
+			}
+		}
+
+		// Two struct pins the name could belong to: splitting one is choosing.
+		if (!Prefix || bTied)
+		{
+			break;
+		}
+
+		Schema->SplitPin(Prefix, false);
+		SplitHere.Add(Prefix);
+
+		if (UEdGraphPin* Found = FindPinByFuzzyName(Node, PinPath, EGPD_Input))
+		{
+			return Found;
+		}
+	}
+
+	// Nothing under those splits: put the node back, deepest first.
+	for (int32 Index = SplitHere.Num() - 1; Index >= 0; --Index)
+	{
+		if (SplitHere[Index]->SubPins.Num() > 0)
+		{
+			Schema->RecombinePin(SplitHere[Index]->SubPins[0]);
 		}
 	}
 
@@ -2501,6 +2595,31 @@ bool FNodeScribeBuildContext::FindNodeSetting(UEdGraphNode* Node, const FString&
 	return true;
 }
 
+namespace
+{
+	/**
+	 * Tells the node which option changed, as the details panel does.
+	 *
+	 * A bare PostEditChange says nothing changed in particular, and a node that
+	 * rebuilds its pins on one option ignores it: `Switch on String (Pin Names
+	 * = ...)` kept only its Default output, and every label under it failed.
+	 * An option inside a struct the node wraps is not the node's own property,
+	 * so there the general form stays.
+	 */
+	void NotifyNodeOptionChanged(UEdGraphNode* Node, FProperty* Property)
+	{
+		const UClass* Owner = Property ? Property->GetOwnerClass() : nullptr;
+		if (Owner && Node->GetClass()->IsChildOf(Owner))
+		{
+			FPropertyChangedEvent ChangedEvent(Property, EPropertyChangeType::ValueSet);
+			Node->PostEditChangeProperty(ChangedEvent);
+			return;
+		}
+
+		Node->PostEditChange();
+	}
+}
+
 void FNodeScribeBuildContext::ApplyLabelSettings(UEdGraphNode* Node, const FNodeScribeStatement& Statement)
 {
 	// A label has no pins: states, conduits and transitions are set up only
@@ -2547,7 +2666,7 @@ void FNodeScribeBuildContext::ApplyLabelSettings(UEdGraphNode* Node, const FNode
 			continue;
 		}
 
-		Node->PostEditChange();
+		NotifyNodeOptionChanged(Node, Setting.Property);
 	}
 }
 
@@ -2628,9 +2747,30 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 	{
 		UEdGraphPin* Pin = nullptr;
 
+		// Already wired when the node was made (a class from a variable).
+		if (ArgsAppliedEarly.Contains(&Arg))
+		{
+			if (Arg.PinName.IsEmpty())
+			{
+				++NextPositional;
+			}
+			continue;
+		}
+
 		if (!Arg.PinName.IsEmpty())
 		{
 			Pin = FindPinByFuzzyName(Node, Arg.PinName, EGPD_Input);
+
+			// Before growing: `B X` is a field of `B`, not a pin an Add button
+			// would ever make.
+			if (!Pin)
+			{
+				Pin = SplitInputToFindPin(Node, Arg.PinName);
+				if (Pin)
+				{
+					CollectPositional();
+				}
+			}
 
 			if (!Pin)
 			{
@@ -2675,7 +2815,7 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 						continue;
 					}
 
-					Node->PostEditChange();
+					NotifyNodeOptionChanged(Node, Setting.Property);
 
 					AddInfo(Statement.LineNumber, FString::Printf(
 						TEXT("`%s` is not a pin: it went in as a node option."), *Arg.PinName));
@@ -4010,21 +4150,39 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		// Expose on Spawn pins exist. Applied in the normal order, the other
 		// arguments would arrive before their pins and become "the node has no
 		// pin X" -- an error that would explain nothing.
-		FString ClassValue;
+		const FNodeScribeArg* ClassArg = nullptr;
 		for (const FNodeScribeArg& Arg : Statement.Args)
 		{
 			if (FNodeScribeCatalog::Normalize(Arg.PinName) == TEXT("class"))
 			{
-				ClassValue = Arg.Value;
+				ClassArg = &Arg;
 				break;
 			}
 		}
 
 		// Without a pin name, the first argument is the class: `Create Widget (WBP_X)`.
-		if (ClassValue.IsEmpty() && Statement.Args.Num() > 0 && Statement.Args[0].PinName.IsEmpty())
+		if (!ClassArg && Statement.Args.Num() > 0 && Statement.Args[0].PinName.IsEmpty())
 		{
-			ClassValue = Statement.Args[0].Value;
+			ClassArg = &Statement.Args[0];
 		}
+
+		// The class from a variable or another node: the wire is what makes the
+		// pins exist, so it goes in now. Read as a class name, `$Rock Class`
+		// found no class and every Expose on Spawn value after it was lost.
+		if (ClassArg && ClassArg->bIsReference)
+		{
+			if (UEdGraphPin* ClassPin = Node->GetClassPin())
+			{
+				if (UEdGraphPin* Source = ResolveReference(ClassArg->Value, Statement.LineNumber, ClassPin))
+				{
+					Connect(Source, ClassPin, Statement.LineNumber);
+					ArgsAppliedEarly.Add(ClassArg);
+				}
+			}
+			return Node;
+		}
+
+		const FString ClassValue = ClassArg ? ClassArg->Value : FString();
 
 		if (ClassValue.IsEmpty() || ClassValue.StartsWith(TEXT("?")))
 		{
@@ -4322,6 +4480,20 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 			// Before allocating the pins: the proxy's delegates say which pins
 			// exist, and the proxy is only known after this line.
 			Node->InitializeProxyFromFunction(Lookup.Function);
+			FinalizeNode(Node);
+			return Node;
+		}
+
+		// A function of an interface is called as a message, as the editor's
+		// menu offers it: its Target takes any object, and an object that does
+		// not implement the interface simply does nothing. As a plain call the
+		// Target wants an interface reference, and an Actor variable's wire
+		// was dropped on the way back.
+		if (const UClass* Owner = Lookup.Function->GetOwnerClass();
+			Owner && Owner->HasAnyClassFlags(CLASS_Interface))
+		{
+			UK2Node_Message* Node = AllocateNode<UK2Node_Message>();
+			Node->SetFromFunction(Lookup.Function);
 			FinalizeNode(Node);
 			return Node;
 		}

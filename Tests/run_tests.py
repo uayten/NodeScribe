@@ -103,6 +103,89 @@ Print String (In String = "begin")
         'expects_warning': ['takes its parameters from where it is declared'],
     },
     {
+        # R-017: a split struct input is written with its parent's name, and
+        # pasting it back splits the pin again -- `B X` is not an added pin.
+        'name': 'split_struct_inputs',
+        'text': '''
+event Test
+loc = Get Actor Location
+rot = Get Actor Rotation
+Spawn Actor from Class (Class = /Script/Engine.StaticMeshActor, Spawn Transform Location = $loc, Spawn Transform Rotation = $rot)
+sum = KismetMathLibrary.Add_VectorVector (A = $loc, B X = 2.0, B Z = 3.0)
+Set Actor Location (New Location = $sum)
+''',
+        'expects_in_reading': ['Spawn Transform Location = $', 'B X = 2.0', 'B Z = 3.0'],
+    },
+    {
+        # R-018: `0 Hearts` is a name, not the step `0`; and a Switch on String
+        # gets the outputs its Pin Names option asks for.
+        'name': 'digit_names_and_string_switch',
+        'text': '''
+variable Word : String
+
+event Test
+0 Hearts
+Switch on String (Selection = $Word, Pin Names = '("0.0","1.0")', Has Default Pin = false)
+  0.0:
+    Print String (In String = "zero")
+  1.0:
+    Print String (In String = "one")
+
+event 0 Hearts
+Print String (In String = "no hearts")
+''',
+    },
+    {
+        # R-019: an interface function is a message, whose Target takes any
+        # object. As a plain call the Actor's wire was dropped.
+        'name': 'interface_message',
+        'text': '''
+event Test
+me = Self
+has = GameplayTagAssetInterface.HasMatchingGameplayTag (Target = $me)
+Print String (In String = $has (Boolean -> String))
+''',
+        'expects_in_reading': ['Has Matching Gameplay Tag (Target = $'],
+    },
+    {
+        # A function with a parameter called `Target` writes its self pin as
+        # `self`: two `Target`s both went into the parameter.
+        'name': 'self_beside_parameter_called_target',
+        'text': '''
+event Test
+me = Self
+asc = Get Ability System Component (Actor = $me)
+other = Get Ability System Component (Actor = $me)
+AbilitySystemComponent.BP_ApplyGameplayEffectToTarget (self = $asc, Target = $other)
+''',
+        'expects_in_reading': ['self = $', 'Target = $'],
+    },
+    {
+        # R-020: the class from a variable makes the node's pins from the wire.
+        'name': 'spawn_class_from_variable',
+        'text': '''
+variable Spawn What : StaticMeshActor Class
+
+event Test
+transform = Make Transform
+spawned = Spawn Actor from Class (Class = $Spawn What, Spawn Transform = $transform)
+Destroy Actor (Target = $spawned)
+''',
+        'expects_in_reading': ['Class = $Spawn What'],
+    },
+    {
+        # R-021: a comment's parentheses and a trailing colon are its text.
+        'name': 'comment_with_parentheses',
+        'text': '''
+Comment Set 'IsInAir' (used in state machine)
+Comment Steps:
+
+event Test
+Print String (In String = "c")
+''',
+        'expects_in_reading': ['(used in state machine)', 'Comment Steps:'],
+    },
+    {
         'name': 'types',
         'text': '''
 variable A : Vector
@@ -363,6 +446,14 @@ def round_trip(case):
         if expected not in t1 and expected not in written:
             report.append('the expected warning is missing: %r' % expected)
             report.append('the plugin has to fail out loud here.')
+            return False, report
+
+    # What a fixed point cannot see: a line lost on the first write is lost on
+    # the second too, and T1 == T2 holds.
+    for expected in case.get('expects_in_reading', []):
+        if expected not in t1:
+            report.append('the reading lacks %r:' % expected)
+            report.extend('  ' + l for l in t1.splitlines())
             return False, report
 
     graph_b, error = new_blueprint('NS_%s_b' % name)
@@ -1444,11 +1535,33 @@ def token_budget():
     return not problems, problems + numbers
 
 
+def empty_graph_keeps_header():
+    """An emptied graph still reads with its refPath and the variables.
+
+    Its reading used to be empty: the header came from the first node, and
+    there was none -- the refPath a first write needs went with it.
+    """
+    graph, error = new_blueprint('NS_empty_graph_header')
+    if not graph:
+        return False, [error]
+
+    text = 'variable Kept : Boolean\n\nevent Test\nPrint String (In String = "x")\n'
+    unreal.NodeScribeLibrary.write_graph(graph, text, False)
+    unreal.NodeScribeLibrary.clear_graph(graph)
+    reading = unreal.NodeScribeLibrary.read_graph(graph)
+
+    missing = [m for m in ('# refPath: ', 'variable Kept : Boolean') if m not in reading]
+    if missing:
+        return False, ['the reading of the emptied graph lacks %s:' % ', '.join(missing)] + reading.splitlines()
+    return True, []
+
+
 OTHERS = [
     ('designer_writes_rows', designer_writes_rows),
     ('chain_reaches_function_entry', chain_reaches_function_entry),
     ('replace_swaps_the_graph', replace_swaps_the_graph),
     ('empty_event_is_reused', empty_event_is_reused),
+    ('empty_graph_keeps_header', empty_graph_keeps_header),
     ('insert_into_existing_chain', insert_into_existing_chain),
     ('replace_refuses_lossy_graph', replace_refuses_lossy_graph),
     ('replace_takes_own_break', replace_takes_own_break),

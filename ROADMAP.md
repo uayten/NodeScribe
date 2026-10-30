@@ -4,10 +4,6 @@
 
 ## Em teste
 
-## Em andamento
-
-## A fazer
-
 ### R-017 [ajuste] Pinos de struct divididos em Spawn Actor e Set Color and Opacity
 Ajusta: a leitura e a escrita de `$x.Pin` em struct dividido (Docs/FORMAT.md > When the node has more than one output)
 Esperado: um pino de struct dividido (Split Struct Pin) nesses nodes volta dividido, com os mesmos valores.
@@ -27,3 +23,8 @@ Esperado: um Spawn Actor ou Create Widget cuja classe vem de uma variável volta
 ### R-021 [ajuste] Comentário com parênteses
 Ajusta: Docs/FORMAT.md > Comments
 Esperado: um comentário cujo texto tem uma parte entre parênteses volta com ela.
+
+## Em andamento
+
+## A fazer
+

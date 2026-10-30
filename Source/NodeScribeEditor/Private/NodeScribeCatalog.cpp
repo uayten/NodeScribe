@@ -398,6 +398,35 @@ namespace
 	}
 }
 
+namespace
+{
+	/**
+	 * true when `Function` is a class's implementation of a function of an
+	 * interface it implements. `BossRushPlayer_C.Obter Facção` is that: the
+	 * same call as `BPI_Facção.Obter Facção`, which reaches every implementer.
+	 */
+	bool IsInterfaceImplementationInCatalog(const UClass* Owner, const UFunction* Function)
+	{
+		if (!Owner || !Function || Owner->HasAnyClassFlags(CLASS_Interface))
+		{
+			return false;
+		}
+
+		for (const UClass* Class = Owner; Class; Class = Class->GetSuperClass())
+		{
+			for (const FImplementedInterface& Implemented : Class->Interfaces)
+			{
+				if (Implemented.Class && Implemented.Class->FindFunctionByName(Function->GetFName()))
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+}
+
 FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass* SelfClass, UClass* ContextClass) const
 {
 	EnsureBuilt();
@@ -457,6 +486,14 @@ FNodeScribeLookup FNodeScribeCatalog::FindFunction(const FString& Query, UClass*
 			{
 				continue;
 			}
+		}
+
+		// An implementation is not a second candidate: it tied with its own
+		// interface, and the call became ambiguous in every Blueprint that used
+		// it. Named on purpose (`BossRushPlayer.Obter Facção`), it still resolves.
+		if (OwnerQuery.IsEmpty() && IsInterfaceImplementationInCatalog(Entry.OwnerClass.Get(), Entry.Function.Get()))
+		{
+			continue;
 		}
 
 		const int32 Score = ScoreEntry(Entry, NormalizedQuery, SelfClass, ContextClass);

@@ -71,6 +71,7 @@ output and link to another pin on the way back.
 | Value with both kinds of quotes | warning: there is no escape, copy it by hand |
 | Data node that feeds nobody | note, with each one's name |
 | Event bound to a dispatcher/delegate | warning on reading; red comment on pasting |
+| Interface function called on an interface reference | warning: it comes back as the interface's message |
 | Function entry (`Function Entry`) | warning with the signature: create the function and paste inside it |
 
 Reroutes (the little dots for arranging wires) vanish on the way back -- they
