@@ -52,6 +52,8 @@
 #include "K2Node_ClearDelegate.h"
 #include "K2Node_MacroInstance.h"
 #include "K2Node_RemoveDelegate.h"
+#include "K2Node_AddComponent.h"
+#include "K2Node_CallParentFunction.h"
 #include "K2Node_EnumEquality.h"
 #include "K2Node_EnumInequality.h"
 #include "K2Node_GetArrayItem.h"
@@ -811,6 +813,15 @@ void FNodeScribeReadContext::EmitLine(int32 Indent, const FString& Text)
 
 void FNodeScribeReadContext::AddInfo(const FString& Message)
 {
+	// A node described twice, once as a line and once as a source, says it once.
+	if (Result.Diagnostics.ContainsByPredicate([&Message](const FNodeScribeDiagnostic& Diagnostic)
+		{
+			return Diagnostic.Message == Message;
+		}))
+	{
+		return;
+	}
+
 	Result.Diagnostics.Emplace(ENodeScribeSeverity::Info, 0, Message);
 }
 
@@ -945,6 +956,24 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 	if (Node->IsA<UK2Node_MakeArray>())
 	{
 		return TEXT("Make Array");
+	}
+
+	// A call by its class, but what it adds is a template inside the node, which
+	// the text cannot carry, and the function it calls is not in the catalog.
+	if (Node->IsA<UK2Node_AddComponent>())
+	{
+		OutRoundTripIssue = FString::Printf(
+			TEXT("`%s` adds a component from a template inside the node, which the text does not carry. Recreate this one by hand."),
+			*ShortTitle(Node));
+		return ShortTitle(Node);
+	}
+
+	if (const UK2Node_CallParentFunction* ParentCall = Cast<UK2Node_CallParentFunction>(Node))
+	{
+		if (const UFunction* ParentFunction = ParentCall->GetTargetFunction())
+		{
+			return TEXT("Parent ") + ParentFunction->GetName();
+		}
 	}
 
 	if (const UK2Node_GetArrayItem* ArrayItem = Cast<UK2Node_GetArrayItem>(Node))
@@ -1206,12 +1235,17 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 			Locals.Add(FString::Printf(TEXT("%s : %s"), *Local.VarName.ToString(), *DescribePinType(Local.VarType)));
 		}
 
-		OutRoundTripIssue = FString::Printf(
-			TEXT("`%s` is the function's entry, and it is born together with it -- no line creates it. ")
-			TEXT("Paste this text inside a function with the parameters (%s)%s: the `Function Entry` line finds its entry."),
-			*ShortTitle(Node),
-			Parameters.Num() > 0 ? *FString::Join(Parameters, TEXT(", ")) : TEXT("none"),
-			Locals.Num() > 0 ? *FString::Printf(TEXT(" and the local variables (%s)"), *FString::Join(Locals, TEXT(", "))) : TEXT(""));
+		// A note, not a warning: in its own function the text comes back whole, and
+		// a warning would make `replace` refuse every function there is. It only
+		// matters when pasting somewhere else, and only if there is something to say.
+		if (Parameters.Num() > 0 || Locals.Num() > 0)
+		{
+			AddInfo(FString::Printf(
+				TEXT("`%s` is the function's entry: no line creates it. To paste this text elsewhere, use a function with the parameters (%s)%s."),
+				*ShortTitle(Node),
+				Parameters.Num() > 0 ? *FString::Join(Parameters, TEXT(", ")) : TEXT("none"),
+				Locals.Num() > 0 ? *FString::Printf(TEXT(" and the local variables (%s)"), *FString::Join(Locals, TEXT(", "))) : TEXT("")));
+		}
 
 		return TEXT("Function Entry");
 	}
@@ -2552,8 +2586,11 @@ void FNodeScribeReadContext::Run()
 	{
 		Scope.Remove(Comment);
 
+		// `\r` too: a comment typed on Windows has both, and a lone one still breaks the line.
 		FString Text = Comment->NodeComment;
+		Text.ReplaceInline(TEXT("\r\n"), TEXT(" "));
 		Text.ReplaceInline(TEXT("\n"), TEXT(" "));
+		Text.ReplaceInline(TEXT("\r"), TEXT(" "));
 		Text.TrimStartAndEndInline();
 
 		if (!Text.IsEmpty())

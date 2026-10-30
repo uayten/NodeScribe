@@ -183,18 +183,26 @@ static int32 RemoveDeletableNodes(UEdGraph* Graph, UBlueprint* Blueprint)
 	TArray<UEdGraphNode*> ToRemove;
 	for (UEdGraphNode* Node : Graph->Nodes)
 	{
-		if (!Node || !Node->CanUserDeleteNode())
+		if (!Node)
 		{
 			continue;
 		}
 
+		// Before asking if it can be deleted: an interface function's Return
+		// cannot, and its wires have to go all the same.
 		if (Node->IsA<UK2Node_FunctionResult>() && !bKeptReturn)
 		{
+			// Without its wires: the Entry may lead straight to it, and the `Return`
+			// line only finds a node nothing leads to.
+			Node->BreakAllNodeLinks();
 			bKeptReturn = true;
 			continue;
 		}
 
-		ToRemove.Add(Node);
+		if (Node->CanUserDeleteNode())
+		{
+			ToRemove.Add(Node);
+		}
 	}
 
 	for (UEdGraphNode* Node : ToRemove)

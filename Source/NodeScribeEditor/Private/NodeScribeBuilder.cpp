@@ -55,6 +55,7 @@
 #include "K2Node_ClearDelegate.h"
 #include "K2Node_RemoveDelegate.h"
 #include "K2Node_CallArrayFunction.h"
+#include "K2Node_CallParentFunction.h"
 #include "K2Node_EnumEquality.h"
 #include "K2Node_EnumInequality.h"
 #include "K2Node_GetArrayItem.h"
@@ -4332,6 +4333,20 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 		UK2Node_EnumInequality* Node = AllocateNode<UK2Node_EnumInequality>();
 		FinalizeNode(Node);
 		return Node;
+	}
+
+	// --- Call to the parent function --------------------------------------
+	// By name it would find the override this graph is, and call itself forever.
+	if (Expression.StartsWith(TEXT("Parent "), ESearchCase::IgnoreCase) && Blueprint && Blueprint->ParentClass)
+	{
+		const FString ParentFunctionName = Expression.Mid(7).TrimStartAndEnd();
+		if (UFunction* ParentFunction = Blueprint->ParentClass->FindFunctionByName(FName(*ParentFunctionName)))
+		{
+			UK2Node_CallParentFunction* Node = AllocateNode<UK2Node_CallParentFunction>();
+			Node->SetFromFunction(ParentFunction);
+			FinalizeNode(Node);
+			return Node;
+		}
 	}
 
 	// --- Function Entry --------------------------------------------------

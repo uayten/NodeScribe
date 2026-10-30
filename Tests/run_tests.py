@@ -437,6 +437,17 @@ Branch (Condition = $same)
         'forbids_warning': ['I do not know how to write'],
     },
     {
+        # By name it became a call to the override itself: it compiles, and never
+        # returns at runtime.
+        'name': 'call_to_parent',
+        'text': '''
+event BeginPlay
+Parent ReceiveBeginPlay
+Print String (In String = "after the parent")
+''',
+        'expects_in_reading': ['Parent ReceiveBeginPlay'],
+    },
+    {
         'name': 'declared_hole',
         'text': '''
 event Test
@@ -448,6 +459,13 @@ Spawn Sound 2D (Sound = ?)
 
 
 # ---------------------------------------------------------------------------
+
+
+def comparable(text):
+    """body(), with the variable declarations sorted."""
+    lines = body(text)
+    declared = sorted(l for l in lines if l.startswith('variable '))
+    return declared + [l for l in lines if not l.startswith('variable ')]
 
 
 def body(text):
@@ -1030,6 +1048,16 @@ def function_entry_line_finds_the_entry():
     lines = body(unreal.NodeScribeLibrary.read_graph(graph))
     if len(lines) < 2 or 'first' not in lines[1]:
         return False, ['the second write took the entry from the first chain:'] + lines
+
+    # The entry is no loss: `replace` has to work on a function.
+    replaced = unreal.NodeScribeLibrary.write_graph(
+        graph, 'Function Entry\nPrint String (In String = "third")', True)
+    if '[error]' in replaced:
+        return False, ['replace refused a function:'] + replaced.splitlines()
+
+    text = '\n'.join(body(unreal.NodeScribeLibrary.read_graph(graph)))
+    if 'third' not in text or 'first' in text or 'second' in text:
+        return False, ['replace did not swap the function:', text]
 
     event_graph = unreal.load_object(bp, 'EventGraph')
     refused = unreal.NodeScribeLibrary.write_graph(event_graph, 'Function Entry')
@@ -1642,7 +1670,9 @@ def project_graphs_round_trip():
             second = unreal.NodeScribeLibrary.read_graph(target)
             checked += 1
 
-            if body(first) == body(second):
+            # In any order: a Timeline's variable changes place when its graph is
+            # rewritten, and the order of the declarations means nothing.
+            if comparable(first) == comparable(second):
                 continue
 
             diff = list(difflib.unified_diff(body(first), body(second), 'read', 'pasted and read',
