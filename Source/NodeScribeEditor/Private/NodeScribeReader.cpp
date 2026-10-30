@@ -52,6 +52,9 @@
 #include "K2Node_ClearDelegate.h"
 #include "K2Node_MacroInstance.h"
 #include "K2Node_RemoveDelegate.h"
+#include "K2Node_EnumEquality.h"
+#include "K2Node_EnumInequality.h"
+#include "K2Node_GetArrayItem.h"
 #include "K2Node_MakeArray.h"
 #include "K2Node_Select.h"
 #include "K2Node_Self.h"
@@ -944,6 +947,21 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 		return TEXT("Make Array");
 	}
 
+	if (const UK2Node_GetArrayItem* ArrayItem = Cast<UK2Node_GetArrayItem>(Node))
+	{
+		return ArrayItem->GetResultPin()->PinType.bIsReference ? TEXT("Get Array Item by Ref") : TEXT("Get Array Item");
+	}
+
+	if (Node->IsA<UK2Node_EnumInequality>())
+	{
+		return TEXT("Not Equal Enum");
+	}
+
+	if (Node->IsA<UK2Node_EnumEquality>())
+	{
+		return TEXT("Equal Enum");
+	}
+
 	if (Node->IsA<UK2Node_Self>())
 	{
 		return TEXT("Self");
@@ -1168,7 +1186,7 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 	// A function's entry is not recreated from text: it is born with the
 	// function. What can be done is to state the signature, so whoever reads it
 	// creates the right function and pastes the rest inside it.
-	if (Node->IsA<UK2Node_FunctionEntry>())
+	if (const UK2Node_FunctionEntry* Entry = Cast<UK2Node_FunctionEntry>(Node))
 	{
 		TArray<FString> Parameters;
 		for (UEdGraphPin* Pin : Node->Pins)
@@ -1180,11 +1198,20 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 			}
 		}
 
+		// No line declares a local variable either, and without it `Get X` is
+		// another node, or none.
+		TArray<FString> Locals;
+		for (const FBPVariableDescription& Local : Entry->LocalVariables)
+		{
+			Locals.Add(FString::Printf(TEXT("%s : %s"), *Local.VarName.ToString(), *DescribePinType(Local.VarType)));
+		}
+
 		OutRoundTripIssue = FString::Printf(
 			TEXT("`%s` is the function's entry, and it is born together with it -- no line creates it. ")
-			TEXT("Paste this text inside a function with the parameters (%s): the `Function Entry` line finds its entry."),
+			TEXT("Paste this text inside a function with the parameters (%s)%s: the `Function Entry` line finds its entry."),
 			*ShortTitle(Node),
-			Parameters.Num() > 0 ? *FString::Join(Parameters, TEXT(", ")) : TEXT("none"));
+			Parameters.Num() > 0 ? *FString::Join(Parameters, TEXT(", ")) : TEXT("none"),
+			Locals.Num() > 0 ? *FString::Printf(TEXT(" and the local variables (%s)"), *FString::Join(Locals, TEXT(", "))) : TEXT(""));
 
 		return TEXT("Function Entry");
 	}

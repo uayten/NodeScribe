@@ -54,6 +54,10 @@
 #include "K2Node_CallDelegate.h"
 #include "K2Node_ClearDelegate.h"
 #include "K2Node_RemoveDelegate.h"
+#include "K2Node_CallArrayFunction.h"
+#include "K2Node_EnumEquality.h"
+#include "K2Node_EnumInequality.h"
+#include "K2Node_GetArrayItem.h"
 #include "K2Node_MakeArray.h"
 #include "K2Node_Select.h"
 #include "K2Node_Self.h"
@@ -1021,7 +1025,7 @@ private:
 	void ApplyLiteral(UEdGraphPin* Pin, const FString& Value, int32 Line);
 
 	/**
-	 * An argument of a Make Array, kept until the array has its type.
+	 * An argument of a Make Array or an enum comparison, kept until the node has its type.
 	 *
 	 * The node is born a wildcard. A value written on a wildcard pin is thrown away
 	 * when the type arrives, and the first element linked would set the type: `$self`
@@ -1037,6 +1041,9 @@ private:
 	};
 
 	TArray<FDeferredElement> DeferredElements;
+
+	/** Return nodes already taken by a line, so a second `Return` does not find the same. */
+	TSet<UEdGraphNode*> ClaimedReturns;
 
 	/** Applies what waits on an array that got its consumer; with bFinal, all that is left. */
 	void ApplyDeferredElements(bool bFinal);
@@ -1325,6 +1332,15 @@ private:
 
 	/** Does the property accept a Set coming from Blueprint? */
 	bool IsVariableWritable(const FString& Name) const;
+
+	/** The local variable of this function with that name, if there is one. */
+	FBPVariableDescription* FindLocalVariable(const FString& Name) const;
+
+	/** A parameter of this function, which a `Get X` reads like a local variable. */
+	bool IsFunctionParameter(const FString& Name) const;
+
+	/** Points the node at the variable: a local one needs its function as scope. */
+	void ReferToVariable(FMemberReference& Reference, const FString& Name) const;
 
 	/** Complains about empty pose inputs: an empty pose breaks nothing, it just stands still. */
 	void ReportEmptyPoseInputs();
@@ -1844,8 +1860,61 @@ UClass* FNodeScribeBuildContext::GetSelfClass() const
 	return Blueprint->GeneratedClass ? Blueprint->GeneratedClass.Get() : Blueprint->ParentClass.Get();
 }
 
+FBPVariableDescription* FNodeScribeBuildContext::FindLocalVariable(const FString& Name) const
+{
+	return Blueprint && Graph && !Name.IsEmpty()
+		? FBlueprintEditorUtils::FindLocalVariable(Blueprint, Graph, FName(*Name))
+		: nullptr;
+}
+
+bool FNodeScribeBuildContext::IsFunctionParameter(const FString& Name) const
+{
+	if (!Graph)
+	{
+		return false;
+	}
+
+	for (const UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (Node && Node->IsA<UK2Node_FunctionEntry>())
+		{
+			for (const UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin->Direction == EGPD_Output && !IsExecPin(Pin) && Pin->PinName.ToString() == Name)
+				{
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+void FNodeScribeBuildContext::ReferToVariable(FMemberReference& Reference, const FString& Name) const
+{
+	if (const FBPVariableDescription* Local = FindLocalVariable(Name))
+	{
+		Reference.SetLocalMember(FName(*Name), FBlueprintEditorUtils::GetTopLevelGraph(Graph)->GetName(), Local->VarGuid);
+	}
+	else if (IsFunctionParameter(Name))
+	{
+		// A parameter has no variable description, and so no guid: the name finds it.
+		Reference.SetLocalMember(FName(*Name), FBlueprintEditorUtils::GetTopLevelGraph(Graph)->GetName(), FGuid());
+	}
+	else
+	{
+		Reference.SetSelfMember(FName(*Name));
+	}
+}
+
 bool FNodeScribeBuildContext::IsVariableWritable(const FString& Name) const
 {
+	if (FindLocalVariable(Name) || IsFunctionParameter(Name))
+	{
+		return true;
+	}
+
 	UClass* SelfClass = GetSelfClass();
 	const FProperty* Property = SelfClass ? SelfClass->FindPropertyByName(FName(*Name)) : nullptr;
 
@@ -1858,6 +1927,13 @@ bool FNodeScribeBuildContext::IsBlueprintVariable(const FString& Name) const
 	if (Name.IsEmpty())
 	{
 		return false;
+	}
+
+	// Without this, `Get SkeletalMesh` on a local variable falls through to a
+	// function of a similar name: a plausible wrong node.
+	if (FindLocalVariable(Name) || IsFunctionParameter(Name))
+	{
+		return true;
 	}
 
 	// Looking at the class (and not only at the Blueprint's variable list)
@@ -2566,7 +2642,7 @@ UEdGraphPin* FNodeScribeBuildContext::ResolveBaseReference(const FString& Name, 
 	if (IsBlueprintVariable(Name))
 	{
 		UK2Node_VariableGet* GetNode = AllocateNode<UK2Node_VariableGet>();
-		GetNode->VariableReference.SetSelfMember(FName(*Name));
+		ReferToVariable(GetNode->VariableReference, Name);
 		FinalizeNode(GetNode);
 
 		// The position is left to LayoutDataNodes(): here the node that
@@ -3025,7 +3101,7 @@ void FNodeScribeBuildContext::ApplyArguments(UEdGraphNode* Node, const FNodeScri
 			Pin = PositionalPins[NextPositional++];
 		}
 
-		if (Node->IsA<UK2Node_MakeArray>())
+		if (Node->IsA<UK2Node_MakeArray>() || Node->IsA<UK2Node_EnumEquality>())
 		{
 			DeferredElements.Add({ FPinRef(Pin), Arg.bIsReference, Arg.Value, Statement.LineNumber });
 		}
@@ -3104,7 +3180,7 @@ void FNodeScribeBuildContext::ApplyDeferredElements(bool bFinal)
 		else if (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Wildcard && !Element.Value.StartsWith(TEXT("?")))
 		{
 			AddError(Element.Line, FString::Printf(
-				TEXT("`%s = %s` did not go in: nothing gives this Make Array a type. Link the array to a pin, or link one of its elements."),
+				TEXT("`%s = %s` did not go in: nothing gives this node a type. Link one of its pins."),
 				*Pin->PinName.ToString(), *Element.Value));
 		}
 		else
@@ -3890,6 +3966,19 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 	// --- Return -----------------------------------------------------------
 	if (Normalized == TEXT("return"))
 	{
+		// The Return an emptied function kept: it holds the outputs of the
+		// signature, which the pins this line names, and every caller, depend on.
+		for (UEdGraphNode* Existing : Graph->Nodes)
+		{
+			UK2Node_FunctionResult* Kept = Cast<UK2Node_FunctionResult>(Existing);
+			UEdGraphPin* ExecIn = Kept ? FindFlowInput(Kept) : nullptr;
+			if (ExecIn && ExecIn->LinkedTo.Num() == 0 && !ClaimedReturns.Contains(Kept))
+			{
+				ClaimedReturns.Add(Kept);
+				return Kept;
+			}
+		}
+
 		UK2Node_FunctionResult* Node = AllocateNode<UK2Node_FunctionResult>();
 		FinalizeNode(Node);
 		return Node;
@@ -4206,6 +4295,41 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 	if (Normalized == TEXT("makearray"))
 	{
 		UK2Node_MakeArray* Node = AllocateNode<UK2Node_MakeArray>();
+		FinalizeNode(Node);
+		return Node;
+	}
+
+	// --- Array item, enum comparison --------------------------------------
+	// Their titles have parentheses, which the parser reads as the argument list.
+	if (Normalized == TEXT("getarrayitem") || Normalized == TEXT("getarrayitembyref"))
+	{
+		UK2Node_GetArrayItem* Node = AllocateNode<UK2Node_GetArrayItem>();
+
+		// By reflection, and before the pins exist: SetDesiredReturnType is not
+		// exported by the Engine's module.
+		if (Normalized == TEXT("getarrayitembyref"))
+		{
+			if (const FBoolProperty* ByRef = CastField<FBoolProperty>(
+				UK2Node_GetArrayItem::StaticClass()->FindPropertyByName(TEXT("bReturnByRefDesired"))))
+			{
+				ByRef->SetPropertyValue_InContainer(Node, true);
+			}
+		}
+
+		FinalizeNode(Node);
+		return Node;
+	}
+
+	if (Normalized == TEXT("equalenum"))
+	{
+		UK2Node_EnumEquality* Node = AllocateNode<UK2Node_EnumEquality>();
+		FinalizeNode(Node);
+		return Node;
+	}
+
+	if (Normalized == TEXT("notequalenum"))
+	{
+		UK2Node_EnumInequality* Node = AllocateNode<UK2Node_EnumInequality>();
 		FinalizeNode(Node);
 		return Node;
 	}
@@ -4615,13 +4739,13 @@ UEdGraphNode* FNodeScribeBuildContext::TryCreateSpecialNode(const FNodeScribeSta
 			if (bIsSetter)
 			{
 				UK2Node_VariableSet* Node = AllocateNode<UK2Node_VariableSet>();
-				Node->VariableReference.SetSelfMember(FName(*VariableName));
+				ReferToVariable(Node->VariableReference, VariableName);
 				FinalizeNode(Node);
 				return Node;
 			}
 
 			UK2Node_VariableGet* Node = AllocateNode<UK2Node_VariableGet>();
-			Node->VariableReference.SetSelfMember(FName(*VariableName));
+			ReferToVariable(Node->VariableReference, VariableName);
 			FinalizeNode(Node);
 			return Node;
 		}
@@ -4770,10 +4894,23 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 		// the editor, the one with the "Add pin" button. As a plain call they
 		// are stuck with two inputs, and the reader's `Append (A, B, C)` from a
 		// real graph did not paste back.
-		UK2Node_CallFunction* Node = Lookup.Function->HasMetaData(
-			FBlueprintMetadata::MD_CommutativeAssociativeBinaryOperator)
-			? AllocateNode<UK2Node_CommutativeAssociativeBinaryOperator>()
-			: AllocateNode<UK2Node_CallFunction>();
+		//
+		// The array functions too: a plain call leaves their wildcard pins without
+		// a type, and the link goes in while the compiler refuses the node.
+		UK2Node_CallFunction* Node = nullptr;
+		if (Lookup.Function->HasMetaData(FBlueprintMetadata::MD_CommutativeAssociativeBinaryOperator))
+		{
+			Node = AllocateNode<UK2Node_CommutativeAssociativeBinaryOperator>();
+		}
+		else if (Lookup.Function->HasMetaData(FBlueprintMetadata::MD_ArrayParam))
+		{
+			Node = AllocateNode<UK2Node_CallArrayFunction>();
+		}
+		else
+		{
+			Node = AllocateNode<UK2Node_CallFunction>();
+		}
+
 		Node->SetFromFunction(Lookup.Function);
 		FinalizeNode(Node);
 		return Node;

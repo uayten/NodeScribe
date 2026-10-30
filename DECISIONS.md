@@ -168,6 +168,13 @@ Origin: R-022
 Not chosen: a `compile` tool or parameter -- one more door to forget, for a check every write needs; the cost is the time of a compile per write.
 Affects: NodeScribeLibrary, NodeScribeBuilder (NodeLines), Docs/FORMAT.md, the tool's description
 
+### D-029 Emptying a function keeps one Return
+Decision: `clear_graph` and `replace` leave one Return node in a function, and the first `Return` line finds it.
+Why: that node holds the outputs of the signature. Deleted, they are gone, every caller stops compiling, and no line can bring them back: `Return (Return Value = $x)` finds no pin.
+Origin: R-027
+Not chosen: creating the output pins from the `Return` line -- the text does not say their types, and the pin's real name (`ReturnValue`) differs from the written one.
+Affects: NodeScribeLibrary, NodeScribeBuilder
+
 ## Verified facts
 
 ### F-001 A plain Blueprint factory makes no Designer

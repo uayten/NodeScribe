@@ -497,6 +497,7 @@ Every word the format reserves, in one place.
 | `Cast to Class` | line | dynamic cast |
 | `Make Struct`, `Break Struct` | line | struct nodes |
 | `Make Array` | line | array of its arguments; empty without them |
+| `Get Array Item`, `by Ref`, `Equal Enum`, `Not Equal Enum` | line | array item, enum comparison |
 | `Switch on X` | line | enum, `Int`, `String` or `Name` switch |
 | `EnhancedInputAction Path` | line | Input Action event |
 | `Comment Text` | line | comment box |

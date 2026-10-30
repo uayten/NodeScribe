@@ -411,6 +411,32 @@ Set Enemies (Enemies = $empty)
         'forbids_warning': ['I do not know how to write'],
     },
     {
+        # R-027: a plain call left the array function's pins without a type; the
+        # item and the comparison had titles the parser cuts at the parenthesis.
+        'name': 'array_functions_and_enum_comparison',
+        'text': '''
+variable Enemies : Array of Actor
+variable Points : Array of Vector
+variable Mode : EMovementMode
+
+event Test
+length = KismetArrayLibrary.Array_Length (Target Array = $Enemies)
+item = Get Array Item (Array = $Enemies, Dimension 1 = $length)
+KismetArrayLibrary.Array_Add (Target Array = $Enemies, New Item = $item)
+reference = Get Array Item by Ref (Array = $Points, Dimension 1 = 0)
+found = KismetArrayLibrary.Array_Contains (Target Array = $Points, Item to Find = $reference)
+Print String (In String = $found)
+same = Equal Enum (A = $Mode, B = MOVE_Walking)
+Branch (Condition = $same)
+  true:
+    other = Not Equal Enum (A = $Mode, B = MOVE_Falling)
+    Branch (Condition = $other)
+''',
+        'expects_in_reading': ['Get Array Item (Array = $', 'Get Array Item by Ref (Array = $',
+                               'Equal Enum (A = $Mode', 'Not Equal Enum (A = $Mode'],
+        'forbids_warning': ['I do not know how to write'],
+    },
+    {
         'name': 'declared_hole',
         'text': '''
 event Test
@@ -1633,6 +1659,9 @@ def project_graphs_round_trip():
         # After every graph is back: a write in the loop above compiles too, but
         # with the graphs still to come empty.
         copy_errors = unreal.NodeScribeLibrary.read_compile_errors(unreal.load_asset(copy_path))
+        # The whole path first: a message names the object, and with the copy's
+        # folder in it, an error the original has too would count as new.
+        copy_errors = copy_errors.replace('%s.%s' % (copy_path, copy_name), '%s.%s' % (source, name))
         new_errors = set(copy_errors.replace(copy_name, name).splitlines()) - original_errors
         if new_errors:
             warned = any(label.startswith(name + ':') for label in declared)

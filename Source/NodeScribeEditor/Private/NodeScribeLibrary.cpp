@@ -20,6 +20,7 @@
 #include "HAL/FileManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "K2Node_FunctionResult.h"
 #include "Kismet2/CompilerResultsLog.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/FileHelper.h"
@@ -175,13 +176,25 @@ namespace
  */
 static int32 RemoveDeletableNodes(UEdGraph* Graph, UBlueprint* Blueprint)
 {
+	// One Return stays: it holds the outputs of the function's signature. Without
+	// it they are gone, the callers stop compiling, and no line can bring them back.
+	bool bKeptReturn = false;
+
 	TArray<UEdGraphNode*> ToRemove;
 	for (UEdGraphNode* Node : Graph->Nodes)
 	{
-		if (Node && Node->CanUserDeleteNode())
+		if (!Node || !Node->CanUserDeleteNode())
 		{
-			ToRemove.Add(Node);
+			continue;
 		}
+
+		if (Node->IsA<UK2Node_FunctionResult>() && !bKeptReturn)
+		{
+			bKeptReturn = true;
+			continue;
+		}
+
+		ToRemove.Add(Node);
 	}
 
 	for (UEdGraphNode* Node : ToRemove)
