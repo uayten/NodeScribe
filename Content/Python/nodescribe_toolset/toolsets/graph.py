@@ -310,10 +310,12 @@ class NodeScribeTools(unreal.ToolsetDefinition):
 
         Without a topic, the core: call once per session, before writing or
         interpreting text for the first time. A topic is read only when the
-        task touches it: `animgraph` (AnimGraph, state machines), `designer`
+        task touches it: `nodes` (dispatchers, Create Widget, Spawn Actor,
+        Input Action events, ability tasks, Play Montage), `animgraph`
+        (AnimGraph, state machines), `designer`
         (a Widget Blueprint's `designer` section), `behavior-tree`,
         `input-mapping`, `sheet` (components and instanced objects in
-        write_object), and `reading` (anchors, conversions and warnings in a
+        write_object), and `reading` (conversions and warnings in a
         reading; read it before `replace`).
         """
         return unreal.NodeScribeLibrary.get_format_docs(topic or "")

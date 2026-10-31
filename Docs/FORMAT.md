@@ -16,17 +16,14 @@ each rule is the way it is: [design.md](design.md) -- not needed to write text.
 - [Arguments](#arguments)
 - [When two nodes share a name](#when-two-nodes-share-a-name)
 - [Branches (Branch, loops)](#branches-branch-loops)
+- [Chains that meet](#chains-that-meet)
 - [Switch](#switch)
 - [Events](#events)
-- [Input Action events](#input-action-events)
-- [Dispatchers](#dispatchers)
 - [Select](#select)
 - [Make Array](#make-array)
 - [Cast](#cast)
 - [Variables](#variables)
 - [Structs](#structs)
-- [Subsystems](#subsystems)
-- [Creating widgets and spawning actors](#creating-widgets-and-spawning-actors)
 - [Standard macros](#standard-macros)
 - [Other names the plugin knows](#other-names-the-plugin-knows)
 - [Holes: what the plugin does **not** decide for you](#holes-what-the-plugin-does-not-decide-for-you)
@@ -45,12 +42,13 @@ returns one, `get_format_docs()` returns this core.
 
 | topic | file | read it when |
 |---|---|---|
+| `nodes` | [format/nodes.md](format/nodes.md) | the graph uses Input Action events, dispatchers, subsystems, Create Widget, Spawn Actor, or a node that waits (async actions, ability tasks, `Play Montage`) |
 | `animgraph` | [format/animgraph.md](format/animgraph.md) | the graph is an Animation Blueprint's AnimGraph, a state machine or a transition rule |
 | `behavior-tree` | [format/behavior-tree.md](format/behavior-tree.md) | reading or writing a Behavior Tree with `read_object` / `write_object` |
 | `designer` | [format/designer.md](format/designer.md) | the `designer` section of a Widget Blueprint |
 | `input-mapping` | [format/input-mapping.md](format/input-mapping.md) | the `mappings` section of an Input Mapping Context |
 | `sheet` | [format/sheet.md](format/sheet.md) | adding or removing a component, or an array of instanced objects (a Gameplay Effect's `Components`) in `read_object` / `write_object` |
-| `reading` | [format/reading.md](format/reading.md) | a reading has `# anchor`, `(A -> B)` conversions or warnings, or before `replace` |
+| `reading` | [format/reading.md](format/reading.md) | a reading has `(A -> B)` conversions or warnings, or before `replace` |
 
 ## The basics
 
@@ -169,6 +167,31 @@ Labels: `true`/`then`, `false`/`else`, `loop body`/`loop`, `completed`. Any
 other name is compared with the output pin's name. A node with several
 execution outputs and no label stops the chain there.
 
+## Chains that meet
+
+A node has one line. A chain that reaches a node written elsewhere, above or
+below, says so with `->`:
+
+```
+Branch (Condition = $bOn)
+  true:
+    Print String (In String = "turned on")
+    Refresh Screen  # anchor 1
+  false:
+    -> anchor 1
+```
+
+`# anchor N` at the end of a node line is the one comment that means something:
+it names that node. `-> anchor N` links the chain to it, and the chain ends
+there. `through Pin` enters by another input, as the `Reset` of a Do Once:
+
+```
+Do Once
+  completed:
+    -> anchor 2 through Reset
+Do Once  # anchor 2
+```
+
 ## Switch
 
 ```
@@ -220,33 +243,6 @@ Print String (In String = $key.Selected Key Key)
 
 `of` separates the dispatcher from the variable that exposes it. A variable or
 dispatcher that does not exist is answered with the ones that do.
-
-## Input Action events
-
-```
-EnhancedInputAction /Game/MyGame/Player/Inputs/IA_Attack.IA_Attack
-  Started:
-    Print String (In String = "attacked")
-```
-
-The labels are the triggers: `Started`, `Triggered`, `Completed`, `Canceled`,
-`Ongoing`. The short name (`IA_Attack`) works once the asset is loaded; the
-full path always does.
-
-## Dispatchers
-
-```
-Call OnHealthChanged (New Health = $health)
-Bind OnHealthChanged
-Unbind OnHealthChanged
-Clear OnHealthChanged
-```
-
-Without `Target`, the dispatcher is this Blueprint's; with `Target = $obj`, it
-is that object's. The event bound with `Event = $done` may be declared further
-down (`done = event Done`); declaring no parameters, it takes the dispatcher's.
-For a dispatcher's **event**, see
-`event X of Variable`.
 
 ## Select
 
@@ -314,26 +310,6 @@ struct node if the struct exists -- `Make Literal Int` stays the function.
 functions instead of the generic node; there the input pin is the function's
 parameter (`In Vec`, not `Vector`), and the positional form works on both.
 
-## Subsystems
-
-```
-settings = Get EnhancedInputLocalPlayerSubsystem (PlayerController = $pc)
-```
-
-LocalPlayer subsystems ask for a PlayerController; Engine ones ask for nothing.
-
-## Creating widgets and spawning actors
-
-```
-row = Create Widget (Class = WBP_RemapRow, Owning Player = $pc, Input Name = $name)
-Spawn Actor from Class (Class = BP_Boss, Spawn Transform = $t)
-```
-
-Also `Construct Object from Class`. The *Expose on Spawn* pins only exist once
-the class is set; the plugin applies `Class` first, so the arguments go in any
-order. `Class = $Rock Class` takes them from the variable's class. Without
-`Class`, the node goes in without those pins, with a warning.
-
 ## Standard macros
 
 ```
@@ -349,18 +325,6 @@ Also: `Do Once`, `Flip Flop`, `Gate`, `While Loop`, `Multi Gate`, `Is Valid`,
 
 `Return` is a function graph's return node. `To Text` converts any value into
 Text. `Self` is the reference to this Blueprint.
-
-An **async action** (`UBlueprintAsyncActionBase`: one execution pin per event)
-goes in by the name shown in the graph, each output an indented label; the pin
-that continues right away is `then`:
-
-```
-Wait For Any Controller Changes
-  On Connected:
-    Print String (In String = "connected")
-  On Disconnected:
-    Print String (In String = "dropped")
-```
 
 ## Holes: what the plugin does **not** decide for you
 
@@ -452,7 +416,7 @@ after Branch (Condition = $bOn):
 ```
 
 `after` is not indented. Without `replace`: it inserts into the graph that is
-there. If an `after` matches no node, or more than one, the whole write is
+there. A `-> anchor N` only finds an `# anchor N` of the same text. If an `after` matches no node, or more than one, the whole write is
 refused and nothing changes. If the block ends in a node with several outputs,
 whatever came next is left unlinked, with an error.
 
@@ -467,6 +431,7 @@ Nothing fails silently:
 | Node name not found | **red** comment in the graph with the original line |
 | Event that already exists in the graph, with a wire | red comment; nothing is created or changed |
 | `after` that matches no node, or several | error; the whole write is refused |
+| `-> anchor N` with no such anchor, input or output to leave from | error on that line; the link does not go in |
 | Ambiguous name | red comment listing the candidates, none chosen |
 | Nonexistent pin | error in the panel listing the pins the node really has |
 | `$something` that does not exist | error in the panel |
@@ -500,6 +465,8 @@ Every word the format reserves, in one place.
 | `Get Array Item`, `by Ref`, `Equal Enum`, `Not Equal Enum` | line | array item, enum comparison |
 | `Parent Function` | line | call to the parent's function |
 | `Switch on X` | line | enum, `Int`, `String` or `Name` switch |
+| `# anchor N` | end of a node line | names the node for a link |
+| `-> anchor N [through Pin]` | line | links the chain to that node, by that input |
 | `EnhancedInputAction Path` | line | Input Action event |
 | `Comment Text` | line | comment box |
 | `after Line:` | top level | inserts the block under it after the node that reads as `Line` |

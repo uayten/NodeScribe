@@ -293,6 +293,25 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 
 		Line = StripComment(Line);
 
+		// The one comment with a meaning: the end a `-> anchor N` lands on. Any
+		// other comment stays what it is.
+		int32 ExecAnchor = 0;
+		{
+			FString Comment = Original.Mid(Line.Len()).TrimStartAndEnd();
+			if (Comment.RemoveFromStart(TEXT("#")))
+			{
+				Comment.TrimStartInline();
+				if (Comment.RemoveFromStart(TEXT("anchor "), ESearchCase::IgnoreCase))
+				{
+					Comment.TrimStartAndEndInline();
+					if (Comment.IsNumeric() && !Comment.Contains(TEXT(".")) && !Comment.Contains(TEXT("-")))
+					{
+						ExecAnchor = FCString::Atoi(*Comment);
+					}
+				}
+			}
+		}
+
 		// Markdown code fences show up when a chat answer is copied.
 		{
 			FString Probe = Line;
@@ -369,6 +388,41 @@ TArray<FNodeScribeStatement> FNodeScribeParser::Parse(const FString& Text, TArra
 		Statement.LineNumber = LineNumber;
 		Statement.Indent = Indent;
 		Statement.RawLine = Original.TrimStartAndEnd();
+		Statement.ExecAnchor = ExecAnchor;
+
+		// `-> anchor 3 through Reset`: where the chain goes when the next node
+		// already has a line. No node line starts with an arrow.
+		if (Line.StartsWith(TEXT("->")))
+		{
+			FString Rest = Line.RightChop(2).TrimStartAndEnd();
+			FString Number = Rest;
+			FString PinName;
+
+			const bool bHasKeyword = Rest.RemoveFromStart(TEXT("anchor "), ESearchCase::IgnoreCase);
+			if (bHasKeyword)
+			{
+				Number = Rest.TrimStartAndEnd();
+				if (Number.Split(TEXT(" through "), &Number, &PinName, ESearchCase::IgnoreCase))
+				{
+					Number.TrimEndInline();
+					PinName.TrimStartAndEndInline();
+				}
+			}
+
+			const int32 Parsed = bHasKeyword && Number.IsNumeric() ? FCString::Atoi(*Number) : 0;
+			if (Parsed <= 0)
+			{
+				OutDiagnostics.Emplace(ENodeScribeSeverity::Error, LineNumber, FString::Printf(
+					TEXT("`%s` is not a link. Write `-> anchor N`, or `-> anchor N through Pin`."), *Statement.RawLine));
+				continue;
+			}
+
+			Statement.bIsExecLink = true;
+			Statement.LinkAnchor = Parsed;
+			Statement.LinkPin = PinName;
+			Statements.Add(MoveTemp(Statement));
+			continue;
+		}
 
 		// Variable declaration: `variable Health : Float = 100`.
 		//

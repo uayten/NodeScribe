@@ -1,10 +1,16 @@
 #include "NodeScribeCatalog.h"
 
 #include "NodeScribeTypes.h"
+#include "EdGraph/EdGraph.h"
 #include "Engine/Blueprint.h"
+#include "GameplayTask.h"
+#include "K2Node_AsyncAction.h"
+#include "K2Node_BaseAsyncTask.h"
+#include "K2Node_LatentGameplayTaskCall.h"
 #include "Kismet/BlueprintAsyncActionBase.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "UObject/Class.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 
 namespace
@@ -48,7 +54,8 @@ namespace
 		// whole plugin built on `UBlueprintAsyncActionBase` out of the catalog,
 		// and none of its graphs came back pasteable.
 		if (Function->HasMetaData(TEXT("BlueprintInternalUseOnly"))
-			&& !FNodeScribeCatalog::IsAsyncActionFactory(Function))
+			&& !FNodeScribeCatalog::IsAsyncActionFactory(Function)
+			&& !FNodeScribeCatalog::IsGameplayTaskFactory(Function))
 		{
 			return false;
 		}
@@ -217,6 +224,98 @@ bool FNodeScribeCatalog::IsAsyncActionFactory(const UFunction* Function)
 	return true;
 }
 
+bool FNodeScribeCatalog::IsGameplayTaskFactory(const UFunction* Function)
+{
+	if (!Function || !Function->HasAnyFunctionFlags(FUNC_Static))
+	{
+		return false;
+	}
+
+	const FObjectProperty* ReturnProperty = CastField<FObjectProperty>(Function->GetReturnProperty());
+	const UClass* Owner = Function->GetOwnerClass();
+
+	return ReturnProperty && ReturnProperty->PropertyClass
+		&& ReturnProperty->PropertyClass->IsChildOf(UGameplayTask::StaticClass())
+		&& Owner && Owner->IsChildOf(UGameplayTask::StaticClass())
+		&& !Owner->HasAnyClassFlags(CLASS_Abstract);
+}
+
+namespace
+{
+	/**
+	 * Never instantiated: it exists to reach the one protected static that says
+	 * whether a task has a node of its own.
+	 */
+	class FNodeScribeTaskCallAccess : public UK2Node_LatentGameplayTaskCall
+	{
+	public:
+		static bool HasDedicatedNode(TSubclassOf<UGameplayTask> TaskClass)
+		{
+			return HasDedicatedNodeClass(TaskClass);
+		}
+	};
+
+	/**
+	 * The factory a node class fixes in its constructor, read by reflection since
+	 * the field is protected. GetFactoryFunction would do, but it logs an error
+	 * for every class that fixes none.
+	 */
+	UClass* GetFixedFactoryClass(const UClass* NodeClass)
+	{
+		const FObjectProperty* Property = FindFProperty<FObjectProperty>(UK2Node_BaseAsyncTask::StaticClass(), TEXT("ProxyFactoryClass"));
+		const UObject* Defaults = NodeClass ? NodeClass->GetDefaultObject() : nullptr;
+
+		return Property && Defaults
+			? Cast<UClass>(Property->GetObjectPropertyValue_InContainer(Defaults))
+			: nullptr;
+	}
+}
+
+UClass* FNodeScribeCatalog::FindAsyncNodeClass(const UFunction* Function)
+{
+	if (IsAsyncActionFactory(Function))
+	{
+		return UK2Node_AsyncAction::StaticClass();
+	}
+
+	if (!IsGameplayTaskFactory(Function))
+	{
+		return nullptr;
+	}
+
+	// By path: the ability tasks and their node belong to a plugin NodeScribe
+	// does not require.
+	const UClass* AbilityTask = FindObject<UClass>(nullptr, TEXT("/Script/GameplayAbilities.AbilityTask"));
+	if (AbilityTask && Function->GetOwnerClass()->IsChildOf(AbilityTask))
+	{
+		return FindObject<UClass>(nullptr, TEXT("/Script/GameplayAbilitiesEditor.K2Node_LatentAbilityCall"));
+	}
+
+	return FNodeScribeTaskCallAccess::HasDedicatedNode(Function->GetOwnerClass())
+		? nullptr
+		: UK2Node_LatentGameplayTaskCall::StaticClass();
+}
+
+bool FNodeScribeCatalog::IsFixedAsyncNodeClass(const UClass* NodeClass)
+{
+	return NodeClass && NodeClass->IsChildOf(UK2Node_BaseAsyncTask::StaticClass())
+		&& !NodeClass->HasAnyClassFlags(CLASS_Abstract)
+		&& GetFixedFactoryClass(NodeClass) != nullptr;
+}
+
+bool FNodeScribeCatalog::IsShownAs(const UFunction* Function, const FString& Name)
+{
+	return Function && Normalize(Function->GetDisplayNameText().ToString()) == Normalize(Name);
+}
+
+UClass* FNodeScribeCatalog::FindFixedAsyncNode(const FString& Title) const
+{
+	EnsureBuilt();
+
+	const TWeakObjectPtr<UClass>* Found = FixedAsyncNodes.Find(Normalize(Title));
+	return Found ? Found->Get() : nullptr;
+}
+
 FString FNodeScribeCatalog::StripEventPrefix(const FString& FunctionName)
 {
 	if (FunctionName.StartsWith(TEXT("Receive"), ESearchCase::CaseSensitive))
@@ -235,6 +334,7 @@ FString FNodeScribeCatalog::StripEventPrefix(const FString& FunctionName)
 void FNodeScribeCatalog::Invalidate()
 {
 	Entries.Reset();
+	FixedAsyncNodes.Reset();
 	bBuilt = false;
 }
 
@@ -252,6 +352,9 @@ void FNodeScribeCatalog::Build() const
 
 	Entries.Reset();
 	Entries.Reserve(32768);
+	FixedAsyncNodes.Reset();
+
+	UEdGraph* TitleGraph = nullptr;
 
 	for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
 	{
@@ -259,6 +362,31 @@ void FNodeScribeCatalog::Build() const
 		if (!IsUsableClass(Class))
 		{
 			continue;
+		}
+
+		if (IsFixedAsyncNodeClass(Class))
+		{
+			// A throwaway node in a throwaway Blueprint: the base class's title
+			// resolves the factory through the node's Blueprint, and a node without
+			// one brings the editor down.
+			if (!TitleGraph)
+			{
+				TitleGraph = NewObject<UEdGraph>(NewObject<UBlueprint>(GetTransientPackage(), NAME_None, RF_Transient), NAME_None, RF_Transient);
+			}
+
+			const UEdGraphNode* Template = NewObject<UEdGraphNode>(TitleGraph, Class, NAME_None, RF_Transient);
+			const FString Title = Normalize(Template->GetNodeTitle(ENodeTitleType::ListView).ToString());
+
+			// Two classes with one title are neither: it stays, empty, so the name
+			// answers as not found instead of with whichever came first.
+			if (FixedAsyncNodes.Contains(Title))
+			{
+				FixedAsyncNodes[Title] = nullptr;
+			}
+			else
+			{
+				FixedAsyncNodes.Add(Title, Class);
+			}
 		}
 
 		const bool bIsLibrary = Class->IsChildOf(UBlueprintFunctionLibrary::StaticClass());
@@ -276,6 +404,7 @@ void FNodeScribeCatalog::Build() const
 			Entry.Function = Function;
 			Entry.OwnerClass = Class;
 			Entry.bIsLibrary = bIsLibrary;
+			Entry.bIsTaskFactory = IsGameplayTaskFactory(Function);
 
 			const FString RawName = Function->GetName();
 			Entry.NormalizedName = Normalize(StripEnginePrefix(RawName));
@@ -323,6 +452,11 @@ int32 FNodeScribeCatalog::ScoreEntry(const FEntry& Entry, const FString& Normali
 		Score = 200;
 	}
 	else
+	{
+		return 0;
+	}
+
+	if (Entry.bIsTaskFactory && Score < 900)
 	{
 		return 0;
 	}

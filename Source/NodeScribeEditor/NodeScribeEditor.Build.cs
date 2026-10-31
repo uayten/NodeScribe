@@ -55,7 +55,12 @@ public class NodeScribeEditor : ModuleRules
 			"AssetRegistry",
 			// Components: added and removed through the subsystem behind the
 			// Components panel, so its rules come along.
-			"SubobjectDataInterface"
+			"SubobjectDataInterface",
+			// Gameplay tasks: which node a task's factory becomes. The ability tasks'
+			// node comes from the GAS plugin and is looked up by path, so a project
+			// without GAS still loads NodeScribe.
+			"GameplayTasks",
+			"GameplayTasksEditor"
 		});
 	}
 }

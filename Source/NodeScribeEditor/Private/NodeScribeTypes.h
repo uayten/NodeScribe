@@ -93,6 +93,18 @@ struct FNodeScribeStatement
 	 */
 	bool bIsAnchor = false;
 
+	/**
+	 * true when the line is `-> anchor N [through Pin]`: the chain goes on into a
+	 * node that has its own line. LinkAnchor is N, LinkPin the input it enters
+	 * through (empty = the main one).
+	 */
+	bool bIsExecLink = false;
+	int32 LinkAnchor = 0;
+	FString LinkPin;
+
+	/** N of a node line ending in `# anchor N`; 0 when it has none. */
+	int32 ExecAnchor = 0;
+
 	/** Value after the `=`, if any. Empty = the type's default. */
 	FString VariableDefault;
 

@@ -188,6 +188,19 @@ Why: `replace` refuses a graph with a warning, and the suite counts a difference
 Origin: R-031
 Affects: NodeScribeReader, Docs/format/reading.md, Tests/run_tests.py
 
+### D-032 Chains that meet are `# anchor N` and `-> anchor N [through Pin]`
+Decision: a line ending in `# anchor N` names its node, and `-> anchor N` links the chain to it, by the main input or the one after `through`. Links are resolved at the end of the text. The reading writes them, and they no longer warn.
+Why: the reading already wrote both ends as comments, and the wire was all that was missing. A link that fails is an error on its line.
+Origin: R-033
+Not chosen: `$names`, which belong to data outputs; a comment that makes the wire, which nobody could delete safely.
+Affects: NodeScribeParser, NodeScribeBuilder, NodeScribeReader, Docs/FORMAT.md, Docs/format/reading.md
+
+### D-033 Tasks become the node the editor's menu places, found without linking GAS
+Decision: a gameplay task's factory enters the catalog, by its exact name only, and becomes `UK2Node_LatentAbilityCall` (found by path) or `UK2Node_LatentGameplayTaskCall`. A node class that fixes its own factory (`Play Montage`, `AI MoveTo`) goes by its title, found by iterating the classes. Unknown dedicated nodes are a red comment.
+Why: a hard dependency would force GAS on every project with the plugin. As a prefix, `Play Montage` would resolve to `PlayMontageAndWait`.
+Origin: R-032
+Affects: NodeScribeCatalog, NodeScribeBuilder, NodeScribeReader, NodeScribeEditor.Build.cs, Docs/format/nodes.md
+
 ## Verified facts
 
 ### F-001 A plain Blueprint factory makes no Designer

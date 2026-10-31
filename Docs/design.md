@@ -44,6 +44,29 @@ comment, an empty pin or a refusal costs one look.
 - **No label, the chain stops.** Choosing one of several execution outputs for
   the writer would be guessing.
 
+## Chains that meet
+
+- **`# anchor N` stays a comment on the line, and `->` is a line of its own.**
+  The reading already wrote both ends, so a person who has seen one reading
+  needs nothing new, and a line that names no link still pastes without one. A
+  `-> anchor N` has to be a statement: a comment that made a wire would be a
+  comment nobody could delete safely.
+- **Numbers and not `$names`.** A name belongs to a data output, and a node that
+  only has execution has none. A name on the line would also read as a value.
+- **Linked at the end of the text.** A side input may name a line further down,
+  and forcing the order would make the text read in a different order from the
+  graph (D-032).
+- **A link that cannot land is an error, not a cut chain.** A cut chain compiles,
+  and the branch simply never runs.
+
+## Nodes that wait
+
+- **A task's name only counts whole.** As a prefix, `Play Montage` would become
+  `Play Montage and Wait`, which compiles and is a different node, and the tasks'
+  hundreds of names would shift lines that resolve today.
+- **The ability task's node is found by path, not linked.** A hard dependency
+  would make every project using NodeScribe enable GAS (D-033).
+
 ## Events
 
 - **The yellow warning for an Engine event the class lacks**: a Custom Event
@@ -133,6 +156,6 @@ comment, an empty pin or a refusal costs one look.
   before its first node: half an insertion is a graph nobody wrote.
 - **The colon is required** so that no line that worked before changes meaning:
   a node line never ends in `:`, so a function called "After X" stays a function.
-- **Insertion and not `replace` for graphs that reconverge.** The format only
-  describes trees, so a graph where two chains land on the same node can never
-  be rewritten whole. An insertion leaves those wires alone.
+- **Insertion leaves the wires around it alone**, so a small change does not
+  depend on the whole graph coming back. An `# anchor N` counts only in the text
+  that has it: a number from another reading could name another node.

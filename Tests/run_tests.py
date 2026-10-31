@@ -455,6 +455,73 @@ Spawn Sound 2D (Sound = ?)
 ''',
         'expects_warning': ['left empty, waiting'],
     },
+    {
+        # Born without cases, and only the linked ones come out: `3:` has to make
+        # 1, 2 and 3 for the label to mean the same.
+        'name': 'int_switch_grows_cases',
+        'text': '''
+variable Which : Integer
+
+event Test
+Switch on Int (Selection = $Which, Start Index = 1, Has Default Pin = false)
+  1:
+    Print String (In String = "one")
+  3:
+    Print String (In String = "three")
+''',
+        'expects_in_reading': ['1:', '3:', 'three'],
+    },
+    {
+        # The reading only writes a link it found on a wire, so a link lost on the
+        # first write fails `expects_in_reading` even though T1 == T2 would hold.
+        'name': 'chains_reconverge',
+        'text': '''
+variable bOn : Boolean
+
+event Test
+Branch (Condition = $bOn)
+  true:
+    Print String (In String = "turned on")
+    Print String (In String = "both")  # anchor 1
+  false:
+    -> anchor 1
+''',
+        'expects_in_reading': ['# anchor 1', '-> anchor 1'],
+        'forbids_warning': ['[warning]', '[error]'],
+    },
+    {
+        'name': 'chain_comes_back',
+        'text': '''
+variable bAgain : Boolean
+
+event Test
+Print String (In String = "top")  # anchor 1
+Branch (Condition = $bAgain)
+  true:
+    -> anchor 1
+''',
+        'expects_in_reading': ['# anchor 1', '-> anchor 1'],
+        'forbids_warning': ['[warning]', '[error]'],
+    },
+    {
+        # The anchor comes after the link: a side input may name a later line.
+        'name': 'side_input_links',
+        'text': '''
+variable bOn : Boolean
+
+event Test
+Branch (Condition = $bOn)
+  true:
+    Do Once
+      completed:
+        Print String (In String = "first")
+        -> anchor 1 through Reset
+  false:
+    Do Once  # anchor 1
+''',
+        'expects_in_reading': ['# anchor 1', '-> anchor 1 through Reset'],
+        'forbids_warning': ['[warning]', '[error]'],
+    },
 ]
 
 
@@ -689,6 +756,98 @@ def replace_refuses_lossy_graph():
         return False, problems
 
     return True, []
+
+
+def bad_links_fail_out_loud():
+    """A link that cannot land is an error on its line, never a chain cut quietly."""
+    cases = [
+        ('no such anchor', 'event Test\nPrint String (In String = "a")\n-> anchor 7\n', 'anchor 7'),
+        ('no such pin', 'event Test\nDo Once  # anchor 1\n  completed:\n    -> anchor 1 through Nope\n', 'Nope'),
+        ('nothing to leave from', 'event Test\nBranch\n-> anchor 1\nPrint String  # anchor 1\n', 'no execution output'),
+        ('two lines, one anchor', 'event Test\nPrint String  # anchor 1\nDelay  # anchor 1\n', 'two lines'),
+        ('not a link', 'event Test\n-> somewhere\n', 'not a link'),
+    ]
+
+    problems = []
+    for index, (label, text, expected) in enumerate(cases):
+        graph, error = new_blueprint('NS_bad_link_%d' % index)
+        if not graph:
+            return False, [error]
+        report = unreal.NodeScribeLibrary.write_graph(graph, text)
+        if '[error]' not in report or expected not in report:
+            problems.append('%s: expected an error with %r, and the return was:' % (label, expected))
+            problems.extend('  ' + l for l in report.splitlines())
+
+    return not problems, problems
+
+
+def new_ability(name):
+    path = '%s/%s' % (DESTINATION, name)
+    report = unreal.NodeScribeLibrary.create_asset(path, 'GameplayAbility', '')
+    if report.startswith('[error]'):
+        return None, report
+
+    bp = unreal.load_asset(path)
+    header = unreal.NodeScribeLibrary.read_object(bp, '').splitlines()
+    graphs = next((l[len('# graphs: '):].split(', ') for l in header if l.startswith('# graphs: ')), [])
+    graph = unreal.load_object(None, '%s.%s:%s' % (path, name, graphs[0])) if graphs else None
+    if not graph:
+        return None, 'could not find a graph in %s' % path
+    return graph, ''
+
+
+def tasks_come_back():
+    """Play Montage and the ability tasks return as the same nodes, wired and compiling."""
+    text = '''
+variable Mesh : Skeletal Mesh Component
+
+event ActivateAbility
+Wait Input Release (Test Already Released = true)
+  On Release:
+    Play Montage (In Skeletal Mesh Component = $Mesh, Starting Position = 0.5)
+      On Completed:
+        Print String (In String = "montage done")
+  then:
+    PlayMontageAndWait (Task Instance Name = "Swing", Rate = 2.0)
+      On Completed:
+        Print String (In String = "task done")
+'''
+    first, error = new_ability('NS_task_a')
+    if not first:
+        return False, [error]
+    written = unreal.NodeScribeLibrary.write_graph(first, text)
+    t1 = unreal.NodeScribeLibrary.read_graph(first)
+
+    second, error = new_ability('NS_task_b')
+    if not second:
+        return False, [error]
+    written_b = unreal.NodeScribeLibrary.write_graph(second, t1)
+    t2 = unreal.NodeScribeLibrary.read_graph(second)
+
+    problems = []
+    for label, output in (('first', written), ('second', written_b)):
+        if '[error]' in output:
+            problems.append('the %s write complained:' % label)
+            problems.extend('  ' + l for l in output.splitlines())
+    for expected in ('Play Montage (', 'PlayMontageAndWait (', 'On Release:', '"montage done"', '"task done"'):
+        if expected not in t1:
+            problems.append('the reading lacks %r' % expected)
+    if '[warning]' in t1 or 'logic of its own' in t1:
+        problems.append('the reading warned about a node that comes back')
+    if body(t1) != body(t2):
+        problems.extend(difflib.unified_diff(body(t1), body(t2), 'T1', 'T2', lineterm='', n=2))
+
+    # An ability task outside an ability would compile into nothing useful.
+    outside, error = new_blueprint('NS_task_outside')
+    if not outside:
+        return False, [error]
+    report = unreal.NodeScribeLibrary.write_graph(outside, 'event Test\nWait Input Release\n')
+    if 'cannot go in this graph' not in report:
+        problems.append('an ability task in an Actor went in, and the return was: %s' % report)
+
+    if problems:
+        problems.extend(['', '--- T1 ---'] + t1.splitlines())
+    return not problems, problems
 
 
 def sheet_round_trip_changes_nothing():
@@ -1847,6 +2006,8 @@ OTHERS = [
     ('insert_into_existing_chain', insert_into_existing_chain),
     ('replace_refuses_lossy_graph', replace_refuses_lossy_graph),
     ('replace_takes_own_break', replace_takes_own_break),
+    ('bad_links_fail_out_loud', bad_links_fail_out_loud),
+    ('tasks_come_back', tasks_come_back),
     ('sheet_round_trip_changes_nothing', sheet_round_trip_changes_nothing),
     ('state_machine_round_trip', state_machine_round_trip),
     ('blendspace_gets_grid', blendspace_gets_grid),

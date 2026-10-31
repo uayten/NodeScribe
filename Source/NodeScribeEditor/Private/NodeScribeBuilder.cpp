@@ -33,6 +33,7 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "K2Node_AsyncAction.h"
+#include "K2Node_BaseAsyncTask.h"
 #include "K2Node_BreakStruct.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_ComponentBoundEvent.h"
@@ -900,6 +901,36 @@ private:
 
 	/** The node each `after` line found, by line number. */
 	TMap<int32, UEdGraphNode*> AnchorNodes;
+
+	/** `N -> the node` of each line ending in `# anchor N`. */
+	TMap<int32, UEdGraphNode*> ExecAnchorNodes;
+
+	/**
+	 * A `-> anchor N` waiting for the end of the text: a side input may name a
+	 * node whose line has not come yet.
+	 */
+	struct FPendingExecLink
+	{
+		FPinRef From;
+		int32 Anchor = 0;
+		FString Pin;
+		int32 Line = 0;
+	};
+
+	TArray<FPendingExecLink> PendingExecLinks;
+
+	/** Registers the node of a line ending in `# anchor N`. */
+	void RegisterExecAnchor(const FNodeScribeStatement& Statement, UEdGraphNode* Node);
+
+	/** Links every `-> anchor N`, now that every line has its node. */
+	void ResolveExecLinks();
+
+	/**
+	 * A node whose class is not the plain call: an ability or gameplay task, or a
+	 * node that fixes its own factory. Null, with a red comment left by the
+	 * caller's return, when the graph cannot have it.
+	 */
+	UEdGraphNode* CreateAsyncNode(const FNodeScribeStatement& Statement, UClass* NodeClass, const UFunction* Factory);
 
 	/**
 	 * The names the graph's own reading gives its nodes, for `$name` in the
@@ -4863,6 +4894,18 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 		&& Lookup.IsConfident()
 		&& Lookup.Function->HasAnyFunctionFlags(FUNC_BlueprintPure);
 
+	// A node that fixes its own factory goes by its title: `Play Montage`. A
+	// function with exactly that name still wins, and the reader, which checks
+	// the same way, warns about that node instead of writing a line that would
+	// come back as the function.
+	if (UClass* FixedNode = FNodeScribeCatalog::Get().FindFixedAsyncNode(Statement.NodeExpression))
+	{
+		if (!FNodeScribeCatalog::IsShownAs(Lookup.Function, Statement.NodeExpression))
+		{
+			return CreateAsyncNode(Statement, FixedNode, nullptr);
+		}
+	}
+
 	if (!bPureFunctionWins)
 	{
 		if (UEdGraph* MacroGraph = FindStandardMacroGraph(Statement.NodeExpression, GetSelfClass()))
@@ -4889,6 +4932,12 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 			Node->InitializeProxyFromFunction(Lookup.Function);
 			FinalizeNode(Node);
 			return Node;
+		}
+
+		// A gameplay task's factory: the same idea, in the node the menu places.
+		if (FNodeScribeCatalog::IsGameplayTaskFactory(Lookup.Function))
+		{
+			return CreateAsyncNode(Statement, FNodeScribeCatalog::FindAsyncNodeClass(Lookup.Function), Lookup.Function);
 		}
 
 		// A function of an interface is called as a message, as the editor's
@@ -4994,6 +5043,45 @@ UEdGraphNode* FNodeScribeBuildContext::CreateNodeForStatement(const FNodeScribeS
 
 	return CreateErrorComment(Statement,
 		TEXT("No node with that name was found.") + DelegateHint);
+}
+
+UEdGraphNode* FNodeScribeBuildContext::CreateAsyncNode(const FNodeScribeStatement& Statement, UClass* NodeClass, const UFunction* Factory)
+{
+	if (!NodeClass)
+	{
+		const FString Reason = FString::Printf(
+			TEXT("`%s` asks for a node of its own, and the plugin does not know which."), *Statement.NodeExpression);
+		AddError(Statement.LineNumber, Reason);
+		return CreateErrorComment(Statement, Reason);
+	}
+
+	if (!NodeClass->GetDefaultObject<UEdGraphNode>()->IsCompatibleWithGraph(Graph))
+	{
+		const FString Reason = FString::Printf(
+			TEXT("`%s` cannot go in this graph: it only exists in an event graph, and an ability task only in a Gameplay Ability's."),
+			*Statement.NodeExpression);
+		AddError(Statement.LineNumber, Reason);
+		return CreateErrorComment(Statement, Reason);
+	}
+
+	UEdGraphNode* Node = NewObject<UEdGraphNode>(Graph, NodeClass, NAME_None, RF_Transactional);
+	Graph->AddNode(Node, false, false);
+	Node->CreateNewGuid();
+
+	// Before the pins, which are made from these. The fields are protected, and
+	// the menu's own spawner sets them from inside the node's class.
+	if (Factory)
+	{
+		const UClass* Base = UK2Node_BaseAsyncTask::StaticClass();
+		const FObjectProperty* ProxyClass = CastField<FObjectProperty>(Factory->GetReturnProperty());
+
+		FindFProperty<FNameProperty>(Base, TEXT("ProxyFactoryFunctionName"))->SetPropertyValue_InContainer(Node, Factory->GetFName());
+		FindFProperty<FObjectProperty>(Base, TEXT("ProxyFactoryClass"))->SetObjectPropertyValue_InContainer(Node, Factory->GetOwnerClass());
+		FindFProperty<FObjectProperty>(Base, TEXT("ProxyClass"))->SetObjectPropertyValue_InContainer(Node, ProxyClass ? ProxyClass->PropertyClass.Get() : nullptr);
+	}
+
+	FinalizeNode(Node);
+	return Node;
 }
 
 namespace
@@ -5705,6 +5793,64 @@ bool FNodeScribeBuildContext::ResolveAnchors(const TArray<FNodeScribeStatement>&
 	return bAllFound;
 }
 
+void FNodeScribeBuildContext::RegisterExecAnchor(const FNodeScribeStatement& Statement, UEdGraphNode* Node)
+{
+	// A comment stands for a line that did not resolve: its error is already out,
+	// and whoever links here gets told the anchor does not exist.
+	if (Statement.ExecAnchor <= 0 || Node->IsA<UEdGraphNode_Comment>())
+	{
+		return;
+	}
+
+	if (ExecAnchorNodes.Contains(Statement.ExecAnchor))
+	{
+		AddError(Statement.LineNumber, FString::Printf(
+			TEXT("`# anchor %d` is on two lines. A link would have to choose: number them apart."), Statement.ExecAnchor));
+		return;
+	}
+
+	ExecAnchorNodes.Add(Statement.ExecAnchor, Node);
+}
+
+void FNodeScribeBuildContext::ResolveExecLinks()
+{
+	for (const FPendingExecLink& Link : PendingExecLinks)
+	{
+		UEdGraphPin* From = Link.From.Resolve();
+		UEdGraphNode* const* Target = ExecAnchorNodes.Find(Link.Anchor);
+
+		if (!Target)
+		{
+			AddError(Link.Line, FString::Printf(
+				TEXT("No node line in this text ends in `# anchor %d`, so this link went nowhere."), Link.Anchor));
+			continue;
+		}
+
+		UEdGraphPin* Input = Link.Pin.IsEmpty()
+			? FindFlowInput(*Target)
+			: FindPinByFuzzyName(*Target, Link.Pin, EGPD_Input);
+
+		if (!From || !Input || !IsExecPin(Input))
+		{
+			TArray<FString> Inputs;
+			for (const UEdGraphPin* Pin : (*Target)->Pins)
+			{
+				if (Pin->Direction == EGPD_Input && IsExecPin(Pin))
+				{
+					Inputs.Add(Pin->PinName.ToString());
+				}
+			}
+
+			AddError(Link.Line, FString::Printf(
+				TEXT("`%s` has no execution input `%s`. Inputs: %s"),
+				*(*Target)->GetNodeTitle(ENodeTitleType::ListView).ToString(), *Link.Pin, *FString::Join(Inputs, TEXT(", "))));
+			continue;
+		}
+
+		Connect(From, Input, Link.Line);
+	}
+}
+
 void FNodeScribeBuildContext::CaptureDisplaced(FFrame& Frame, UEdGraphPin* Origin, int32 Line)
 {
 	Frame.OpenedAtLine = Line;
@@ -5854,6 +6000,28 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 			continue;
 		}
 
+		if (Statement.bIsExecLink)
+		{
+			while (Frames.Num() > 1 && Statement.Indent <= Frames.Top().Indent)
+			{
+				PopFrame();
+			}
+
+			FFrame& LinkFrame = Frames.Top();
+			if (UEdGraphPin* From = LinkFrame.PendingExec.Resolve())
+			{
+				PendingExecLinks.Add({ FPinRef(From), Statement.LinkAnchor, Statement.LinkPin, Statement.LineNumber });
+				LinkFrame.PendingExec = FPinRef();
+			}
+			else
+			{
+				AddError(Statement.LineNumber, FString::Printf(
+					TEXT("`%s` has no execution output to leave from: the line above ends the chain, or has several outputs and no label."),
+					*Statement.RawLine));
+			}
+			continue;
+		}
+
 		if (Statement.bIsLabel)
 		{
 			// A label closes any block at the same level or deeper, so that
@@ -5916,6 +6084,23 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 				{
 					Chosen = Pin;
 					break;
+				}
+			}
+
+			// A Switch on Int is born without its cases, and the label is the case.
+			// Up to a limit, so a typo like `999999:` does not grow the node for it.
+			if (!Chosen && Statement.Label.IsNumeric())
+			{
+				if (UK2Node_SwitchInteger* IntSwitch = Cast<UK2Node_SwitchInteger>(Owner))
+				{
+					const int32 Case = FCString::Atoi(*Statement.Label);
+					const int32 MaxCases = 256;
+
+					for (int32 Added = 0; !Chosen && Case >= IntSwitch->StartIndex && Case - IntSwitch->StartIndex < MaxCases && Added < MaxCases; ++Added)
+					{
+						IntSwitch->AddPinToSwitchNode();
+						Chosen = IntSwitch->FindPin(*Statement.Label, EGPD_Output);
+					}
 				}
 			}
 
@@ -6000,6 +6185,8 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 		{
 			continue;
 		}
+
+		RegisterExecAnchor(Statement, Node);
 
 		FFrame& Frame = Frames.Top();
 
@@ -6169,6 +6356,10 @@ void FNodeScribeBuildContext::Run(const TArray<FNodeScribeStatement>& Statements
 
 	ConnectOutputPose();
 	ConnectFunctionEntry();
+
+	// After the entry: it looks for the first node with a free execution input,
+	// and a link back to the top of the chain would hide that node from it.
+	ResolveExecLinks();
 
 	LayoutAnimNodes();
 	LayoutDataNodes();

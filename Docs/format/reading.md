@@ -3,30 +3,13 @@
 A topic of [the format](../FORMAT.md). Every rule of the core still
 applies; this file only adds what is particular to it.
 
-## Four things the reading writes and the parser discards
+## What the reading adds
 
-**Reconvergence anchor.** Two chains landing on the same node do not fit in a
-tree. Instead of the second branch coming out empty -- just like a branch
-nobody linked --, the target node gets a `# anchor N` at the end of its line,
-and the point of return says where it goes:
-
-```
-Branch (Condition = $bOn)
-  true:
-    Print String (In String = "turned on")
-    Refresh Screen  # anchor 1
-  false:
-    # -> back to anchor 1 (`Refresh Screen`)
-```
-
-The way back is still lost on pasting -- what changed is that you can see it
-exists, and where.
-
-**Side input.** An execution wire does not always land on the main input of
-the node on the other side. The `Reset` of a Do Once, the `Stop` of a Timeline,
-the `Close` of a Gate: those do not continue the chain, they send a command to
-a node that lives elsewhere in the graph. It comes out with the same anchor,
-saying through which pin it enters:
+**Links.** Chains that land on the same node, a chain coming back to one of its
+own, and a wire entering through a side pin (the `Reset` of a Do Once, the `Stop`
+of a Timeline, the `Close` of a Gate) come out as `# anchor N` and `-> anchor N`,
+as in the core's *Chains that meet*, with the node's title after them as a
+comment. They come back linked on pasting:
 
 ```
 Branch (Condition = $Rotation Mode?)
@@ -34,15 +17,10 @@ Branch (Condition = $Rotation Mode?)
     Do Once  # anchor 2
       completed:
         Set Actor Location (New Location = $Home Location)
-        # -> enters `Do Once` through pin `Reset` (anchor 3)
+        -> anchor 3 through Reset  # `Do Once`
   false:
     Do Once  # anchor 3
 ```
-
-Before, this was followed as if it were a continuation, and the reading wrote a
-chain that does not exist -- two Do Onces that reset each other came out
-stacked, one under the other, as if one called the other. The link itself is
-still lost on pasting; what changed is that it shows up, and on the right pin.
 
 **Type conversion.** Linking an `Integer` into a `String` pin makes Unreal
 insert a conversion node. It does not become a line (the plugin recreates it by
@@ -54,7 +32,9 @@ Append (A = "n = ", B = $Counter (Integer -> String))
 
 Without this, a `Device Id` promoted to `int64` and a `Connection Id` that
 already was `int64` write exactly the same line -- and one of the two makes
-every controller collide on the same map key.
+every controller collide on the same map key. A promotable math operator comes
+back as a plain call, so its mark names the function's parameter: `(Integer ->
+Float)`, even with the pin on screen showing Integer.
 
 **Unnamed pin.** When the plugin cannot name the output a value comes from, it
 writes `$x.<unknown pin>` instead of `$x`, which would look like the main
@@ -64,8 +44,7 @@ output and link to another pin on the way back.
 
 | Situation | What happens |
 |---|---|
-| Execution chain that reconverges | anchor on both ends + warning: the way back is lost on pasting |
-| Wire entering through a side pin (`Reset`, `Stop`, `Close`) | anchor + the pin's name, and a warning: the link is lost on pasting |
+| Wire of incompatible types kept by the asset, which the editor would refuse today | warning: on pasting the link does not go in |
 | Pin fed by a node outside the selection | warning: the pin comes out without a value |
 | Node the plugin cannot name back | the node's title comes out + a warning that it may not come back the same |
 | Value with both kinds of quotes | warning: there is no escape, copy it by hand |

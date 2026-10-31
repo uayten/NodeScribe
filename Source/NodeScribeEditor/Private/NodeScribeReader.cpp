@@ -61,6 +61,7 @@
 #include "K2Node_Select.h"
 #include "K2Node_Self.h"
 #include "K2Node_SwitchEnum.h"
+#include "K2Node_PromotableOperator.h"
 #include "K2Node_SwitchInteger.h"
 #include "K2Node_SwitchName.h"
 #include "K2Node_SwitchString.h"
@@ -375,16 +376,8 @@ namespace
 	 * inheritance, not conversion, and it would mark almost every line of the
 	 * graph while saying nothing.
 	 */
-	bool NeedsConversionNote(const UEdGraphPin* Source, const UEdGraphPin* Target)
+	bool NeedsConversionNote(const FEdGraphPinType& From, const FEdGraphPinType& To)
 	{
-		if (!Source || !Target)
-		{
-			return false;
-		}
-
-		const FEdGraphPinType& From = Source->PinType;
-		const FEdGraphPinType& To = Target->PinType;
-
 		// A wildcard is the pin that will still become the type of whatever links
 		// to it (`Find` on a TMap, macro body). There is no conversion there.
 		if (From.PinCategory == UEdGraphSchema_K2::PC_Wildcard
@@ -1157,24 +1150,40 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 	// marked as not pasteable because of this line.
 	if (const UK2Node_BaseAsyncTask* AsyncNode = Cast<UK2Node_BaseAsyncTask>(Node))
 	{
-		if (UFunction* Factory = AsyncNode->GetFactoryFunction())
+		UClass* SelfClass = Blueprint
+			? (Blueprint->GeneratedClass ? Blueprint->GeneratedClass.Get() : Blueprint->ParentClass.Get())
+			: nullptr;
+
+		// A node that fixes its own factory: its title is the line. The builder
+		// reads the title back unless a function has exactly that name.
+		if (FNodeScribeCatalog::IsFixedAsyncNodeClass(Node->GetClass()))
 		{
-			// A subclass with its own node (a GAS task, for example) does not come
-			// back: the builder creates `UK2Node_AsyncAction`, which is another node.
-			if (Node->GetClass() != UK2Node_AsyncAction::StaticClass())
+			const FString Title = ShortTitle(Node);
+			const FNodeScribeLookup Lookup = FNodeScribeCatalog::Get().FindFunction(Title, SelfClass, nullptr);
+
+			if (FNodeScribeCatalog::IsShownAs(Lookup.Function, Title)
+				|| FNodeScribeCatalog::Get().FindFixedAsyncNode(Title) != Node->GetClass())
 			{
 				OutRoundTripIssue = FString::Printf(
-					TEXT("`%s` uses node `%s`, which has logic of its own. The format recreates async actions ")
-					TEXT("as `UK2Node_AsyncAction`: pasting back would give a similar, different node. ")
-					TEXT("Recreate this one by hand."),
+					TEXT("`%s` is a node of its own, and on pasting that name means something else. Recreate this one by hand."),
+					*Title);
+			}
+			return Title;
+		}
+
+		if (UFunction* Factory = AsyncNode->GetFactoryFunction())
+		{
+			// A subclass with logic of its own does not come back: the builder only
+			// makes the node the editor's menu places for this factory.
+			if (Node->GetClass() != FNodeScribeCatalog::FindAsyncNodeClass(Factory))
+			{
+				OutRoundTripIssue = FString::Printf(
+					TEXT("`%s` uses node `%s`, which has logic of its own. Pasting back would give a similar, ")
+					TEXT("different node, or none. Recreate this one by hand."),
 					*ShortTitle(Node), *Node->GetClass()->GetName());
 			}
 
 			const FString DisplayName = Factory->GetDisplayNameText().ToString();
-
-			UClass* SelfClass = Blueprint
-				? (Blueprint->GeneratedClass ? Blueprint->GeneratedClass.Get() : Blueprint->ParentClass.Get())
-				: nullptr;
 
 			const FNodeScribeLookup Lookup = FNodeScribeCatalog::Get().FindFunction(DisplayName, SelfClass, nullptr);
 			if (Lookup.Function == Factory)
@@ -1186,7 +1195,15 @@ FString FNodeScribeReadContext::DescribeNode(UEdGraphNode* Node, FString& OutRou
 			// same path as `Class.Function` for a regular call.
 			if (const UClass* Owner = Factory->GetOwnerClass())
 			{
-				return Owner->GetName() + TEXT(".") + Factory->GetName();
+				const FString Qualified = Owner->GetName() + TEXT(".") + Factory->GetName();
+
+				if (OutRoundTripIssue.IsEmpty()
+					&& FNodeScribeCatalog::Get().FindFunction(Qualified, SelfClass, nullptr).Function != Factory)
+				{
+					OutRoundTripIssue = FString::Printf(
+						TEXT("`%s` cannot be found by name on pasting. Recreate this one by hand."), *Qualified);
+				}
+				return Qualified;
 			}
 
 			return DisplayName;
@@ -1576,10 +1593,36 @@ FString FNodeScribeReadContext::BuildArgumentList(UEdGraphNode* Node, int32 Inde
 				//
 				// In parentheses after the reference: it is a reading note, and
 				// the parser discards it when pasting back.
-				if (NeedsConversionNote(SourcePin, Pin))
+				//
+				// A promotable operator's pin takes the type of its wire, and the
+				// line comes back as a plain call: what counts is the function's
+				// parameter, the type the value converts into on pasting.
+				FEdGraphPinType WrittenType = Pin->PinType;
+				if (const UK2Node_PromotableOperator* Operator = Cast<UK2Node_PromotableOperator>(Node))
+				{
+					const UFunction* Function = Operator->GetTargetFunction();
+					if (const FProperty* Parameter = Function ? Function->FindPropertyByName(Pin->PinName) : nullptr)
+					{
+						GetDefault<UEdGraphSchema_K2>()->ConvertPropertyToPinType(Parameter, WrittenType);
+					}
+				}
+
+				if (NeedsConversionNote(SourcePin->PinType, WrittenType))
 				{
 					Reference += FString::Printf(TEXT(" (%s -> %s)"),
-						*DescribePinType(SourcePin->PinType), *DescribePinType(Pin->PinType));
+						*DescribePinType(SourcePin->PinType), *DescribePinType(WrittenType));
+				}
+
+				// A wire the schema would refuse: it only exists because the asset
+				// kept it, and on pasting the link does not go in.
+				if (NeedsConversionNote(SourcePin->PinType, Pin->PinType)
+					&& GetDefault<UEdGraphSchema_K2>()->CanCreateConnection(SourcePin, Pin).Response == CONNECT_RESPONSE_DISALLOW)
+				{
+					AddWarning(FString::Printf(
+						TEXT("`%s` gets `%s` through a wire of incompatible types (%s -> %s), which the editor would refuse today. ")
+						TEXT("On pasting that link does not go in."),
+						*ShortTitle(Node), *GetWrittenPinName(Pin),
+						*DescribePinType(SourcePin->PinType), *DescribePinType(Pin->PinType)));
 				}
 
 				Args.Add(FString::Printf(TEXT("%s = %s"), *ArgumentName(Pin), *Reference));
@@ -1860,24 +1903,11 @@ void FNodeScribeReadContext::EmitExecChain(UEdGraphNode* Node, int32 Indent)
 
 	if (EmittedExec.Contains(Node))
 	{
-		// Two chains landing on the same node. The format is a tree and cannot
-		// say "go back to that one" -- but saying *where* it goes back to is what
-		// separates "this branch was not linked" from "this branch continues up
-		// there".
-		//
-		// Without this the branch came out with the label and nothing under it,
-		// the way a truly empty branch comes out, and the two were
-		// indistinguishable. The anchor goes as a comment on both ends: the
-		// parser discards it, so the text stays pasteable exactly as it was.
-		const int32 Anchor = AnchorFor(Node);
-
-		EmitLine(Indent, FString::Printf(TEXT("# -> back to anchor %d (`%s`)"),
-			Anchor, *ShortTitle(Node)));
-
-		AddWarning(FString::Printf(
-			TEXT("Execution goes back to `%s` (anchor %d), which already appeared before. ")
-			TEXT("The text format only describes trees: this reconvergence is lost on pasting and you relink it by hand."),
-			*ShortTitle(Node), Anchor));
+		// Two chains landing on the same node, or a chain coming back to one of
+		// its own. A line cannot be written twice, so this one says where it goes;
+		// the builder links it when the text is pasted.
+		EmitLine(Indent, FString::Printf(TEXT("-> anchor %d  # `%s`"),
+			AnchorFor(Node), *ShortTitle(Node)));
 		return;
 	}
 
@@ -1934,16 +1964,8 @@ void FNodeScribeReadContext::EmitExecLink(UEdGraphPin* ExecOutput, int32 Indent)
 	// The anchor is the same as the reconvergence one, and here it may point at
 	// a line that has not come out yet -- that is why the number is reserved now
 	// and written on the node at the very end.
-	const int32 Anchor = AnchorFor(Target);
-	const FString PinLabel = GetWrittenPinName(TargetPin);
-
-	EmitLine(Indent, FString::Printf(TEXT("# -> enters `%s` through pin `%s` (anchor %d)"),
-		*ShortTitle(Target), *PinLabel, Anchor));
-
-	AddWarning(FString::Printf(
-		TEXT("Execution enters `%s` (anchor %d) through pin `%s`, which is not its main input. ")
-		TEXT("The text format only describes trees: this link is lost on pasting and you relink it by hand."),
-		*ShortTitle(Target), Anchor, *PinLabel));
+	EmitLine(Indent, FString::Printf(TEXT("-> anchor %d through %s  # `%s`"),
+		AnchorFor(Target), *GetWrittenPinName(TargetPin), *ShortTitle(Target)));
 }
 
 int32 FNodeScribeReadContext::AnchorFor(UEdGraphNode* Node)

@@ -77,6 +77,37 @@ public:
 	static bool IsAsyncActionFactory(const UFunction* Function);
 
 	/**
+	 * true for a gameplay task's factory (`WaitInputRelease`,
+	 * `PlayMontageAndWait`): the same rule as the Engine's menu, a static function
+	 * of a concrete task class that returns a task.
+	 */
+	static bool IsGameplayTaskFactory(const UFunction* Function);
+
+	/**
+	 * The node class the editor's menu places for a factory: an async action, an
+	 * ability task or a plain gameplay task. Null when it is none of those, or
+	 * when a task asks for a node of its own that is not known here.
+	 */
+	static UClass* FindAsyncNodeClass(const UFunction* Function);
+
+	/**
+	 * A node class whose factory is fixed in the class itself, by its title:
+	 * `Play Montage`, `AI MoveTo`. Null when no class, or more than one, has it.
+	 */
+	UClass* FindFixedAsyncNode(const FString& Title) const;
+
+	/** true for a class FindFixedAsyncNode can return. */
+	static bool IsFixedAsyncNodeClass(const UClass* NodeClass);
+
+	/**
+	 * true when the function is shown under exactly this name, which then means
+	 * the function and not a fixed node. By display name only: the task
+	 * `AIMoveTo` is shown as `Move To Location or Actor`, and `AI MoveTo` is a
+	 * different node.
+	 */
+	static bool IsShownAs(const UFunction* Function, const FString& Name);
+
+	/**
 	 * The event's name as the user writes it: `ReceiveBeginPlay` -> `BeginPlay`.
 	 * The Engine prefixes implementable events; nobody types the prefix.
 	 */
@@ -105,6 +136,12 @@ private:
 
 		/** true for static libraries (KismetSystemLibrary and the like). */
 		bool bIsLibrary = false;
+
+		/**
+		 * A gameplay task's factory: found only by its exact name. As a prefix,
+		 * `Play Montage` would become `Play Montage and Wait`, another node.
+		 */
+		bool bIsTaskFactory = false;
 	};
 
 	void EnsureBuilt() const;
@@ -114,5 +151,9 @@ private:
 	static int32 ScoreEntry(const FEntry& Entry, const FString& NormalizedQuery, UClass* SelfClass, UClass* ContextClass);
 
 	mutable TArray<FEntry> Entries;
+
+	/** Normalised title -> class; null when two classes share the title. */
+	mutable TMap<FString, TWeakObjectPtr<UClass>> FixedAsyncNodes;
+
 	mutable bool bBuilt = false;
 };
